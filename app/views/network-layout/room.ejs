@@ -1,0 +1,635 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<%
+  var typeLabels = {};
+  appConfig.assetTypes.forEach(function(t) { typeLabels[t.value] = t.label; });
+  var cableLabels = {};
+  appConfig.cableTypes.forEach(function(t) { cableLabels[t.value] = t.label; });
+  var statusLabels = {};
+  appConfig.connectionStatuses.forEach(function(t) { statusLabels[t.value] = t.label; });
+  var ownerLabels = {};
+  appConfig.ownershipTypes.forEach(function(t) { ownerLabels[t.value] = t.label; });
+
+  /* ---- Build asset map ---- */
+  var assetMap = {};
+  assets.forEach(function(a) { assetMap[a.id] = a; });
+
+  /* ---- Helper: cable category ---- */
+  function cableCat(cableType) {
+    return cableType === 'infiniband' ? 'IB' : 'Eth';
+  }
+
+  /* ---- Group connections by (switch, speed, cableCat) into horizontal rows ---- */
+  var speedOrder = { '400G': 0, '200G': 1, '100G': 2, '56G': 3, '50G': 4, '40G': 5, '25G': 6, '10G': 7, '1G': 8 };
+  var rowMap = {};
+  var directConns = [];  // non-switch ↔ non-switch
+
+  connections.forEach(function(c) {
+    var from = assetMap[c.from_asset_id];
+    var to = assetMap[c.to_asset_id];
+    if (!from || !to) return;
+
+    var sw, dev;
+    if (from.asset_type === 'switch') {
+      sw = from; dev = to;
+    } else if (to.asset_type === 'switch') {
+      sw = to; dev = from;
+    } else {
+      directConns.push(c);
+      return;
+    }
+
+    var speed = c.speed || 'N/A';
+    var cat = cableCat(c.cable_type);
+    var key = sw.id + '|' + speed + '|' + cat;
+    if (!rowMap[key]) rowMap[key] = { sw: sw, speed: speed, cat: cat, devMap: {} };
+    if (!rowMap[key].devMap[dev.id]) rowMap[key].devMap[dev.id] = { device: dev, conns: [] };
+    rowMap[key].devMap[dev.id].conns.push(c);
+  });
+
+  var topoRows = Object.values(rowMap).map(function(r) {
+    r.devices = Object.values(r.devMap);
+    return r;
+  });
+
+  topoRows.sort(function(a, b) {
+    var nameA = a.sw.asset_number || a.sw.model_name || '';
+    var nameB = b.sw.asset_number || b.sw.model_name || '';
+    if (nameA !== nameB) return nameA.localeCompare(nameB);
+    var sa = speedOrder[a.speed] !== undefined ? speedOrder[a.speed] : 99;
+    var sb = speedOrder[b.speed] !== undefined ? speedOrder[b.speed] : 99;
+    if (sa !== sb) return sa - sb;
+    if (a.cat !== b.cat) return a.cat === 'IB' ? 1 : -1;
+    return 0;
+  });
+
+  /* ---- Group direct (non-switch) connections by pair ---- */
+  var directMap = {};
+  directConns.forEach(function(c) {
+    var a = Math.min(c.from_asset_id, c.to_asset_id);
+    var b = Math.max(c.from_asset_id, c.to_asset_id);
+    var speed = c.speed || 'N/A';
+    var cat = cableCat(c.cable_type);
+    var key = a + '-' + b + '|' + speed + '|' + cat;
+    if (!directMap[key]) directMap[key] = { a: assetMap[a], b: assetMap[b], speed: speed, cat: cat, conns: [] };
+    directMap[key].conns.push(c);
+  });
+  var directList = Object.values(directMap);
+
+  /* ---- Unconnected devices ---- */
+  var connectedIds = {};
+  connections.forEach(function(c) { connectedIds[c.from_asset_id] = true; connectedIds[c.to_asset_id] = true; });
+  var unconnected = assets.filter(function(a) { return !connectedIds[a.id]; });
+
+  /* ---- Helper: ownership from a list of conns ---- */
+  function getOwnership(conns) {
+    var hasC = false, hasV = false;
+    conns.forEach(function(c) { if (c.ownership === 'vendor') hasV = true; else hasC = true; });
+    return hasC && hasV ? 'mixed' : hasV ? 'vendor' : 'company';
+  }
+
+  /* ---- Helper: speed CSS class ---- */
+  function speedClass(speed) {
+    var n = parseInt(speed) || 0;
+    if (n >= 400) return 'speed-400g';
+    if (n >= 200) return 'speed-200g';
+    if (n >= 100) return 'speed-100g';
+    if (n >= 25) return 'speed-25g';
+    if (n >= 10) return 'speed-10g';
+    return 'speed-other';
+  }
+
+  /* ---- Helper: segment width based on speed + cable count ---- */
+  function segWidth(speed, count) {
+    var n = parseInt(speed) || 0;
+    var base = 1.5;
+    if (n >= 400) base = 5;
+    else if (n >= 200) base = 4;
+    else if (n >= 100) base = 3;
+    else if (n >= 25) base = 2;
+    else if (n >= 10) base = 1.5;
+    var mult = count <= 1 ? 1 : count <= 2 ? 1.5 : 2;
+    return Math.round(base * mult * 10) / 10;
+  }
+%>
+
+<div class="page-header">
+    <h1><%= room.name %> - 네트워크 배치도</h1>
+    <div class="btn-group">
+        <button class="btn btn-primary" onclick="openAddConnModal()">+ 연결 추가</button>
+        <a href="/network-layout" class="btn btn-secondary">목록으로</a>
+    </div>
+</div>
+
+<!-- Stats -->
+<div class="net-stats">
+    <div class="net-stat">
+        <div class="stat-value" style="color: var(--primary);"><%= stats.total_connections %></div>
+        <div class="stat-label">총 연결</div>
+    </div>
+    <div class="net-stat">
+        <div class="stat-value" style="color: var(--company-color);"><%= stats.company_cables %></div>
+        <div class="stat-label">자사 케이블</div>
+    </div>
+    <div class="net-stat">
+        <div class="stat-value" style="color: var(--vendor-color);"><%= stats.vendor_cables %></div>
+        <div class="stat-label">업체 케이블</div>
+    </div>
+    <div class="net-stat">
+        <div class="stat-value" style="color: var(--switch-color);"><%= stats.switch_count %></div>
+        <div class="stat-label">스위치</div>
+    </div>
+</div>
+
+<!-- Switch selector -->
+<% if (switches.length > 0) { %>
+<div class="card" style="padding: 14px 20px; margin-bottom: 16px;">
+    <form method="GET" action="/network-layout/<%= room.id %>" class="net-sw-filter">
+        <label style="font-weight: 600; font-size: 14px; margin-right: 12px;">스위치 선택</label>
+        <% switches.forEach(function(sw) { %>
+        <label class="net-sw-chip" data-sw-chip>
+            <input type="checkbox" name="sw" value="<%= sw.id %>" <%= selectedIds.indexOf(sw.id) !== -1 ? 'checked' : '' %>>
+            <span><%= sw.asset_number || sw.model_name %></span>
+        </label>
+        <% }) %>
+        <button type="submit" class="btn btn-sm btn-primary" style="margin-left: 8px;">조회</button>
+        <% if (selectedIds.length > 0) { %>
+        <a href="/network-layout/<%= room.id %>" class="btn btn-sm btn-secondary" style="margin-left: 4px;">전체 보기</a>
+        <span style="font-size: 12px; color: var(--text-light); margin-left: 12px;">
+            필터 적용: <%= connections.length %>/<%= allConnectionCount %> 연결 표시중
+        </span>
+        <% } %>
+    </form>
+</div>
+<% } %>
+
+<!-- Legend -->
+<div class="net-legend">
+    <span class="net-legend-label">속도</span>
+    <div class="net-legend-item">
+        <div class="net-seg-sample speed-400g"></div>
+        <span>400G</span>
+    </div>
+    <div class="net-legend-item">
+        <div class="net-seg-sample speed-200g"></div>
+        <span>200G</span>
+    </div>
+    <div class="net-legend-item">
+        <div class="net-seg-sample speed-100g"></div>
+        <span>100G</span>
+    </div>
+    <div class="net-legend-item">
+        <div class="net-seg-sample speed-25g"></div>
+        <span>25G</span>
+    </div>
+    <div class="net-legend-item">
+        <div class="net-seg-sample speed-10g"></div>
+        <span>10G</span>
+    </div>
+    <span class="net-legend-sep"></span>
+    <span class="net-legend-label">유형</span>
+    <div class="net-legend-item">
+        <div class="net-seg-sample cat-eth"></div>
+        <span>Ethernet</span>
+    </div>
+    <div class="net-legend-item">
+        <div class="net-seg-sample cat-ib"></div>
+        <span>InfiniBand</span>
+    </div>
+</div>
+
+<!-- Topology Visualization: Horizontal Rows -->
+<% if (topoRows.length === 0 && directList.length === 0) { %>
+<div class="card">
+    <div class="net-empty">
+        <p>연결된 장비가 없습니다.</p>
+        <p class="text-muted" style="font-size: 13px;">"+ 연결 추가" 버튼으로 장비 간 연결을 등록하세요.</p>
+    </div>
+</div>
+<% } else { %>
+<div class="net-topo-card">
+    <% var prevSwId = null; %>
+    <% topoRows.forEach(function(row, ri) { %>
+    <% if (prevSwId !== null && prevSwId !== row.sw.id) { %>
+    <div class="net-row-divider"></div>
+    <% } %>
+    <% prevSwId = row.sw.id; %>
+    <div class="net-h-row">
+        <!-- Switch box -->
+        <div class="net-h-sw-box" data-sw-id="<%= row.sw.id %>">
+            <div class="sw-name"><%= row.sw.asset_number || row.sw.model_name %></div>
+            <div class="sw-model"><%= row.sw.model_name || '' %></div>
+        </div>
+
+        <!-- Speed badge -->
+        <div class="net-h-speed <%= speedClass(row.speed) %>"><%= row.speed %> <span class="cat-label cat-<%= row.cat === 'IB' ? 'ib' : 'eth' %>"><%= row.cat %></span></div>
+
+        <!-- Connected devices -->
+        <% row.devices.forEach(function(d, di) {
+            var w = segWidth(row.speed, d.conns.length);
+        %>
+        <div class="net-h-seg <%= speedClass(row.speed) %> cat-<%= row.cat === 'IB' ? 'ib' : 'eth' %>" style="border-top-width: <%= w %>px;"></div>
+        <div class="net-h-dev-box <%= d.device.asset_type === 'switch' ? 'is-switch' : '' %>"
+             draggable="true"
+             data-conn-ids="<%= JSON.stringify(d.conns.map(function(c){return c.id})) %>"
+             data-sw-id="<%= row.sw.id %>">
+            <div class="dev-name"><%= d.device.asset_number || d.device.model_name %></div>
+            <div class="dev-info">
+                <% if (d.conns.length > 1) { %><strong><%= d.conns.length %>×</strong> <% } %>
+                <%= typeLabels[d.device.asset_type] || d.device.asset_type %>
+            </div>
+            <% if (d.conns.length > 0) { %>
+            <div class="dev-ports">
+                <% d.conns.forEach(function(c) {
+                    var devPort = c.from_asset_id === row.sw.id ? c.to_port : c.from_port;
+                    var swPort = c.from_asset_id === row.sw.id ? c.from_port : c.to_port;
+                    var cType = cableLabels[c.cable_type] || c.cable_type || '';
+                    var tipParts = [swPort + ' → ' + devPort];
+                    if (cType) tipParts.push('케이블: ' + cType);
+                    if (c.cable_label) tipParts.push('라벨: ' + c.cable_label);
+                    if (c.cable_color) tipParts.push('색상: ' + c.cable_color);
+                    if (c.cable_length) tipParts.push('길이: ' + c.cable_length);
+                    if (c.ownership === 'vendor') tipParts.push('소유: 업체');
+                    if (c.vendor_name) tipParts.push('업체: ' + c.vendor_name);
+                    var tip = tipParts.join(' | ');
+                    /* short label for badge */
+                    var shortType = c.cable_type ? (c.cable_type === 'infiniband' ? 'IB' : c.cable_type.replace('fiber_', 'F/').replace('cat6a','C6a').replace('cat6','C6')) : '';
+                    var badgeExtra = [shortType, c.cable_label].filter(Boolean).join(' ');
+                %>
+                <span class="dev-port" data-conn-id="<%= c.id %>" title="<%= tip %>"><%= devPort %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
+                <% }) %>
+            </div>
+            <% } %>
+        </div>
+        <% }) %>
+    </div>
+    <% }) %>
+
+    <% if (directList.length > 0) { %>
+    <div class="net-direct-section">
+        <div class="net-direct-title">서버간 직접 연결</div>
+        <% directList.forEach(function(dl) {
+            var w = segWidth(dl.speed, dl.conns.length);
+        %>
+        <div class="net-h-row">
+            <div class="net-h-dev-box">
+                <div class="dev-name"><%= dl.a.asset_number || dl.a.model_name %></div>
+                <div class="dev-info"><%= typeLabels[dl.a.asset_type] || dl.a.asset_type %></div>
+                <div class="dev-ports">
+                    <% dl.conns.forEach(function(c) {
+                        var p = c.from_asset_id === dl.a.id ? c.from_port : c.to_port;
+                        var cType = cableLabels[c.cable_type] || c.cable_type || '';
+                        var tipParts = [p];
+                        if (cType) tipParts.push('케이블: ' + cType);
+                        if (c.cable_label) tipParts.push('라벨: ' + c.cable_label);
+                        if (c.cable_color) tipParts.push('색상: ' + c.cable_color);
+                        if (c.cable_length) tipParts.push('길이: ' + c.cable_length);
+                        var shortType = c.cable_type ? (c.cable_type === 'infiniband' ? 'IB' : c.cable_type.replace('fiber_', 'F/').replace('cat6a','C6a').replace('cat6','C6')) : '';
+                        var badgeExtra = [shortType, c.cable_label].filter(Boolean).join(' ');
+                    %>
+                    <span class="dev-port" title="<%= tipParts.join(' | ') %>"><%= p %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
+                    <% }) %>
+                </div>
+            </div>
+            <div class="net-h-speed <%= speedClass(dl.speed) %>">
+                <% if (dl.conns.length > 1) { %><%= dl.conns.length %>× <% } %><%= dl.speed %> <span class="cat-label cat-<%= dl.cat === 'IB' ? 'ib' : 'eth' %>"><%= dl.cat %></span>
+            </div>
+            <div class="net-h-seg <%= speedClass(dl.speed) %> cat-<%= dl.cat === 'IB' ? 'ib' : 'eth' %>" style="border-top-width: <%= w %>px;"></div>
+            <div class="net-h-dev-box">
+                <div class="dev-name"><%= dl.b.asset_number || dl.b.model_name %></div>
+                <div class="dev-info"><%= typeLabels[dl.b.asset_type] || dl.b.asset_type %></div>
+                <div class="dev-ports">
+                    <% dl.conns.forEach(function(c) {
+                        var p = c.from_asset_id === dl.b.id ? c.from_port : c.to_port;
+                        var cType = cableLabels[c.cable_type] || c.cable_type || '';
+                        var tipParts = [p];
+                        if (cType) tipParts.push('케이블: ' + cType);
+                        if (c.cable_label) tipParts.push('라벨: ' + c.cable_label);
+                        if (c.cable_color) tipParts.push('색상: ' + c.cable_color);
+                        if (c.cable_length) tipParts.push('길이: ' + c.cable_length);
+                        var shortType = c.cable_type ? (c.cable_type === 'infiniband' ? 'IB' : c.cable_type.replace('fiber_', 'F/').replace('cat6a','C6a').replace('cat6','C6')) : '';
+                        var badgeExtra = [shortType, c.cable_label].filter(Boolean).join(' ');
+                    %>
+                    <span class="dev-port" title="<%= tipParts.join(' | ') %>"><%= p %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
+                    <% }) %>
+                </div>
+            </div>
+        </div>
+        <% }) %>
+    </div>
+    <% } %>
+
+    <% if (unconnected.length > 0) { %>
+    <div class="net-unconnected">
+        <div class="net-unconnected-title">미연결 장비 (<%= unconnected.length %>)</div>
+        <div class="net-unconnected-list">
+            <% unconnected.forEach(function(dev) { %>
+            <span class="net-unconnected-item"><%= dev.asset_number || dev.model_name %> (<%= typeLabels[dev.asset_type] || dev.asset_type %>)</span>
+            <% }) %>
+        </div>
+    </div>
+    <% } %>
+</div>
+<% } %>
+
+<!-- Connections Table -->
+<div class="card net-table-section">
+    <div class="card-header">
+        <h2>연결 목록 (<%= connections.length %>)</h2>
+    </div>
+    <% if (connections.length === 0) { %>
+    <p class="text-center text-muted" style="padding: 20px;">등록된 연결이 없습니다.</p>
+    <% } else { %>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>출발장비</th>
+                    <th>출발포트</th>
+                    <th>도착장비</th>
+                    <th>도착포트</th>
+                    <th>케이블유형</th>
+                    <th>속도</th>
+                    <th>소유</th>
+                    <th>업체</th>
+                    <th>상태</th>
+                    <th>작업</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% connections.forEach(function(c) { %>
+                <tr>
+                    <td><%= c.from_asset_number || c.from_model || c.from_asset_id %></td>
+                    <td><%= c.from_port %></td>
+                    <td><%= c.to_asset_number || c.to_model || c.to_asset_id %></td>
+                    <td><%= c.to_port %></td>
+                    <td><%= cableLabels[c.cable_type] || c.cable_type || '-' %></td>
+                    <td><%= c.speed || '-' %></td>
+                    <td><span class="badge badge-<%= c.ownership %>"><%= ownerLabels[c.ownership] || c.ownership %></span></td>
+                    <td><%= c.vendor_name || '-' %></td>
+                    <td><span class="badge badge-<%= c.status === 'active' ? 'success' : c.status === 'planned' ? 'warning' : 'secondary' %>"><%= statusLabels[c.status] || c.status %></span></td>
+                    <td>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-warning" onclick="openEditConnModal(<%= c.id %>)">수정</button>
+                            <button class="btn btn-sm btn-danger" onclick="confirmDeleteConn(<%= c.id %>)">삭제</button>
+                        </div>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% } %>
+</div>
+
+<!-- Add/Edit Connection Modal -->
+<div class="modal-overlay" id="connModal">
+    <div class="modal" style="max-width: 700px;">
+        <div class="modal-header">
+            <h3 id="connModalTitle">연결 추가</h3>
+            <button class="modal-close" onclick="closeConnModal()">&times;</button>
+        </div>
+        <form id="connForm" method="POST">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>출발 장비 *</label>
+                    <select name="from_asset_id" id="connFromAsset" class="form-control" required>
+                        <option value="">-- 선택 --</option>
+                        <% assets.forEach(function(a) { %>
+                        <option value="<%= a.id %>"><%= a.asset_number || a.model_name %> (<%= typeLabels[a.asset_type] || a.asset_type %>)</option>
+                        <% }) %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>출발 포트 *</label>
+                    <input type="text" name="from_port" id="connFromPort" class="form-control" required placeholder="예: Eth1/1">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>도착 장비 *</label>
+                    <select name="to_asset_id" id="connToAsset" class="form-control" required>
+                        <option value="">-- 선택 --</option>
+                        <% assets.forEach(function(a) { %>
+                        <option value="<%= a.id %>"><%= a.asset_number || a.model_name %> (<%= typeLabels[a.asset_type] || a.asset_type %>)</option>
+                        <% }) %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>도착 포트 *</label>
+                    <input type="text" name="to_port" id="connToPort" class="form-control" required placeholder="예: eno1">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>케이블 유형</label>
+                    <select name="cable_type" id="connCableType" class="form-control">
+                        <option value="">-- 선택 --</option>
+                        <% appConfig.cableTypes.forEach(function(t) { %>
+                        <option value="<%= t.value %>"><%= t.label %></option>
+                        <% }) %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>속도</label>
+                    <input type="text" name="speed" id="connSpeed" class="form-control" placeholder="예: 100G">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>케이블 라벨</label>
+                    <input type="text" name="cable_label" id="connCableLabel" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>케이블 색상</label>
+                    <input type="text" name="cable_color" id="connCableColor" class="form-control" placeholder="예: 노란색">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>케이블 길이</label>
+                    <input type="text" name="cable_length" id="connCableLength" class="form-control" placeholder="예: 3m">
+                </div>
+                <div class="form-group">
+                    <label>소유</label>
+                    <select name="ownership" id="connOwnership" class="form-control">
+                        <% appConfig.ownershipTypes.forEach(function(t) { %>
+                        <option value="<%= t.value %>"><%= t.label %></option>
+                        <% }) %>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>업체</label>
+                    <select name="vendor_id" id="connVendor" class="form-control">
+                        <option value="">-- 선택 --</option>
+                        <% vendors.forEach(function(v) { %>
+                        <option value="<%= v.id %>"><%= v.vendor_name %></option>
+                        <% }) %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>상태</label>
+                    <select name="status" id="connStatus" class="form-control">
+                        <% appConfig.connectionStatuses.forEach(function(t) { %>
+                        <option value="<%= t.value %>"><%= t.label %></option>
+                        <% }) %>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>설명</label>
+                <textarea name="description" id="connDesc" class="form-control" rows="2"></textarea>
+            </div>
+            <div class="btn-group" style="justify-content: flex-end; margin-top: 16px;">
+                <button type="button" class="btn btn-secondary" onclick="closeConnModal()">취소</button>
+                <button type="submit" class="btn btn-primary">저장</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delete form -->
+<form id="deleteConnForm" method="POST" style="display:none;"></form>
+
+<script>
+var connectionsData = <%- JSON.stringify(connections) %>;
+
+/* === Modal functions === */
+function openAddConnModal() {
+    document.getElementById('connModalTitle').textContent = '연결 추가';
+    document.getElementById('connForm').action = '/network-layout/<%= room.id %>/connections';
+    ['connFromAsset','connFromPort','connToAsset','connToPort','connCableType','connSpeed',
+     'connCableLabel','connCableColor','connCableLength','connVendor','connDesc'].forEach(function(id) {
+        document.getElementById(id).value = '';
+    });
+    document.getElementById('connOwnership').value = 'company';
+    document.getElementById('connStatus').value = 'active';
+    document.getElementById('connModal').classList.add('active');
+}
+
+function openEditConnModal(connId) {
+    var c = connectionsData.find(function(x) { return x.id === connId; });
+    if (!c) return;
+    document.getElementById('connModalTitle').textContent = '연결 수정';
+    document.getElementById('connForm').action = '/network-layout/connections/' + connId;
+    document.getElementById('connFromAsset').value = c.from_asset_id;
+    document.getElementById('connFromPort').value = c.from_port;
+    document.getElementById('connToAsset').value = c.to_asset_id;
+    document.getElementById('connToPort').value = c.to_port;
+    document.getElementById('connCableType').value = c.cable_type || '';
+    document.getElementById('connSpeed').value = c.speed || '';
+    document.getElementById('connCableLabel').value = c.cable_label || '';
+    document.getElementById('connCableColor').value = c.cable_color || '';
+    document.getElementById('connCableLength').value = c.cable_length || '';
+    document.getElementById('connOwnership').value = c.ownership || 'company';
+    document.getElementById('connVendor').value = c.vendor_id || '';
+    document.getElementById('connStatus').value = c.status || 'active';
+    document.getElementById('connDesc').value = c.description || '';
+    document.getElementById('connModal').classList.add('active');
+}
+
+function closeConnModal() { document.getElementById('connModal').classList.remove('active'); }
+
+function confirmDeleteConn(connId) {
+    if (confirm('이 연결을 삭제하시겠습니까?')) {
+        var form = document.getElementById('deleteConnForm');
+        form.action = '/network-layout/connections/' + connId + '/delete';
+        form.submit();
+    }
+}
+
+document.getElementById('connModal').addEventListener('click', function(e) {
+    if (e.target === this) closeConnModal();
+});
+
+/* === Click on port badge → open edit modal === */
+document.querySelectorAll('.dev-port[data-conn-id]').forEach(function(port) {
+    port.addEventListener('click', function(e) {
+        e.stopPropagation();
+        var connId = Number(this.getAttribute('data-conn-id'));
+        if (connId) openEditConnModal(connId);
+    });
+});
+
+/* === Click on device box (single connection) → open edit modal === */
+document.querySelectorAll('.net-h-dev-box[data-conn-ids]').forEach(function(box) {
+    box.addEventListener('click', function(e) {
+        if (e.target.closest('.dev-port[data-conn-id]')) return; // handled by port click
+        var connIds;
+        try { connIds = JSON.parse(this.getAttribute('data-conn-ids')); } catch(err) { return; }
+        if (connIds.length === 1) openEditConnModal(connIds[0]);
+    });
+});
+
+/* === Drag & Drop: move device to another switch === */
+document.querySelectorAll('.net-h-dev-box[draggable="true"]').forEach(function(box) {
+    box.addEventListener('dragstart', function(e) {
+        this.classList.add('dragging');
+        var connIds = this.getAttribute('data-conn-ids');
+        var oldSwId = this.getAttribute('data-sw-id');
+        e.dataTransfer.setData('application/json', JSON.stringify({
+            connIds: JSON.parse(connIds),
+            oldSwId: Number(oldSwId)
+        }));
+        e.dataTransfer.effectAllowed = 'move';
+    });
+    box.addEventListener('dragend', function() {
+        this.classList.remove('dragging');
+        document.querySelectorAll('.net-h-sw-box.drop-target').forEach(function(el) {
+            el.classList.remove('drop-target');
+        });
+    });
+});
+
+document.querySelectorAll('.net-h-sw-box[data-sw-id]').forEach(function(swBox) {
+    swBox.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        this.classList.add('drop-target');
+    });
+    swBox.addEventListener('dragenter', function(e) {
+        e.preventDefault();
+        this.classList.add('drop-target');
+    });
+    swBox.addEventListener('dragleave', function() {
+        this.classList.remove('drop-target');
+    });
+    swBox.addEventListener('drop', function(e) {
+        e.preventDefault();
+        this.classList.remove('drop-target');
+        var data;
+        try { data = JSON.parse(e.dataTransfer.getData('application/json')); } catch(err) { return; }
+        var newSwId = Number(this.getAttribute('data-sw-id'));
+        if (!data || !data.connIds || !data.oldSwId || data.oldSwId === newSwId) return;
+        fetch('/network-layout/connections/batch-move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                conn_ids: data.connIds,
+                old_switch_id: data.oldSwId,
+                new_switch_id: newSwId,
+                room_id: <%= room.id %>
+            })
+        }).then(function(res) { return res.json(); })
+          .then(function(result) {
+            if (result.success) location.reload();
+            else alert('이동 실패: ' + (result.error || ''));
+          }).catch(function(err) { alert('이동 실패: ' + err.message); });
+    });
+});
+
+/* Switch chip toggle - sync class with checkbox state */
+document.querySelectorAll('[data-sw-chip]').forEach(function(chip) {
+    var cb = chip.querySelector('input[type="checkbox"]');
+    function sync() {
+        if (cb.checked) chip.classList.add('checked');
+        else chip.classList.remove('checked');
+    }
+    sync();
+    cb.addEventListener('change', sync);
+});
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
