@@ -1,0 +1,343 @@
+/* =============================================
+   Network Layout - Horizontal Row Topology
+   Color = Speed, Style = IB/Eth
+   ============================================= */
+
+/* === Speed color palette === */
+:root {
+    --clr-400g: #dc2626;
+    --clr-200g: #ea580c;
+    --clr-100g: #7c3aed;
+    --clr-25g:  #0d9488;
+    --clr-10g:  #2563eb;
+    --clr-other: #6b7280;
+}
+
+/* Switch filter */
+.net-sw-filter {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.net-sw-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    transition: all 0.15s;
+    user-select: none;
+}
+
+.net-sw-chip input[type="checkbox"] { display: none; }
+
+.net-sw-chip:hover {
+    border-color: var(--switch-color);
+    background: #f0fdf4;
+}
+
+.net-sw-chip:has(input:checked),
+.net-sw-chip.checked {
+    border-color: var(--switch-color);
+    background: #dcfce7;
+    color: #15803d;
+    font-weight: 600;
+}
+
+/* Stats row */
+.net-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.net-stat {
+    background: var(--bg-white);
+    border-radius: var(--radius);
+    padding: 12px 20px;
+    box-shadow: var(--shadow);
+    text-align: center;
+    min-width: 120px;
+}
+
+.net-stat .stat-value { font-size: 24px; font-weight: 700; }
+.net-stat .stat-label { font-size: 12px; color: var(--text-light); margin-top: 2px; }
+
+/* === Legend === */
+.net-legend {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: var(--text-light);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.net-legend-label {
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.net-legend-sep {
+    width: 1px;
+    height: 16px;
+    background: var(--border);
+    margin: 0 4px;
+}
+
+.net-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Legend speed samples */
+.net-seg-sample {
+    width: 30px;
+    height: 0;
+    border-top-style: solid;
+}
+
+.net-seg-sample.speed-400g { border-top: 5px solid var(--clr-400g); }
+.net-seg-sample.speed-200g { border-top: 4px solid var(--clr-200g); }
+.net-seg-sample.speed-100g { border-top: 3px solid var(--clr-100g); }
+.net-seg-sample.speed-25g  { border-top: 2px solid var(--clr-25g); }
+.net-seg-sample.speed-10g  { border-top: 2px solid var(--clr-10g); }
+
+/* Legend cable type samples */
+.net-seg-sample.cat-eth { border-top: 3px solid #374151; }
+.net-seg-sample.cat-ib  { border-top: 3px dashed #374151; }
+
+/* ===== Topology card ===== */
+.net-topo-card {
+    background: var(--bg-white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 24px;
+    margin-bottom: 24px;
+}
+
+/* ===== Horizontal row ===== */
+.net-h-row {
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+    gap: 0;
+    overflow-x: auto;
+}
+
+.net-row-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 0;
+}
+
+/* Switch box */
+.net-h-sw-box {
+    flex-shrink: 0;
+    background: #f0fdf4;
+    border: 2px solid var(--switch-color);
+    border-radius: var(--radius);
+    padding: 8px 14px;
+    text-align: center;
+    min-width: 110px;
+}
+
+.net-h-sw-box .sw-name { font-weight: 700; font-size: 12px; color: var(--text); }
+.net-h-sw-box .sw-model { font-size: 10px; color: var(--text-light); margin-top: 1px; }
+
+/* Speed badge — base */
+.net-h-speed {
+    flex-shrink: 0;
+    border-radius: 10px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    margin: 0 4px;
+    z-index: 2;
+    position: relative;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Speed badge — per speed */
+.net-h-speed.speed-400g { color: var(--clr-400g); border: 1.5px solid var(--clr-400g); background: #fef2f2; }
+.net-h-speed.speed-200g { color: var(--clr-200g); border: 1.5px solid var(--clr-200g); background: #fff7ed; }
+.net-h-speed.speed-100g { color: var(--clr-100g); border: 1.5px solid var(--clr-100g); background: #f5f3ff; }
+.net-h-speed.speed-25g  { color: var(--clr-25g);  border: 1.5px solid var(--clr-25g);  background: #f0fdfa; }
+.net-h-speed.speed-10g  { color: var(--clr-10g);  border: 1.5px solid var(--clr-10g);  background: #eff6ff; }
+.net-h-speed.speed-other { color: var(--clr-other); border: 1.5px solid var(--clr-other); background: #f9fafb; }
+
+/* Cable category label inside speed badge */
+.cat-label {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 0 4px;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+}
+
+.cat-label.cat-eth {
+    background: #e0e7ff;
+    color: #3730a3;
+}
+
+.cat-label.cat-ib {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+/* === Connecting line segment === */
+.net-h-seg {
+    flex: 0 0 30px;
+    height: 0;
+    border-top-style: solid;
+}
+
+/* Speed → color */
+.net-h-seg.speed-400g { border-top-color: var(--clr-400g); border-top-width: 5px; }
+.net-h-seg.speed-200g { border-top-color: var(--clr-200g); border-top-width: 4px; }
+.net-h-seg.speed-100g { border-top-color: var(--clr-100g); border-top-width: 3px; }
+.net-h-seg.speed-25g  { border-top-color: var(--clr-25g);  border-top-width: 2px; }
+.net-h-seg.speed-10g  { border-top-color: var(--clr-10g);  border-top-width: 2px; }
+.net-h-seg.speed-other { border-top-color: var(--clr-other); border-top-width: 1px; }
+
+/* Cable type → line style */
+.net-h-seg.cat-eth { border-top-style: solid; }
+.net-h-seg.cat-ib  { border-top-style: dashed; }
+
+/* Device box */
+.net-h-dev-box {
+    flex-shrink: 0;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    text-align: center;
+    min-width: 80px;
+    cursor: default;
+    transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.net-h-dev-box:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border-color: #93c5fd;
+}
+
+.net-h-dev-box.is-switch {
+    background: #f0fdf4;
+    border-color: var(--switch-color);
+}
+
+.net-h-dev-box.is-switch:hover { border-color: #16a34a; }
+
+.net-h-dev-box .dev-name {
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.net-h-dev-box .dev-info {
+    font-size: 10px;
+    color: var(--text-light);
+    margin-top: 1px;
+}
+
+.net-h-dev-box .dev-ports {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: 4px;
+    justify-content: center;
+}
+
+.net-h-dev-box .dev-port {
+    font-size: 9px;
+    font-family: 'Courier New', monospace;
+    background: #e0e7ff;
+    color: #3730a3;
+    padding: 1px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+.net-h-dev-box.is-switch .dev-port {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.dev-port .port-detail {
+    font-family: inherit;
+    font-size: 8px;
+    opacity: 0.7;
+}
+
+/* Direct connections section */
+.net-direct-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px dashed var(--border);
+}
+
+.net-direct-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-light);
+    margin-bottom: 8px;
+}
+
+/* Connection table */
+.net-table-section { margin-top: 24px; }
+
+/* Empty state */
+.net-empty { text-align: center; padding: 40px 20px; color: var(--text-light); }
+.net-empty p { margin-bottom: 8px; }
+
+/* Unconnected devices */
+.net-unconnected {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px dashed var(--border);
+}
+
+.net-unconnected-title { font-size: 12px; color: var(--text-light); margin-bottom: 8px; }
+
+.net-unconnected-list { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.net-unconnected-item {
+    font-size: 11px;
+    padding: 3px 8px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    color: var(--text-light);
+}
+
+/* Drag & drop feedback */
+.net-h-dev-box[draggable="true"] { cursor: grab; }
+.net-h-dev-box.dragging { opacity: 0.4; }
+
+/* Drop target highlight */
+.net-h-sw-box.drop-target {
+    outline: 3px dashed var(--switch-color);
+    outline-offset: 3px;
+    background: #bbf7d0;
+}
+
+/* Port click */
+.dev-port[data-conn-id] { cursor: pointer; }
+.dev-port[data-conn-id]:hover { background: #c7d2fe; }
