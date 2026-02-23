@@ -1,0 +1,394 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= asset ? '자산 수정' : '자산 등록' %></h1>
+    <a href="/assets" class="btn btn-secondary">목록</a>
+</div>
+
+<form method="POST" action="<%= asset ? '/assets/' + asset.id : '/assets' %>" class="card">
+    <div class="card-header"><h2>기본 정보</h2></div>
+
+    <%
+      const pf = (typeof prefill !== 'undefined' && prefill) ? prefill : null;
+      const effectiveOwnership = asset?.ownership || (pf ? pf.ownership : '') || '';
+    %>
+    <div class="form-row">
+        <div class="form-group">
+            <label>자산번호</label>
+            <input type="text" name="asset_number" class="form-control" value="<%= asset?.asset_number || (pf ? pf.asset_number : '') || '' %>" placeholder="AST-0001">
+        </div>
+        <div class="form-group">
+            <label>관리번호</label>
+            <input type="text" name="management_number" class="form-control" value="<%= asset?.management_number || (pf ? pf.management_number : '') || '' %>">
+        </div>
+        <div class="form-group">
+            <label>자산유형 *</label>
+            <select name="asset_type" class="form-control" required>
+                <% appConfig.assetTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= asset?.asset_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>소유구분</label>
+            <select name="ownership" class="form-control" id="ownershipSelect" onchange="toggleVendor()">
+                <% appConfig.ownershipTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= effectiveOwnership === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+    </div>
+
+    <div class="form-row" id="vendorRow" style="<%= effectiveOwnership !== 'vendor' ? 'display:none' : '' %>">
+        <div class="form-group">
+            <label>업체 선택</label>
+            <select name="vendor_id" id="vendorSelect" class="form-control" onchange="toggleNewVendor()">
+                <option value="">선택</option>
+                <% vendors.forEach(v => { %>
+                <option value="<%= v.id %>" <%= asset?.vendor_id == v.id ? 'selected' : '' %>><%= v.vendor_name %></option>
+                <% }) %>
+                <option value="__new__">+ 새 업체 직접 입력</option>
+            </select>
+        </div>
+        <div class="form-group" id="newVendorGroup" style="display:none;">
+            <label>새 업체명</label>
+            <input type="text" name="new_vendor_name" id="newVendorName" class="form-control" placeholder="업체명을 입력하세요">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>제조사</label>
+            <input type="text" name="manufacturer" class="form-control" value="<%= asset?.manufacturer || '' %>">
+        </div>
+        <div class="form-group">
+            <label>모델명</label>
+            <input type="text" name="model_name" class="form-control" value="<%= asset?.model_name || (pf ? pf.model_name : '') || '' %>">
+        </div>
+        <div class="form-group">
+            <label>시리얼번호</label>
+            <input type="text" name="serial_number" class="form-control" value="<%= asset?.serial_number || '' %>">
+        </div>
+        <div class="form-group">
+            <label>상태</label>
+            <select name="status" class="form-control">
+                <% appConfig.assetStatuses.forEach(t => { %>
+                <option value="<%= t.value %>" <%= asset?.status === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+    </div>
+
+    <div class="card-header mt-2"><h2>위치 정보</h2></div>
+
+    <%
+      // Determine current location type from asset's room
+      const curLocType = (function() {
+        if (!asset || !asset.room_id) return '';
+        const curRoom = rooms.find(r => r.id == asset.room_id);
+        return curRoom ? curRoom.location_type : '';
+      })();
+    %>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>위치유형</label>
+            <select name="loc_type" class="form-control" id="locTypeSelect" onchange="filterByLocType()">
+                <option value="">선택</option>
+                <% appConfig.locationTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= curLocType === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>장소</label>
+            <select name="room_id" class="form-control" id="roomSelect" onchange="toggleNewRoom(); filterRacks();">
+                <option value="">선택</option>
+                <% rooms.forEach(r => { %>
+                <option value="<%= r.id %>" data-loc-type="<%= r.location_type %>" <%= asset?.room_id == r.id ? 'selected' : '' %>><%= r.name %></option>
+                <% }) %>
+                <option value="__new__">+ 직접 입력</option>
+            </select>
+        </div>
+        <div class="form-group" id="newRoomGroup" style="display:none;">
+            <label>새 장소명</label>
+            <input type="text" name="new_room_name" id="newRoomName" class="form-control" placeholder="장소명을 입력하세요">
+        </div>
+    </div>
+
+    <div id="rackSection" style="<%= curLocType && curLocType !== 'server_room' ? 'display:none' : '' %>">
+        <div class="form-row">
+            <div class="form-group">
+                <label>랙</label>
+                <select name="rack_id" class="form-control" id="rackSelect" onchange="toggleNewRack()">
+                    <option value="">선택</option>
+                    <% racks.forEach(r => { %>
+                    <option value="<%= r.id %>" data-room="<%= r.room_id %>" <%= asset?.rack_id == r.id ? 'selected' : '' %>><%= r.room_name %> - <%= r.name %></option>
+                    <% }) %>
+                    <option value="__new__">+ 직접 입력</option>
+                </select>
+            </div>
+            <div class="form-group" id="newRackGroup" style="display:none;">
+                <label>새 랙 이름</label>
+                <input type="text" name="new_rack_name" id="newRackName" class="form-control" placeholder="예: A-01">
+            </div>
+            <div class="form-group">
+                <label>U 시작 위치</label>
+                <input type="number" id="uStart" class="form-control" min="1" max="42" value="<%= asset?.rack_unit_start ? Math.floor((asset.rack_unit_start - 1) / 3) + 1 : '' %>" onchange="calcSlotStart()">
+            </div>
+            <div class="form-group">
+                <label>구멍 <span style="font-size:11px;color:#94a3b8;">(1~3)</span></label>
+                <select id="holeStart" class="form-control" onchange="calcSlotStart()">
+                    <option value="1" <%= asset?.rack_unit_start && ((asset.rack_unit_start - 1) % 3) + 1 === 1 ? 'selected' : '' %>>1 (하단)</option>
+                    <option value="2" <%= asset?.rack_unit_start && ((asset.rack_unit_start - 1) % 3) + 1 === 2 ? 'selected' : '' %>>2 (중간)</option>
+                    <option value="3" <%= asset?.rack_unit_start && ((asset.rack_unit_start - 1) % 3) + 1 === 3 ? 'selected' : '' %>>3 (상단)</option>
+                </select>
+            </div>
+            <input type="hidden" name="rack_unit_start" id="rackUnitStart" value="<%= asset?.rack_unit_start || '' %>">
+            <%
+              const curSlots = asset?.rack_unit_size || 3;
+              const curU = Math.floor(curSlots / 3);
+              const curExtra = curSlots % 3;
+            %>
+            <div class="form-group">
+                <label>U 크기</label>
+                <input type="number" id="uSize" class="form-control" min="1" max="14" value="<%= curU || 1 %>" onchange="calcSlots()">
+            </div>
+            <div class="form-group">
+                <label>추가 칸 <span style="font-size:11px;color:#94a3b8;">(선반 등)</span></label>
+                <input type="number" id="extraSlots" class="form-control" min="0" max="2" value="<%= curExtra %>" onchange="calcSlots()">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>블레이드</label>
+                <select name="blade_slot" id="bladeSlot" class="form-control">
+                    <option value="" <%= !asset?.blade_slot ? 'selected' : '' %>>없음 (풀사이즈)</option>
+                    <option value="left" <%= asset?.blade_slot === 'left' ? 'selected' : '' %>>좌 (Left)</option>
+                    <option value="right" <%= asset?.blade_slot === 'right' ? 'selected' : '' %>>우 (Right)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>총 슬롯 크기</label>
+                <input type="number" name="rack_unit_size" id="totalSlots" class="form-control" value="<%= curSlots %>" readonly style="background:#f1f5f9;font-weight:600;">
+                <small style="color:#64748b;font-size:11px;">1U=3칸, 2U=6칸, 선반+2U=7칸</small>
+            </div>
+        </div>
+    </div>
+
+    <div class="card-header mt-2"><h2>IP 주소</h2></div>
+
+    <div id="ipRows">
+        <% const ips = (typeof assetIps !== 'undefined' && assetIps.length > 0) ? assetIps : (asset && asset.ip_address ? [{ ip_address: asset.ip_address, ip_type: 'management', description: '' }] : []); %>
+        <% ips.forEach((ip, idx) => { %>
+        <div class="form-row ip-row">
+            <div class="form-group" style="flex:0 0 140px;">
+                <% if (idx === 0) { %><label>유형</label><% } %>
+                <select name="ip_types[]" class="form-control">
+                    <% appConfig.ipTypes.forEach(t => { %>
+                    <option value="<%= t.value %>" <%= ip.ip_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="form-group">
+                <% if (idx === 0) { %><label>IP 주소</label><% } %>
+                <input type="text" name="ip_addresses[]" class="form-control" value="<%= ip.ip_address || '' %>" placeholder="10.100.230.x">
+            </div>
+            <div class="form-group">
+                <% if (idx === 0) { %><label>설명</label><% } %>
+                <input type="text" name="ip_descriptions[]" class="form-control" value="<%= ip.description || '' %>" placeholder="설명">
+            </div>
+            <div class="form-group" style="flex:0 0 60px; align-self: flex-end;">
+                <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.ip-row').remove()">X</button>
+            </div>
+        </div>
+        <% }) %>
+    </div>
+    <div style="margin-bottom: 16px;">
+        <button type="button" class="btn btn-sm btn-outline" onclick="addIpRow()">+ IP 추가</button>
+    </div>
+
+    <div class="card-header mt-2"><h2>접속 정보</h2></div>
+
+    <div class="form-row" style="margin-bottom: 4px;">
+        <div class="form-group" style="flex:0 0 100px;">
+            <label>SSH 포트</label>
+        </div>
+        <div class="form-group" style="flex:0 0 120px;">
+            <input type="number" name="ssh_port" class="form-control" value="<%= asset?.ssh_port || 22 %>">
+        </div>
+    </div>
+
+    <div id="credRows">
+        <% const creds = (typeof assetCredentials !== 'undefined' && assetCredentials.length > 0) ? assetCredentials : (asset && asset.ssh_user ? [{ username: asset.ssh_user, password: asset.ssh_password || '', credential_type: 'root', description: '' }] : []); %>
+        <% creds.forEach((cred, idx) => { %>
+        <div class="form-row cred-row">
+            <div class="form-group" style="flex:0 0 120px;">
+                <% if (idx === 0) { %><label>유형</label><% } %>
+                <select name="cred_types[]" class="form-control">
+                    <% appConfig.credentialTypes.forEach(t => { %>
+                    <option value="<%= t.value %>" <%= cred.credential_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="form-group">
+                <% if (idx === 0) { %><label>사용자</label><% } %>
+                <input type="text" name="cred_usernames[]" class="form-control" value="<%= cred.username || '' %>" placeholder="root">
+            </div>
+            <div class="form-group">
+                <% if (idx === 0) { %><label>비밀번호</label><% } %>
+                <input type="text" name="cred_passwords[]" class="form-control" value="<%= cred.password || '' %>" placeholder="password">
+            </div>
+            <div class="form-group">
+                <% if (idx === 0) { %><label>설명</label><% } %>
+                <input type="text" name="cred_descriptions[]" class="form-control" value="<%= cred.description || '' %>" placeholder="설명">
+            </div>
+            <div class="form-group" style="flex:0 0 60px; align-self: flex-end;">
+                <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.cred-row').remove()">X</button>
+            </div>
+        </div>
+        <% }) %>
+    </div>
+    <div style="margin-bottom: 16px;">
+        <button type="button" class="btn btn-sm btn-outline" onclick="addCredRow()">+ 계정 추가</button>
+    </div>
+
+    <div class="card-header mt-2"><h2>운영 정보</h2></div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>사용자</label>
+            <input type="text" name="assigned_user" class="form-control" value="<%= asset?.assigned_user || '' %>">
+        </div>
+        <div class="form-group">
+            <label>용도</label>
+            <input type="text" name="purpose" class="form-control" value="<%= asset?.purpose || '' %>">
+        </div>
+        <div class="form-group">
+            <label id="purchaseDateLabel"><%= effectiveOwnership === 'vendor' ? '입고일' : '구매일' %></label>
+            <input type="date" name="purchase_date" class="form-control" value="<%= asset?.purchase_date || '' %>">
+        </div>
+        <div class="form-group">
+            <label id="warrantyEndLabel"><%= effectiveOwnership === 'vendor' ? '반납예정일' : '보증만료' %></label>
+            <input type="date" name="warranty_end" class="form-control" value="<%= asset?.warranty_end || '' %>">
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>비고</label>
+        <textarea name="notes" class="form-control"><%= asset?.notes || '' %></textarea>
+    </div>
+
+    <div class="btn-group mt-2">
+        <button type="submit" class="btn btn-primary"><%= asset ? '수정' : '등록' %></button>
+        <a href="/assets" class="btn btn-secondary">취소</a>
+    </div>
+</form>
+
+<script>
+function toggleVendor() {
+    var sel = document.getElementById('ownershipSelect');
+    var isVendor = sel.value === 'vendor';
+    document.getElementById('vendorRow').style.display = isVendor ? '' : 'none';
+    document.getElementById('purchaseDateLabel').textContent = isVendor ? '입고일' : '구매일';
+    document.getElementById('warrantyEndLabel').textContent = isVendor ? '반납예정일' : '보증만료';
+}
+function toggleNewVendor() {
+    var sel = document.getElementById('vendorSelect');
+    var show = sel.value === '__new__';
+    document.getElementById('newVendorGroup').style.display = show ? '' : 'none';
+    if (show) document.getElementById('newVendorName').focus();
+}
+function toggleNewRack() {
+    var sel = document.getElementById('rackSelect');
+    var show = sel.value === '__new__';
+    document.getElementById('newRackGroup').style.display = show ? '' : 'none';
+    if (show) document.getElementById('newRackName').focus();
+}
+function toggleNewRoom() {
+    var sel = document.getElementById('roomSelect');
+    var show = sel.value === '__new__';
+    document.getElementById('newRoomGroup').style.display = show ? '' : 'none';
+    if (show) document.getElementById('newRoomName').focus();
+}
+function filterByLocType() {
+    var locType = document.getElementById('locTypeSelect').value;
+    // Filter room options by location_type
+    var roomOpts = document.querySelectorAll('#roomSelect option[data-loc-type]');
+    roomOpts.forEach(function(o) {
+        o.style.display = (!locType || o.dataset.locType === locType) ? '' : 'none';
+    });
+    // Reset room selection if it doesn't match
+    var roomSel = document.getElementById('roomSelect');
+    var curOpt = roomSel.options[roomSel.selectedIndex];
+    if (curOpt && curOpt.dataset.locType && curOpt.dataset.locType !== locType) {
+        roomSel.value = '';
+    }
+    // Show/hide rack section
+    var rackSection = document.getElementById('rackSection');
+    if (locType && locType !== 'server_room') {
+        rackSection.style.display = 'none';
+        // Clear rack-related values
+        document.getElementById('rackSelect').value = '';
+        document.getElementById('rackUnitStart').value = '';
+    } else {
+        rackSection.style.display = '';
+    }
+    filterRacks();
+}
+function filterRacks() {
+    var roomId = document.getElementById('roomSelect').value;
+    var sel = document.getElementById('rackSelect');
+    var opts = sel.querySelectorAll('option[data-room]');
+    var firstVisible = null;
+    var currentVisible = false;
+    opts.forEach(function(o) {
+        var show = !roomId || o.dataset.room === roomId;
+        o.style.display = show ? '' : 'none';
+        if (show && !firstVisible) firstVisible = o;
+        if (show && o.selected) currentVisible = true;
+    });
+    if (!currentVisible && firstVisible) {
+        sel.value = firstVisible.value;
+    } else if (!currentVisible) {
+        sel.value = '';
+    }
+}
+
+function calcSlots() {
+    var u = parseInt(document.getElementById('uSize').value) || 1;
+    var extra = parseInt(document.getElementById('extraSlots').value) || 0;
+    document.getElementById('totalSlots').value = u * 3 + extra;
+}
+
+function calcSlotStart() {
+    var u = parseInt(document.getElementById('uStart').value) || 0;
+    var hole = parseInt(document.getElementById('holeStart').value) || 1;
+    document.getElementById('rackUnitStart').value = u > 0 ? (u - 1) * 3 + hole : '';
+}
+
+var ipTypeOptions = '<% appConfig.ipTypes.forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %>';
+function addIpRow() {
+    var html = '<div class="form-row ip-row">' +
+        '<div class="form-group" style="flex:0 0 140px;"><select name="ip_types[]" class="form-control">' + ipTypeOptions + '</select></div>' +
+        '<div class="form-group"><input type="text" name="ip_addresses[]" class="form-control" placeholder="10.100.230.x"></div>' +
+        '<div class="form-group"><input type="text" name="ip_descriptions[]" class="form-control" placeholder="설명"></div>' +
+        '<div class="form-group" style="flex:0 0 60px; align-self: flex-end;"><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.ip-row\').remove()">X</button></div>' +
+        '</div>';
+    document.getElementById('ipRows').insertAdjacentHTML('beforeend', html);
+}
+
+var credTypeOptions = '<% appConfig.credentialTypes.forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %>';
+function addCredRow() {
+    var html = '<div class="form-row cred-row">' +
+        '<div class="form-group" style="flex:0 0 120px;"><select name="cred_types[]" class="form-control">' + credTypeOptions + '</select></div>' +
+        '<div class="form-group"><input type="text" name="cred_usernames[]" class="form-control" placeholder="root"></div>' +
+        '<div class="form-group"><input type="text" name="cred_passwords[]" class="form-control" placeholder="password"></div>' +
+        '<div class="form-group"><input type="text" name="cred_descriptions[]" class="form-control" placeholder="설명"></div>' +
+        '<div class="form-group" style="flex:0 0 60px; align-self: flex-end;"><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.cred-row\').remove()">X</button></div>' +
+        '</div>';
+    document.getElementById('credRows').insertAdjacentHTML('beforeend', html);
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
