@@ -1,0 +1,350 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= room.name %> 서버실</h1>
+    <div class="btn-group">
+        <button class="btn btn-primary" onclick="openModal('addRackModal')">+ 랙 추가</button>
+        <a href="/rooms/<%= room.id %>/assets" class="btn btn-outline">자산 목록</a>
+        <a href="/rooms" class="btn btn-secondary">서버실 목록</a>
+        <form method="POST" action="/rooms/<%= room.id %>/delete" style="display:inline" onsubmit="return confirmDelete('서버실과 포함된 모든 랙/장비가 삭제됩니다.')">
+            <button type="submit" class="btn btn-danger">삭제</button>
+        </form>
+    </div>
+</div>
+
+<% if (room.location || room.description) { %>
+<div class="card mb-2">
+    <% if (room.location) { %><p><strong>위치:</strong> <%= room.location %></p><% } %>
+    <% if (room.description) { %><p><strong>설명:</strong> <%= room.description %></p><% } %>
+</div>
+<% } %>
+
+<div class="card mb-2" style="padding:12px 16px;">
+    <div class="d-flex align-center justify-between" style="flex-wrap:wrap;gap:8px;">
+        <span class="text-muted" style="font-size:13px;">랙을 드래그하여 위치를 변경할 수 있습니다.</span>
+        <div class="d-flex gap-1 align-center" style="font-size:12px;">
+            <span class="legend-color server" style="width:16px;height:10px;border-radius:2px;display:inline-block;"></span> 자사
+            <span class="legend-color vendor" style="width:16px;height:10px;border-radius:2px;display:inline-block;margin-left:8px;"></span> 업체
+            <span class="legend-color switch" style="width:16px;height:10px;border-radius:2px;display:inline-block;margin-left:8px;"></span> 스위치
+            <span class="legend-color pdu" style="width:16px;height:10px;border-radius:2px;display:inline-block;margin-left:8px;"></span> PDU
+        </div>
+    </div>
+</div>
+
+<%
+  // Auto-distribute racks that share the same position
+  var posMap = {};
+  racks.forEach(function(r) {
+    var key = (r.row_position || 1) + ':' + (r.col_position || 1);
+    if (!posMap[key]) posMap[key] = [];
+    posMap[key].push(r);
+  });
+  // If any position has multiple racks, redistribute them sequentially
+  var hasOverlap = Object.keys(posMap).some(function(k) { return posMap[k].length > 1; });
+  if (hasOverlap) {
+    var col = 1, row = 1;
+    var maxCols = Math.min(Math.max(Math.ceil(Math.sqrt(racks.length)), 3), 8);
+    racks.forEach(function(r) {
+      r.row_position = row;
+      r.col_position = col;
+      col++;
+      if (col > maxCols) { col = 1; row++; }
+    });
+  }
+
+  // Compute grid dimensions from rack positions
+  var maxRow = 1, maxCol = 1;
+  racks.forEach(function(r) {
+    if (r.row_position > maxRow) maxRow = r.row_position;
+    if (r.col_position > maxCol) maxCol = r.col_position;
+  });
+  // Add one extra row/col for drop targets
+  maxRow = Math.max(maxRow, 1) + 1;
+  maxCol = Math.max(maxCol, 2) + 1;
+  // Cap to reasonable size
+  if (maxCol > 12) maxCol = 12;
+  if (maxRow > 10) maxRow = 10;
+%>
+
+<div class="rack-grid-container">
+    <% if (racks.length === 0) { %>
+    <div class="card text-center">
+        <p class="text-muted">등록된 랙이 없습니다. 랙을 추가해주세요.</p>
+    </div>
+    <% } else { %>
+    <div class="rack-dnd-grid" id="rackGrid"
+         style="grid-template-columns: repeat(<%= maxCol %>, minmax(140px, 1fr)); grid-template-rows: repeat(<%= maxRow %>, auto);">
+        <%
+          // Place racks at their positions
+          racks.forEach(function(rack) {
+            var r = rack.row_position || 1;
+            var c = rack.col_position || 1;
+        %>
+        <div class="rack-thumbnail rack-draggable"
+             draggable="true"
+             data-rack-id="<%= rack.id %>"
+             data-row="<%= r %>"
+             data-col="<%= c %>"
+             style="grid-row: <%= r %>; grid-column: <%= c %>;">
+            <div class="rack-thumb-header">
+                <span class="drag-handle">&#x2630;</span>
+                <%= rack.name %>
+            </div>
+            <div class="rack-thumb-body">
+                <div class="rack-usage-bar">
+                    <div class="rack-usage-fill" style="height:<%= rack.total_units > 0 ? (rack.used_units / rack.total_units * 100) : 0 %>%"></div>
+                </div>
+                <div class="rack-thumb-info">
+                    <span><%= rack.used_units || 0 %>/<%= rack.total_units %>U</span>
+                    <span><%= rack.asset_count || 0 %>대</span>
+                </div>
+            </div>
+            <a href="/racks/<%= rack.id %>" class="rack-thumb-link">상세 보기</a>
+        </div>
+        <% }) %>
+
+        <% // Render empty drop zones for unoccupied cells
+           var occupied = {};
+           racks.forEach(function(rack) {
+             occupied[(rack.row_position || 1) + ':' + (rack.col_position || 1)] = true;
+           });
+           for (var rr = 1; rr <= maxRow; rr++) {
+             for (var cc = 1; cc <= maxCol; cc++) {
+               if (!occupied[rr + ':' + cc]) {
+        %>
+        <div class="rack-drop-zone"
+             data-row="<%= rr %>"
+             data-col="<%= cc %>"
+             style="grid-row: <%= rr %>; grid-column: <%= cc %>;">
+        </div>
+        <%     }
+             }
+           }
+        %>
+    </div>
+    <% } %>
+</div>
+
+<!-- Add Rack Modal -->
+<div class="modal-overlay" id="addRackModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>랙 추가</h3>
+            <button class="modal-close" onclick="closeModal('addRackModal')">&times;</button>
+        </div>
+        <form method="POST" action="/rooms/<%= room.id %>/racks">
+            <div class="form-group">
+                <label>랙 이름 *</label>
+                <input type="text" name="name" class="form-control" required placeholder="예: A-01">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>총 U 수</label>
+                    <input type="number" name="total_units" class="form-control" value="42" min="1" max="52">
+                </div>
+                <div class="form-group">
+                    <label>행 위치</label>
+                    <input type="number" name="row_position" class="form-control" value="1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>열 위치</label>
+                    <input type="number" name="col_position" class="form-control" value="1" min="1">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>설명</label>
+                <textarea name="description" class="form-control"></textarea>
+            </div>
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary">추가</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addRackModal')">취소</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+(function() {
+  var dragSrcEl = null;
+
+  // --- Drag Start ---
+  document.querySelectorAll('.rack-draggable').forEach(function(el) {
+    el.addEventListener('dragstart', function(e) {
+      dragSrcEl = this;
+      this.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', this.dataset.rackId);
+    });
+    el.addEventListener('dragend', function() {
+      this.classList.remove('dragging');
+      document.querySelectorAll('.rack-drop-zone, .rack-draggable').forEach(function(z) {
+        z.classList.remove('drag-over');
+      });
+    });
+  });
+
+  // --- Drop zones (empty cells) ---
+  document.querySelectorAll('.rack-drop-zone').forEach(function(zone) {
+    zone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.classList.add('drag-over');
+    });
+    zone.addEventListener('dragleave', function() {
+      this.classList.remove('drag-over');
+    });
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.classList.remove('drag-over');
+      if (!dragSrcEl) return;
+      var newRow = parseInt(this.dataset.row);
+      var newCol = parseInt(this.dataset.col);
+      moveRack(dragSrcEl, newRow, newCol, this);
+    });
+  });
+
+  // --- Drop on another rack (swap) ---
+  document.querySelectorAll('.rack-draggable').forEach(function(el) {
+    el.addEventListener('dragover', function(e) {
+      if (this === dragSrcEl) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', function() {
+      this.classList.remove('drag-over');
+    });
+    el.addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.classList.remove('drag-over');
+      if (!dragSrcEl || this === dragSrcEl) return;
+      swapRacks(dragSrcEl, this);
+    });
+  });
+
+  function moveRack(srcEl, newRow, newCol, dropZone) {
+    var rackId = srcEl.dataset.rackId;
+    var oldRow = parseInt(srcEl.dataset.row);
+    var oldCol = parseInt(srcEl.dataset.col);
+
+    // Update visually
+    srcEl.style.gridRow = newRow;
+    srcEl.style.gridColumn = newCol;
+    srcEl.dataset.row = newRow;
+    srcEl.dataset.col = newCol;
+
+    // The old position becomes a drop zone
+    dropZone.style.gridRow = oldRow;
+    dropZone.style.gridColumn = oldCol;
+    dropZone.dataset.row = oldRow;
+    dropZone.dataset.col = oldCol;
+
+    savePosition(rackId, newRow, newCol);
+    rebuildGrid();
+  }
+
+  function swapRacks(srcEl, targetEl) {
+    var srcId = srcEl.dataset.rackId;
+    var targetId = targetEl.dataset.rackId;
+    var srcRow = parseInt(srcEl.dataset.row);
+    var srcCol = parseInt(srcEl.dataset.col);
+    var tgtRow = parseInt(targetEl.dataset.row);
+    var tgtCol = parseInt(targetEl.dataset.col);
+
+    // Swap visual positions
+    srcEl.style.gridRow = tgtRow;
+    srcEl.style.gridColumn = tgtCol;
+    srcEl.dataset.row = tgtRow;
+    srcEl.dataset.col = tgtCol;
+
+    targetEl.style.gridRow = srcRow;
+    targetEl.style.gridColumn = srcCol;
+    targetEl.dataset.row = srcRow;
+    targetEl.dataset.col = srcCol;
+
+    savePosition(srcId, tgtRow, tgtCol);
+    savePosition(targetId, srcRow, srcCol);
+    rebuildGrid();
+  }
+
+  function savePosition(rackId, row, col) {
+    fetch('/racks/' + rackId + '/position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ row_position: row, col_position: col })
+    }).then(function(r) {
+      if (!r.ok) console.error('Failed to save rack position');
+    });
+  }
+
+  function rebuildGrid() {
+    var grid = document.getElementById('rackGrid');
+    if (!grid) return;
+
+    // Collect current rack positions
+    var rackEls = grid.querySelectorAll('.rack-draggable');
+    var maxRow = 1, maxCol = 1;
+    rackEls.forEach(function(el) {
+      var r = parseInt(el.dataset.row);
+      var c = parseInt(el.dataset.col);
+      if (r > maxRow) maxRow = r;
+      if (c > maxCol) maxCol = c;
+    });
+
+    // Add one extra row/col for drop targets
+    maxRow = Math.max(maxRow, 1) + 1;
+    maxCol = Math.max(maxCol, 2) + 1;
+    if (maxCol > 12) maxCol = 12;
+    if (maxRow > 10) maxRow = 10;
+
+    // Update grid template
+    grid.style.gridTemplateColumns = 'repeat(' + maxCol + ', minmax(140px, 1fr))';
+    grid.style.gridTemplateRows = 'repeat(' + maxRow + ', auto)';
+
+    // Build occupied map
+    var occupied = {};
+    rackEls.forEach(function(el) {
+      occupied[el.dataset.row + ':' + el.dataset.col] = true;
+    });
+
+    // Remove old drop zones
+    grid.querySelectorAll('.rack-drop-zone').forEach(function(z) { z.remove(); });
+
+    // Create new drop zones
+    for (var rr = 1; rr <= maxRow; rr++) {
+      for (var cc = 1; cc <= maxCol; cc++) {
+        if (!occupied[rr + ':' + cc]) {
+          var zone = document.createElement('div');
+          zone.className = 'rack-drop-zone';
+          zone.dataset.row = rr;
+          zone.dataset.col = cc;
+          zone.style.gridRow = rr;
+          zone.style.gridColumn = cc;
+          // Attach drop events
+          zone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            this.classList.add('drag-over');
+          });
+          zone.addEventListener('dragleave', function() {
+            this.classList.remove('drag-over');
+          });
+          zone.addEventListener('drop', (function(z) {
+            return function(e) {
+              e.preventDefault();
+              z.classList.remove('drag-over');
+              if (!dragSrcEl) return;
+              var nr = parseInt(z.dataset.row);
+              var nc = parseInt(z.dataset.col);
+              moveRack(dragSrcEl, nr, nc, z);
+            };
+          })(zone));
+          grid.appendChild(zone);
+        }
+      }
+    }
+  }
+})();
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

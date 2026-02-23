@@ -1,0 +1,415 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= rack.room_name %> &gt; <%= rack.name %> (<%= rack.total_units %>U / <%= totalSlots %>칸)</h1>
+    <div class="btn-group">
+        <a href="/assets/new?rack_id=<%= rack.id %>" class="btn btn-primary">+ 장비 추가</a>
+        <a href="/rooms/<%= rack.room_id %>" class="btn btn-secondary">서버실</a>
+    </div>
+</div>
+
+<div class="rack-detail-layout">
+    <div class="rack-visual">
+        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">장비를 드래그하여 구멍 단위로 위치를 변경할 수 있습니다. (1U = 3구멍)</p>
+<%
+function getAssetClass(info) {
+    if (info.asset_type === 'switch') return 'switch';
+    if (info.asset_type === 'pdu' || info.asset_type === 'ups') return 'pdu';
+    if (info.ownership === 'vendor') return 'vendor';
+    return 'server';
+}
+function slotPos(slot) {
+    var u = Math.floor((slot - 1) / 3) + 1;
+    var h = ((slot - 1) % 3) + 1;
+    return 'U' + u + '(' + h + ')';
+}
+%>
+        <div class="slot-container" id="rackSlotContainer">
+            <% for (let s = totalSlots; s >= 1; s--) { %>
+            <%
+                const entry = slotMap[s] || { full: null, left: null, right: null };
+                const uNum = Math.floor((s - 1) / 3) + 1;
+                const isUTop = (s % 3 === 0);
+
+                if (entry.full) {
+                    const f = entry.full;
+                    const cls = getAssetClass(f);
+                    const endSlot = f.rack_unit_start + f.slot_size - 1;
+                    const isTop = (s === endSlot);
+                    const isBot = (s === f.rack_unit_start);
+                    const isSingle = (f.slot_size === 1);
+                    const extra = f.slot_size % 3;
+                    const isShelf = extra > 0 && s < f.rack_unit_start + extra;
+                    const isShelfTop = extra > 0 && s === f.rack_unit_start + extra - 1;
+                    let posClass = 'slot-asset-mid';
+                    if (isSingle) posClass = 'slot-asset-single';
+                    else if (isTop) posClass = 'slot-asset-top';
+                    else if (isBot) posClass = 'slot-asset-bot';
+            %>
+            <div class="slot-row <%= cls %> <%= posClass %><%= isShelf ? ' slot-shelf' : '' %><%= isShelfTop ? ' slot-shelf-top' : '' %><%= isUTop && !isTop && s < totalSlots ? ' u-boundary-asset' : '' %>"
+                 data-slot="<%= s %>" data-u="<%= uNum %>"
+                 draggable="true" data-asset-id="<%= f.id %>" data-asset-slots="<%= f.slot_size %>">
+                <span class="slot-u-label<%= isShelfTop ? ' shelf-label' : '' %>"><%= isShelfTop ? '선반' : '' %></span>
+                <span class="hole-marker"></span>
+                <% if (isTop) { %>
+                <div class="slot-info-wrap">
+                    <span class="slot-name"><%= f.model_name %></span>
+                    <% if (f.assigned_user || f.purpose) { %>
+                    <span class="slot-meta"><% if (f.assigned_user) { %><%= f.assigned_user %><% } %><% if (f.assigned_user && f.purpose) { %> | <% } %><% if (f.purpose) { %><%= f.purpose %><% } %></span>
+                    <% } %>
+                </div>
+                <% } %>
+            </div>
+            <%
+                } else if (entry.left || entry.right) {
+                    const anyInfo = entry.left || entry.right;
+                    const endSlot = anyInfo.rack_unit_start + anyInfo.slot_size - 1;
+                    const isTop = (s === endSlot);
+                    const isBot = (s === anyInfo.rack_unit_start);
+                    const isSingle = (anyInfo.slot_size === 1);
+                    const extra = anyInfo.slot_size % 3;
+                    const isShelf = extra > 0 && s < anyInfo.rack_unit_start + extra;
+                    const isShelfTop = extra > 0 && s === anyInfo.rack_unit_start + extra - 1;
+
+                    if (isShelf) {
+                        // Shelf: full-width (not split into blade halves)
+                        let posClass = isBot ? 'slot-asset-bot' : 'slot-asset-mid';
+            %>
+            <div class="slot-row slot-shelf <%= posClass %><%= isShelfTop ? ' slot-shelf-top' : '' %><%= isUTop && s < totalSlots ? ' u-boundary-asset' : '' %>"
+                 data-slot="<%= s %>" data-u="<%= uNum %>"
+                 draggable="true" data-asset-id="<%= anyInfo.id %>" data-asset-slots="<%= anyInfo.slot_size %>">
+                <span class="slot-u-label<%= isShelfTop ? ' shelf-label' : '' %>"><%= isShelfTop ? '선반' : '' %></span>
+                <span class="hole-marker"></span>
+            </div>
+            <%
+                    } else {
+                        // Blade pair (non-shelf slots)
+                        let posClass = 'slot-blade-mid';
+                        if (isSingle) posClass = 'slot-blade-single';
+                        else if (isTop) posClass = 'slot-blade-top';
+                        else if (isBot) posClass = 'slot-blade-bot';
+            %>
+            <div class="slot-row blade-row <%= posClass %><%= isUTop && !isTop && s < totalSlots ? ' u-boundary-asset' : '' %>"
+                 data-slot="<%= s %>" data-u="<%= uNum %>">
+                <span class="slot-u-label"></span>
+                <span class="hole-marker"></span>
+                <div class="blade-pair">
+                    <% if (entry.left) { %>
+                    <div class="blade-half <%= getAssetClass(entry.left) %>"
+                         data-asset-id="<%= entry.left.id %>" data-asset-slots="<%= anyInfo.slot_size %>" draggable="true">
+                        <% if (isTop) { %>
+                        <span class="blade-label"><%= entry.left.model_name %></span>
+                        <span class="slot-meta">
+                            <% if (entry.left.assigned_user) { %><%= entry.left.assigned_user %><% } %>
+                            <% if (entry.left.assigned_user && entry.left.purpose) { %> | <% } %>
+                            <% if (entry.left.purpose) { %><%= entry.left.purpose %><% } %>
+                        </span>
+                        <% } %>
+                    </div>
+                    <% } else { %>
+                    <div class="blade-half blade-empty"></div>
+                    <% } %>
+                    <% if (entry.right) { %>
+                    <div class="blade-half <%= getAssetClass(entry.right) %>"
+                         data-asset-id="<%= entry.right.id %>" data-asset-slots="<%= anyInfo.slot_size %>" draggable="true">
+                        <% if (isTop) { %>
+                        <span class="blade-label"><%= entry.right.model_name %></span>
+                        <span class="slot-meta">
+                            <% if (entry.right.assigned_user) { %><%= entry.right.assigned_user %><% } %>
+                            <% if (entry.right.assigned_user && entry.right.purpose) { %> | <% } %>
+                            <% if (entry.right.purpose) { %><%= entry.right.purpose %><% } %>
+                        </span>
+                        <% } %>
+                    </div>
+                    <% } else { %>
+                    <div class="blade-half blade-empty"></div>
+                    <% } %>
+                </div>
+            </div>
+            <%
+                    }
+                } else {
+            %>
+            <div class="slot-row slot-empty<%= isUTop && s < totalSlots ? ' u-boundary' : '' %>" data-slot="<%= s %>" data-u="<%= uNum %>">
+                <span class="slot-u-label"><%= isUTop ? 'U' + uNum : '' %></span>
+                <span class="hole-marker"></span>
+            </div>
+            <%
+                }
+            } %>
+        </div>
+    </div>
+
+    <div class="rack-sidebar">
+        <div class="card">
+            <div class="card-header">
+                <h2>랙 정보</h2>
+                <button class="btn btn-sm btn-outline" onclick="openModal('rackEditModal')">수정</button>
+            </div>
+            <p><strong>서버실:</strong> <%= rack.room_name %></p>
+            <p><strong>이름:</strong> <%= rack.name %></p>
+            <p><strong>총 U:</strong> <%= rack.total_units %> (<%= totalSlots %>칸)</p>
+            <p><strong>장비 수:</strong> <%= assets.length %>대</p>
+            <% if (rack.description) { %><p><strong>설명:</strong> <%= rack.description %></p><% } %>
+            <div class="mt-2">
+                <form method="POST" action="/racks/<%= rack.id %>/delete" onsubmit="return confirmDelete('이 랙을 삭제하시겠습니까?')">
+                    <button type="submit" class="btn btn-sm btn-danger">랙 삭제</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h2>범례</h2></div>
+            <div class="rack-legend">
+                <div class="legend-item"><span class="legend-color server"></span> 자사 서버</div>
+                <div class="legend-item"><span class="legend-color vendor"></span> 업체 장비</div>
+                <div class="legend-item"><span class="legend-color switch"></span> 스위치</div>
+                <div class="legend-item"><span class="legend-color pdu"></span> PDU</div>
+                <div class="legend-item"><span class="legend-color empty"></span> 빈 공간</div>
+            </div>
+            <p style="font-size:11px;color:#94a3b8;margin-top:8px;">1U = 3구멍, 선반+2U = 7칸</p>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h2>장비 목록</h2></div>
+            <% if (assets.length === 0) { %>
+            <p class="text-muted">장비가 없습니다.</p>
+            <% } %>
+            <% assets.forEach(a => { %>
+            <div class="rack-asset-item" onclick="showAssetPopup(<%= a.id %>)">
+                <strong><%= a.rack_unit_start ? slotPos(a.rack_unit_start) : 'U?' %></strong><% if ((a.rack_unit_size||3) > 1) { %>-<strong><%= slotPos(a.rack_unit_start + (a.rack_unit_size||3) - 1) %></strong><% } %>
+                <% if (a.blade_slot) { %><span style="font-size:10px;color:#94a3b8;">(<%= a.blade_slot === 'left' ? '좌' : '우' %>)</span><% } %>
+                - <%= a.model_name || a.asset_type %>
+                <span style="font-size:11px;color:#64748b;">(<%= Math.floor((a.rack_unit_size||3)/3) %>U<% if ((a.rack_unit_size||3)%3) { %>+<%= (a.rack_unit_size||3)%3 %><% } %>)</span>
+            </div>
+            <% }) %>
+        </div>
+    </div>
+</div>
+
+<!-- Asset Popup Modal -->
+<div class="modal-overlay" id="assetPopup">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="popupTitle">장비 정보</h3>
+            <button class="modal-close" onclick="closeModal('assetPopup')">&times;</button>
+        </div>
+        <div id="popupContent">로딩중...</div>
+    </div>
+</div>
+
+<!-- Rack Edit Modal -->
+<div class="modal-overlay" id="rackEditModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>랙 정보 수정</h3>
+            <button class="modal-close" onclick="closeModal('rackEditModal')">&times;</button>
+        </div>
+        <form method="POST" action="/racks/<%= rack.id %>">
+            <input type="hidden" name="room_id" value="<%= rack.room_id %>">
+            <div class="form-group">
+                <label>이름</label>
+                <input type="text" name="name" class="form-control" value="<%= rack.name %>" required>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>총 U수</label>
+                    <input type="number" name="total_units" class="form-control" value="<%= rack.total_units %>" min="1">
+                </div>
+                <div class="form-group">
+                    <label>행 위치</label>
+                    <input type="number" name="row_position" class="form-control" value="<%= rack.row_position || 1 %>" min="1">
+                </div>
+                <div class="form-group">
+                    <label>열 위치</label>
+                    <input type="number" name="col_position" class="form-control" value="<%= rack.col_position || 1 %>" min="1">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>설명</label>
+                <textarea name="description" class="form-control"><%= rack.description || '' %></textarea>
+            </div>
+            <div class="btn-group mt-2">
+                <button type="submit" class="btn btn-primary">저장</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('rackEditModal')">취소</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+var assetsData = <%- JSON.stringify(assets) %>;
+var rackId = <%= rack.id %>;
+var totalSlots = <%= totalSlots %>;
+var totalUnits = <%= rack.total_units %>;
+
+function slotToU(slot) { return Math.floor((slot - 1) / 3) + 1; }
+function slotHole(slot) { return ((slot - 1) % 3) + 1; }
+function slotPosStr(slot) { return 'U' + slotToU(slot) + '(' + slotHole(slot) + ')'; }
+
+// --- Hole-based drag-and-drop (individual slot rendering) ---
+(function() {
+    var dragAssetId = null;
+    var dragAssetSlots = 0;
+    var container = document.getElementById('rackSlotContainer');
+
+    function getSlotMap() {
+        var map = {};
+        container.querySelectorAll('.slot-row').forEach(function(el) {
+            map[parseInt(el.dataset.slot)] = el;
+        });
+        return map;
+    }
+
+    function canPlace(targetSlot, slotSize, sMap) {
+        var start = targetSlot;
+        var end = start + slotSize - 1;
+        if (start < 1 || end > totalSlots) return false;
+        for (var s = start; s <= end; s++) {
+            var el = sMap[s];
+            if (!el) continue;
+            var elAssetId = el.dataset.assetId ? parseInt(el.dataset.assetId) : null;
+            // Check blade halves too
+            var blades = el.querySelectorAll('.blade-half[data-asset-id]');
+            blades.forEach(function(b) {
+                if (parseInt(b.dataset.assetId) !== dragAssetId) {
+                    elAssetId = parseInt(b.dataset.assetId);
+                }
+            });
+            if (elAssetId && elAssetId !== dragAssetId) return false;
+        }
+        return true;
+    }
+
+    container.addEventListener('dragstart', function(e) {
+        var el = e.target.closest('[data-asset-id]');
+        if (!el) return;
+        dragAssetId = parseInt(el.dataset.assetId);
+        dragAssetSlots = parseInt(el.dataset.assetSlots) || 3;
+        // Mark ALL slots of this asset as dragging
+        container.querySelectorAll('[data-asset-id="' + dragAssetId + '"]').forEach(function(sel) {
+            sel.classList.add('dragging');
+        });
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragAssetId));
+    });
+
+    container.addEventListener('dragend', function() {
+        container.querySelectorAll('.dragging').forEach(function(el) {
+            el.classList.remove('dragging');
+        });
+        container.querySelectorAll('.slot-row').forEach(function(el) {
+            el.classList.remove('drag-target', 'drag-invalid');
+        });
+        dragAssetId = null;
+        dragAssetSlots = 0;
+    });
+
+    container.addEventListener('dragover', function(e) {
+        if (!dragAssetId) return;
+        var targetEl = e.target.closest('.slot-row');
+        if (!targetEl) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+
+        container.querySelectorAll('.slot-row').forEach(function(el) {
+            el.classList.remove('drag-target', 'drag-invalid');
+        });
+
+        var targetSlot = parseInt(targetEl.dataset.slot);
+        var sMap = getSlotMap();
+        var ok = canPlace(targetSlot, dragAssetSlots, sMap);
+
+        var start = targetSlot;
+        var end = start + dragAssetSlots - 1;
+        for (var s = start; s <= end && s <= totalSlots; s++) {
+            var sel = sMap[s];
+            if (sel) sel.classList.add(ok ? 'drag-target' : 'drag-invalid');
+        }
+    });
+
+    container.addEventListener('dragleave', function(e) {
+        if (!container.contains(e.relatedTarget)) {
+            container.querySelectorAll('.slot-row').forEach(function(el) {
+                el.classList.remove('drag-target', 'drag-invalid');
+            });
+        }
+    });
+
+    container.addEventListener('drop', function(e) {
+        e.preventDefault();
+        if (!dragAssetId) return;
+        var targetEl = e.target.closest('.slot-row');
+        if (!targetEl) return;
+
+        var newSlot = parseInt(targetEl.dataset.slot);
+        var sMap = getSlotMap();
+
+        if (!canPlace(newSlot, dragAssetSlots, sMap)) {
+            showToast('해당 위치에 놓을 수 없습니다 (충돌 또는 범위 초과)', 'error');
+            return;
+        }
+
+        fetch('/racks/' + rackId + '/move-asset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_id: dragAssetId, new_slot_start: newSlot })
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) location.reload();
+            else showToast(data.error || '이동 실패', 'error');
+        }).catch(function() {
+            showToast('서버 통신 오류', 'error');
+        });
+    });
+
+    // Click to open popup
+    var didDrag = false;
+    container.addEventListener('dragstart', function() { didDrag = true; });
+    container.addEventListener('click', function(e) {
+        if (didDrag) { didDrag = false; return; }
+        var el = e.target.closest('[data-asset-id]');
+        if (el) showAssetPopup(parseInt(el.dataset.assetId));
+    });
+
+    function showToast(msg, type) {
+        var div = document.createElement('div');
+        div.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;padding:10px 16px;border-radius:6px;color:white;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:opacity .3s;';
+        div.style.background = type === 'error' ? '#ef4444' : '#22c55e';
+        div.textContent = msg;
+        document.body.appendChild(div);
+        setTimeout(function() { div.style.opacity = '0'; setTimeout(function() { div.remove(); }, 300); }, 2500);
+    }
+})();
+
+function showAssetPopup(assetId) {
+    var asset = assetsData.find(function(a) { return a.id === assetId; });
+    if (!asset) return;
+    var uSize = Math.floor((asset.rack_unit_size || 3) / 3);
+    var extraSlots = (asset.rack_unit_size || 3) % 3;
+    var sizeText = uSize + 'U' + (extraSlots ? '+' + extraSlots + '칸' : '');
+    var startPos = asset.rack_unit_start ? slotPosStr(asset.rack_unit_start) : 'U?';
+    var endSlot = asset.rack_unit_start + (asset.rack_unit_size || 3) - 1;
+    var endPos = slotPosStr(endSlot);
+    var posText = startPos + ((asset.rack_unit_size || 3) > 1 ? '-' + endPos : '') + ' / ' + sizeText;
+    document.getElementById('popupTitle').textContent = asset.model_name || asset.asset_type;
+    document.getElementById('popupContent').innerHTML =
+        '<div class="form-row">' +
+        '<div class="form-group"><label>유형</label><p>' + asset.asset_type + '</p></div>' +
+        '<div class="form-group"><label>소유</label><p>' + (asset.ownership === 'company' ? '자사' : '업체') + '</p></div>' +
+        '<div class="form-group"><label>위치</label><p>' + posText + (asset.blade_slot ? ' (' + (asset.blade_slot==='left'?'좌':'우') + ')' : '') + '</p></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+        '<div class="form-group"><label>IP</label><p>' + (asset.ip_address || '-') + '</p></div>' +
+        '<div class="form-group"><label>S/N</label><p>' + (asset.serial_number || '-') + '</p></div>' +
+        '<div class="form-group"><label>사용자</label><p>' + (asset.assigned_user || '-') + '</p></div>' +
+        '</div>' +
+        '<div class="btn-group mt-2">' +
+        '<a href="/assets/' + asset.id + '" class="btn btn-primary">상세 보기</a>' +
+        '<a href="/assets/' + asset.id + '/edit" class="btn btn-outline">수정</a>' +
+        '</div>';
+    openModal('assetPopup');
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
