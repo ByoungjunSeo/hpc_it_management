@@ -323,11 +323,6 @@ function openAssetPopup(assetId) {
     document.querySelectorAll('.adp-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === 'basic'); });
     openModal('assetDetailPopup');
 
-    if (adpCache[assetId]) {
-        renderAdp(adpCache[assetId]);
-        return;
-    }
-
     fetch('/assets/' + assetId + '/json')
         .then(function(r) { return r.json(); })
         .then(function(data) {

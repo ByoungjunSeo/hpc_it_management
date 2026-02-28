@@ -403,11 +403,9 @@ function showAssetPopup(assetId) {
     document.getElementById('popupContent').innerHTML = '<p class="text-muted">로딩중...</p>';
     openModal('assetPopup');
 
-    if (_popupCache[assetId]) { renderPopup(assetId, _popupCache[assetId]); return; }
-
     fetch('/assets/' + assetId + '/json')
         .then(function(r) { return r.json(); })
-        .then(function(data) { _popupCache[assetId] = data; renderPopup(assetId, data); })
+        .then(function(data) { renderPopup(assetId, data); })
         .catch(function() { document.getElementById('popupContent').innerHTML = '<p style="color:#ef4444;">데이터를 불러올 수 없습니다.</p>'; });
 }
 
