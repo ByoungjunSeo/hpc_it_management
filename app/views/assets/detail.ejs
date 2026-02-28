@@ -1,0 +1,283 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>자산 상세</h1>
+    <div class="btn-group">
+        <a href="/assets/<%= asset.id %>/edit" class="btn btn-primary">수정</a>
+        <form method="POST" action="/assets/<%= asset.id %>/delete" style="display:inline" onsubmit="return confirmDelete('이 자산을 삭제하시겠습니까?')">
+            <button type="submit" class="btn btn-danger">삭제</button>
+        </form>
+        <a href="/assets" class="btn btn-secondary">목록</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2>기본 정보</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>자산번호</label>
+            <p><%= asset.asset_number || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>관리번호</label>
+            <p><%= asset.management_number || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>유형</label>
+            <p><span class="badge badge-<%= asset.asset_type %>"><%= appConfig.assetTypes.find(t => t.value === asset.asset_type)?.label %></span></p>
+        </div>
+        <div class="form-group">
+            <label>소유구분</label>
+            <p><span class="badge badge-<%= asset.ownership %>"><%= asset.ownership === 'company' ? '자사' : '업체' %></span>
+            <% if (asset.vendor_name) { %>(<%= asset.vendor_name %>)<% } %></p>
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>제조사</label>
+            <p><%= asset.manufacturer || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>모델명</label>
+            <p><%= asset.model_name || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>시리얼번호</label>
+            <p><%= asset.serial_number || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>상태</label>
+            <p><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label %></span></p>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2>위치 정보</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>서버실</label>
+            <p><%= asset.room_name || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>랙</label>
+            <p><% if (asset.rack_id) { %><a href="/racks/<%= asset.rack_id %>"><%= asset.rack_name %></a><% } else { %>-<% } %></p>
+        </div>
+        <div class="form-group">
+            <label>U 위치</label>
+            <% if (asset.rack_unit_start) {
+                const su = Math.floor((asset.rack_unit_start - 1) / 3) + 1;
+                const sh = ((asset.rack_unit_start - 1) % 3) + 1;
+                const endSlot = asset.rack_unit_start + (asset.rack_unit_size || 3) - 1;
+                const eu = Math.floor((endSlot - 1) / 3) + 1;
+                const eh = ((endSlot - 1) % 3) + 1;
+            %>
+            <p>U<%= su %>(<%= sh %>)<%= (asset.rack_unit_size || 3) > 1 ? '-U' + eu + '(' + eh + ')' : '' %></p>
+            <% } else { %>
+            <p>-</p>
+            <% } %>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2>IP 주소</h2></div>
+    <% if (typeof assetIps !== 'undefined' && assetIps.length > 0) { %>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>인터페이스</th>
+                    <th>속도</th>
+                    <th>IP 주소</th>
+                    <th>설명</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% assetIps.forEach(ip => { %>
+                <tr>
+                    <td><span class="badge badge-info"><%= (ip.ip_type === 'other' && ip.description) ? ip.description : (appConfig.ipTypes.find(t => t.value === ip.ip_type)?.label || ip.ip_type) %></span></td>
+                    <td><%= ip.interface_type || '-' %></td>
+                    <td><%= ip.speed || '-' %></td>
+                    <td><%= ip.ip_address %></td>
+                    <td><%= (ip.ip_type !== 'other' && ip.description) ? ip.description : '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% } else if (asset.ip_address) { %>
+    <div class="form-row">
+        <div class="form-group">
+            <label>IP 주소</label>
+            <p><%= asset.ip_address %></p>
+        </div>
+        <div class="form-group">
+            <label>SSH 포트</label>
+            <p><%= asset.ssh_port || '-' %></p>
+        </div>
+    </div>
+    <% } else { %>
+    <p class="text-muted">등록된 IP 주소가 없습니다.</p>
+    <% } %>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2>접속 정보</h2></div>
+    <% if (typeof assetCredentials !== 'undefined' && assetCredentials.length > 0) { %>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>사용자</th>
+                    <th>비밀번호</th>
+                    <th>설명</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% assetCredentials.forEach(cred => { %>
+                <tr>
+                    <td><span class="badge badge-info"><%= appConfig.credentialTypes.find(t => t.value === cred.credential_type)?.label || cred.credential_type %></span></td>
+                    <td><%= cred.username %></td>
+                    <td><code><%= cred.password || '-' %></code></td>
+                    <td><%= cred.description || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% } else if (asset.ssh_user) { %>
+    <div class="form-row">
+        <div class="form-group">
+            <label>SSH 사용자</label>
+            <p><%= asset.ssh_user %></p>
+        </div>
+        <div class="form-group">
+            <label>SSH 포트</label>
+            <p><%= asset.ssh_port || 22 %></p>
+        </div>
+    </div>
+    <% } else { %>
+    <p class="text-muted">등록된 접속 정보가 없습니다.</p>
+    <% } %>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2>운영 정보</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>사용자</label>
+            <p><%= asset.assigned_user || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>용도</label>
+            <p><%= asset.purpose || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>구매일</label>
+            <p><%= asset.purchase_date || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>보증만료</label>
+            <p><%= asset.warranty_end || '-' %></p>
+        </div>
+    </div>
+    <% if (asset.notes) { %>
+    <div class="form-group">
+        <label>비고</label>
+        <p><%= asset.notes %></p>
+    </div>
+    <% } %>
+</div>
+
+<% if (modules && modules.length > 0) { %>
+<div class="card">
+    <div class="card-header">
+        <h2>컴퓨팅 모듈</h2>
+        <a href="/module-inventory/modules/new?asset_id=<%= asset.id %>" class="btn btn-sm btn-primary">+ 모듈 추가</a>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>모델</th>
+                    <th>제조사</th>
+                    <th>용량/사양</th>
+                    <th>수량</th>
+                    <th>슬롯</th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% modules.forEach(m => { %>
+                <tr>
+                    <td><span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span></td>
+                    <td><%= m.model || '-' %></td>
+                    <td><%= m.manufacturer || '-' %></td>
+                    <td><%= m.capacity || '' %> <%= m.specification || '' %></td>
+                    <td><%= m.count %></td>
+                    <td><%= m.slot_info || '-' %></td>
+                    <td><a href="/module-inventory/modules/<%= m.id %>/edit" class="btn btn-sm btn-outline">수정</a></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% } else { %>
+<div class="card">
+    <div class="card-header">
+        <h2>컴퓨팅 모듈</h2>
+        <a href="/module-inventory/modules/new?asset_id=<%= asset.id %>" class="btn btn-sm btn-primary">+ 모듈 추가</a>
+    </div>
+    <p class="text-muted">등록된 컴퓨팅 모듈이 없습니다.</p>
+</div>
+<% } %>
+
+<% if (typeof equipmentLogs !== 'undefined' && equipmentLogs && equipmentLogs.length > 0) { %>
+<div class="card">
+    <div class="card-header">
+        <h2>입출고 이력</h2>
+        <a href="/inventory/equipment/<%= encodeURIComponent(asset.management_number) %>" class="btn btn-sm btn-outline">상세 보기</a>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>상태</th>
+                    <th>사용날짜</th>
+                    <th>반납일자</th>
+                    <th>사용자</th>
+                    <th>시험명</th>
+                    <th>위치</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% equipmentLogs.forEach(log => { %>
+                <tr>
+                    <td>
+                        <% if (log.status === '입고') { %>
+                        <span class="badge badge-secondary">입고</span>
+                        <% } else if (log.status === '사용중') { %>
+                        <span class="badge badge-success">사용중</span>
+                        <% } else if (log.status === '반납완료') { %>
+                        <span class="badge badge-warning">반납완료</span>
+                        <% } %>
+                    </td>
+                    <td><%= log.usage_date || '-' %></td>
+                    <td><%= log.return_date || '-' %></td>
+                    <td><%= log.user_name || '-' %></td>
+                    <td><%= log.test_name || '-' %></td>
+                    <td><%= [log.room, log.rack, log.unit].filter(Boolean).join('/') || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% } %>
+
+<%- include('../partials/footer', { extraJs }) %>

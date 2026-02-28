@@ -129,9 +129,6 @@ router.post('/', requireMaintenance, (req, res) => {
         name: req.body.new_rack_name.trim()
       });
     }
-    // Validate: duplicate asset number
-    const dupAsset = Asset.checkDuplicateAssetNumber(req.body.asset_number);
-    if (dupAsset) throw new Error('자산번호 "' + req.body.asset_number + '"이(가) 이미 존재합니다.');
     // Validate: rack unit overlap
     const overlap = Asset.checkRackUnitOverlap(req.body.rack_id, req.body.rack_unit_start, req.body.rack_unit_size, req.body.blade_slot);
     if (overlap) throw new Error('랙 위치 충돌: ' + overlap.message);
@@ -140,12 +137,16 @@ router.post('/', requireMaintenance, (req, res) => {
 
     // Process multi-IP fields
     const ipAddresses = req.body['ip_addresses[]'] || req.body.ip_addresses || [];
-    const ipTypesArr = req.body['ip_types[]'] || req.body.ip_types || [];
-    const ipDescs = req.body['ip_descriptions[]'] || req.body.ip_descriptions || [];
+    const ipRealTypes = req.body['ip_real_types[]'] || req.body.ip_real_types || [];
+    const ipCustomDescs = req.body['ip_custom_descs[]'] || req.body.ip_custom_descs || [];
+    const ipInterfaceTypes = req.body['ip_interface_types[]'] || req.body.ip_interface_types || [];
+    const ipSpeedValues = req.body['ip_speed_values[]'] || req.body.ip_speed_values || [];
     const ips = (Array.isArray(ipAddresses) ? ipAddresses : [ipAddresses]).map((addr, i) => ({
       ip_address: addr,
-      ip_type: (Array.isArray(ipTypesArr) ? ipTypesArr : [ipTypesArr])[i] || 'management',
-      description: (Array.isArray(ipDescs) ? ipDescs : [ipDescs])[i] || ''
+      ip_type: (Array.isArray(ipRealTypes) ? ipRealTypes : [ipRealTypes])[i] || 'management',
+      description: (Array.isArray(ipCustomDescs) ? ipCustomDescs : [ipCustomDescs])[i] || '',
+      interface_type: (Array.isArray(ipInterfaceTypes) ? ipInterfaceTypes : [ipInterfaceTypes])[i] || '',
+      speed: (Array.isArray(ipSpeedValues) ? ipSpeedValues : [ipSpeedValues])[i] || ''
     })).filter(ip => ip.ip_address && ip.ip_address.trim());
     if (ips.length > 0) {
       AssetIp.bulkCreate(id, ips);
@@ -242,7 +243,8 @@ router.get('/:id/edit', (req, res) => {
     racks,
     vendors,
     prefill: null,
-    appConfig
+    appConfig,
+    returnTo: req.query.returnTo || req.get('Referer') || ''
   });
 });
 
@@ -281,9 +283,6 @@ router.post('/:id', requireMaintenance, (req, res) => {
       req.body.rack_unit_start = '';
       req.body.blade_slot = '';
     }
-    // Validate: duplicate asset number
-    const dupAsset = Asset.checkDuplicateAssetNumber(req.body.asset_number, req.params.id);
-    if (dupAsset) throw new Error('자산번호 "' + req.body.asset_number + '"이(가) 이미 존재합니다.');
     // Validate: rack unit overlap
     const overlap = Asset.checkRackUnitOverlap(req.body.rack_id, req.body.rack_unit_start, req.body.rack_unit_size, req.body.blade_slot, req.params.id);
     if (overlap) throw new Error('랙 위치 충돌: ' + overlap.message);
@@ -293,12 +292,16 @@ router.post('/:id', requireMaintenance, (req, res) => {
     // Re-create IPs: delete then bulk create
     AssetIp.deleteByAsset(req.params.id);
     const ipAddresses = req.body['ip_addresses[]'] || req.body.ip_addresses || [];
-    const ipTypesArr = req.body['ip_types[]'] || req.body.ip_types || [];
-    const ipDescs = req.body['ip_descriptions[]'] || req.body.ip_descriptions || [];
+    const ipRealTypes = req.body['ip_real_types[]'] || req.body.ip_real_types || [];
+    const ipCustomDescs = req.body['ip_custom_descs[]'] || req.body.ip_custom_descs || [];
+    const ipInterfaceTypes = req.body['ip_interface_types[]'] || req.body.ip_interface_types || [];
+    const ipSpeedValues = req.body['ip_speed_values[]'] || req.body.ip_speed_values || [];
     const ips = (Array.isArray(ipAddresses) ? ipAddresses : [ipAddresses]).map((addr, i) => ({
       ip_address: addr,
-      ip_type: (Array.isArray(ipTypesArr) ? ipTypesArr : [ipTypesArr])[i] || 'management',
-      description: (Array.isArray(ipDescs) ? ipDescs : [ipDescs])[i] || ''
+      ip_type: (Array.isArray(ipRealTypes) ? ipRealTypes : [ipRealTypes])[i] || 'management',
+      description: (Array.isArray(ipCustomDescs) ? ipCustomDescs : [ipCustomDescs])[i] || '',
+      interface_type: (Array.isArray(ipInterfaceTypes) ? ipInterfaceTypes : [ipInterfaceTypes])[i] || '',
+      speed: (Array.isArray(ipSpeedValues) ? ipSpeedValues : [ipSpeedValues])[i] || ''
     })).filter(ip => ip.ip_address && ip.ip_address.trim());
     if (ips.length > 0) {
       AssetIp.bulkCreate(req.params.id, ips);
@@ -354,18 +357,22 @@ router.post('/:id', requireMaintenance, (req, res) => {
         if (ibIps[0]) ib1 = ibIps[0];
         if (ibIps[1]) ib2 = ibIps[1];
 
-        // 3) Credential 매핑 (creds → credential_root, etc1, etc2)
+        // 3) Credential 매핑 (creds → credentials_json + legacy columns)
         let credential_root = null, credential_etc1 = null, credential_etc2 = null;
         const etcCreds = [];
+        const credJsonItems = [];
         creds.forEach(c => {
+          const pair = c.username + ' / ' + c.password;
+          credJsonItems.push({ type: c.credential_type || 'etc', username: c.username || '', password: c.password || '' });
           if (c.credential_type === 'root') {
-            credential_root = c.username + ' / ' + c.password;
+            credential_root = pair;
           } else {
-            etcCreds.push(c.username + ' / ' + c.password);
+            etcCreds.push(pair);
           }
         });
         if (etcCreds[0]) credential_etc1 = etcCreds[0];
         if (etcCreds[1]) credential_etc2 = etcCreds[1];
+        const credentials_json = credJsonItems.length > 0 ? JSON.stringify(credJsonItems) : null;
 
         // 4) Unit 계산 (rack_unit_start → U표기)
         let unit = null;
@@ -377,7 +384,16 @@ router.post('/:id', requireMaintenance, (req, res) => {
           unit = uStart === uEnd ? 'U' + uStart : 'U' + uStart + '-U' + uEnd;
         }
 
-        // 5) 새 "사용중" 레코드 생성
+        // 5) ips_json 생성
+        const ipsJsonItems = [];
+        ips.forEach(ip => {
+          if (ip.ip_address && ip.ip_address.trim()) {
+            ipsJsonItems.push({ purpose: ip.ip_type || 'management', ip: ip.ip_address });
+          }
+        });
+        const ips_json = ipsJsonItems.length > 0 ? JSON.stringify(ipsJsonItems) : null;
+
+        // 6) 새 "사용중" 레코드 생성
         EquipmentUsageLog.create({
           usage_date: today,
           asset_number: afterAsset.asset_number || null,
@@ -387,8 +403,10 @@ router.post('/:id', requireMaintenance, (req, res) => {
           credential_root: credential_root,
           credential_etc1: credential_etc1,
           credential_etc2: credential_etc2,
+          credentials_json: credentials_json,
           ip1: ip1, ip2: ip2, ip3: ip3, ip4: ip4,
           bmc: bmc, ib1: ib1, ib2: ib2,
+          ips_json: ips_json,
           room: afterAsset.room_name || null,
           rack: afterAsset.rack_name || null,
           unit: unit,
@@ -402,8 +420,10 @@ router.post('/:id', requireMaintenance, (req, res) => {
 
     AuditLog.log(req, { action: 'update', targetType: 'asset', targetId: req.params.id, targetLabel: req.body.asset_number || req.body.model_name, details: { before: beforeAsset, after: afterAsset } });
     req.flash('success', '자산이 수정되었습니다.');
-    res.redirect('/assets/' + req.params.id);
+    const returnTo = req.body.returnTo;
+    res.redirect(returnTo || '/assets/' + req.params.id);
   } catch (err) {
+    console.error('자산 수정 오류:', err.message);
     req.flash('error', '자산 수정 실패: ' + err.message);
     res.redirect('/assets/' + req.params.id + '/edit');
   }
@@ -412,11 +432,12 @@ router.post('/:id', requireMaintenance, (req, res) => {
 // Delete asset
 router.post('/:id/delete', requireMaintenance, (req, res) => {
   const asset = Asset.findById(req.params.id);
+  const returnTo = req.body.returnTo || req.get('Referer') || '/assets';
   try {
     Asset.delete(req.params.id);
     AuditLog.log(req, { action: 'delete', targetType: 'asset', targetId: req.params.id, targetLabel: asset ? (asset.asset_number || asset.model_name) : req.params.id });
     req.flash('success', '자산이 삭제되었습니다.');
-    res.redirect('/assets');
+    res.redirect(returnTo);
   } catch (err) {
     req.flash('error', '삭제 실패: ' + err.message);
     res.redirect('/assets/' + req.params.id);
