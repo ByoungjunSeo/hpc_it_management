@@ -6,6 +6,9 @@
 </div>
 
 <form method="POST" action="<%= asset ? '/assets/' + asset.id : '/assets' %>" class="card">
+    <% if (typeof returnTo !== 'undefined' && returnTo) { %>
+    <input type="hidden" name="returnTo" value="<%= returnTo %>">
+    <% } %>
     <div class="card-header"><h2>기본 정보</h2></div>
 
     <%
@@ -152,7 +155,7 @@
             %>
             <div class="form-group">
                 <label>U 크기</label>
-                <input type="number" id="uSize" class="form-control" min="1" max="14" value="<%= curU || 1 %>" onchange="calcSlots()">
+                <input type="number" id="uSize" class="form-control" min="1" max="20" value="<%= curU || 1 %>" onchange="calcSlots()">
             </div>
             <div class="form-group">
                 <label>추가 칸 <span style="font-size:11px;color:#94a3b8;">(선반 등)</span></label>
@@ -181,22 +184,60 @@
     <div id="ipRows">
         <% const ips = (typeof assetIps !== 'undefined' && assetIps.length > 0) ? assetIps : (asset && asset.ip_address ? [{ ip_address: asset.ip_address, ip_type: 'management', description: '' }] : []); %>
         <% ips.forEach((ip, idx) => { %>
+        <%
+          const isOtherCustom = ip.ip_type === 'other' && ip.description;
+          const knownTypes = appConfig.ipTypes.map(t => t.value);
+        %>
         <div class="form-row ip-row">
-            <div class="form-group" style="flex:0 0 140px;">
+            <div class="form-group" style="flex:0 0 160px;">
                 <% if (idx === 0) { %><label>유형</label><% } %>
-                <select name="ip_types[]" class="form-control">
-                    <% appConfig.ipTypes.forEach(t => { %>
-                    <option value="<%= t.value %>" <%= ip.ip_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <select name="ip_types[]" class="form-control ip-type-select" onchange="onAssetIpTypeChange(this)">
+                    <% appConfig.ipTypes.filter(t => t.value !== 'other').forEach(t => { %>
+                    <option value="<%= t.value %>" <%= (!isOtherCustom && ip.ip_type === t.value) ? 'selected' : '' %>><%= t.label %></option>
                     <% }) %>
+                    <option value="__custom__" <%= isOtherCustom ? 'selected' : '' %>>기타(직접입력)</option>
                 </select>
+            </div>
+            <div class="form-group ip-custom-type-group" style="flex:0 0 120px; <%= isOtherCustom ? '' : 'display:none;' %>">
+                <% if (idx === 0) { %><label>&nbsp;</label><% } %>
+                <input type="text" class="form-control ip-custom-type" value="<%= isOtherCustom ? ip.description : '' %>" placeholder="용도 입력" oninput="syncAssetIpType(this)">
+            </div>
+            <input type="hidden" name="ip_real_types[]" class="ip-real-type" value="<%= ip.ip_type || 'management' %>">
+            <input type="hidden" name="ip_custom_descs[]" class="ip-custom-desc" value="<%= isOtherCustom ? ip.description : '' %>">
+            <div class="form-group" style="flex:0 0 120px;">
+                <% if (idx === 0) { %><label>인터페이스</label><% } %>
+                <select name="ip_interface_types[]" class="form-control">
+                    <option value="" <%= !ip.interface_type ? 'selected' : '' %>>-</option>
+                    <option value="Ethernet" <%= ip.interface_type === 'Ethernet' ? 'selected' : '' %>>Ethernet</option>
+                    <option value="InfiniBand" <%= ip.interface_type === 'InfiniBand' ? 'selected' : '' %>>InfiniBand</option>
+                </select>
+            </div>
+            <div class="form-group" style="flex:0 0 120px;">
+                <% if (idx === 0) { %><label>속도</label><% } %>
+                <select name="ip_speeds[]" class="form-control ip-speed-select" onchange="onSpeedChange(this)">
+                    <option value="" <%= !ip.speed ? 'selected' : '' %>>-</option>
+                    <option value="1GbE" <%= ip.speed === '1GbE' ? 'selected' : '' %>>1GbE</option>
+                    <option value="10GbE" <%= ip.speed === '10GbE' ? 'selected' : '' %>>10GbE</option>
+                    <option value="25GbE" <%= ip.speed === '25GbE' ? 'selected' : '' %>>25GbE</option>
+                    <option value="40GbE" <%= ip.speed === '40GbE' ? 'selected' : '' %>>40GbE</option>
+                    <option value="100GbE" <%= ip.speed === '100GbE' ? 'selected' : '' %>>100GbE</option>
+                    <option value="200Gbps" <%= ip.speed === '200Gbps' ? 'selected' : '' %>>200Gbps</option>
+                    <option value="400Gbps" <%= ip.speed === '400Gbps' ? 'selected' : '' %>>400Gbps</option>
+                    <%
+                      const speedPresets = ['1GbE','10GbE','25GbE','40GbE','100GbE','200Gbps','400Gbps'];
+                      const isCustomSpeed = ip.speed && !speedPresets.includes(ip.speed);
+                    %>
+                    <option value="__custom__" <%= isCustomSpeed ? 'selected' : '' %>>직접입력</option>
+                </select>
+                <input type="hidden" name="ip_speed_values[]" class="ip-speed-value" value="<%= ip.speed || '' %>">
+            </div>
+            <div class="form-group ip-speed-custom-group" style="flex:0 0 100px; <%= isCustomSpeed ? '' : 'display:none;' %>">
+                <% if (idx === 0) { %><label>&nbsp;</label><% } %>
+                <input type="text" class="form-control ip-speed-custom" value="<%= isCustomSpeed ? ip.speed : '' %>" placeholder="속도 입력" oninput="syncSpeedValue(this)">
             </div>
             <div class="form-group">
                 <% if (idx === 0) { %><label>IP 주소</label><% } %>
                 <input type="text" name="ip_addresses[]" class="form-control" value="<%= ip.ip_address || '' %>" placeholder="10.100.230.x">
-            </div>
-            <div class="form-group">
-                <% if (idx === 0) { %><label>설명</label><% } %>
-                <input type="text" name="ip_descriptions[]" class="form-control" value="<%= ip.description || '' %>" placeholder="설명">
             </div>
             <div class="form-group" style="flex:0 0 60px; align-self: flex-end;">
                 <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.ip-row').remove()">X</button>
@@ -367,12 +408,65 @@ function calcSlotStart() {
     document.getElementById('rackUnitStart').value = u > 0 ? (u - 1) * 3 + hole : '';
 }
 
-var ipTypeOptions = '<% appConfig.ipTypes.forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %>';
+var ipTypeOptions = '<% appConfig.ipTypes.filter(t => t.value !== "other").forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %><option value="__custom__">기타(직접입력)</option>';
+var ipIfaceOptions = '<option value="">-</option><option value="Ethernet">Ethernet</option><option value="InfiniBand">InfiniBand</option>';
+var ipSpeedOptions = '<option value="">-</option><option value="1GbE">1GbE</option><option value="10GbE">10GbE</option><option value="25GbE">25GbE</option><option value="40GbE">40GbE</option><option value="100GbE">100GbE</option><option value="200Gbps">200Gbps</option><option value="400Gbps">400Gbps</option><option value="__custom__">직접입력</option>';
+
+function onAssetIpTypeChange(sel) {
+    var row = sel.closest('.ip-row');
+    var customGroup = row.querySelector('.ip-custom-type-group');
+    var customInput = row.querySelector('.ip-custom-type');
+    var realType = row.querySelector('.ip-real-type');
+    var customDesc = row.querySelector('.ip-custom-desc');
+    if (sel.value === '__custom__') {
+        customGroup.style.display = '';
+        customInput.focus();
+        realType.value = 'other';
+        customDesc.value = customInput.value || '';
+    } else {
+        customGroup.style.display = 'none';
+        customInput.value = '';
+        realType.value = sel.value;
+        customDesc.value = '';
+    }
+}
+
+function syncAssetIpType(input) {
+    var row = input.closest('.ip-row');
+    row.querySelector('.ip-custom-desc').value = input.value;
+}
+
+function onSpeedChange(sel) {
+    var row = sel.closest('.ip-row');
+    var customGroup = row.querySelector('.ip-speed-custom-group');
+    var customInput = row.querySelector('.ip-speed-custom');
+    var hiddenValue = row.querySelector('.ip-speed-value');
+    if (sel.value === '__custom__') {
+        customGroup.style.display = '';
+        customInput.focus();
+        hiddenValue.value = customInput.value || '';
+    } else {
+        customGroup.style.display = 'none';
+        customInput.value = '';
+        hiddenValue.value = sel.value;
+    }
+}
+
+function syncSpeedValue(input) {
+    var row = input.closest('.ip-row');
+    row.querySelector('.ip-speed-value').value = input.value;
+}
+
 function addIpRow() {
     var html = '<div class="form-row ip-row">' +
-        '<div class="form-group" style="flex:0 0 140px;"><select name="ip_types[]" class="form-control">' + ipTypeOptions + '</select></div>' +
+        '<div class="form-group" style="flex:0 0 160px;"><select name="ip_types[]" class="form-control ip-type-select" onchange="onAssetIpTypeChange(this)">' + ipTypeOptions + '</select></div>' +
+        '<div class="form-group ip-custom-type-group" style="flex:0 0 120px; display:none;"><input type="text" class="form-control ip-custom-type" placeholder="용도 입력" oninput="syncAssetIpType(this)"></div>' +
+        '<input type="hidden" name="ip_real_types[]" class="ip-real-type" value="management">' +
+        '<input type="hidden" name="ip_custom_descs[]" class="ip-custom-desc" value="">' +
+        '<div class="form-group" style="flex:0 0 120px;"><select name="ip_interface_types[]" class="form-control">' + ipIfaceOptions + '</select></div>' +
+        '<div class="form-group" style="flex:0 0 120px;"><select name="ip_speeds[]" class="form-control ip-speed-select" onchange="onSpeedChange(this)">' + ipSpeedOptions + '</select><input type="hidden" name="ip_speed_values[]" class="ip-speed-value" value=""></div>' +
+        '<div class="form-group ip-speed-custom-group" style="flex:0 0 100px; display:none;"><input type="text" class="form-control ip-speed-custom" placeholder="속도 입력" oninput="syncSpeedValue(this)"></div>' +
         '<div class="form-group"><input type="text" name="ip_addresses[]" class="form-control" placeholder="10.100.230.x"></div>' +
-        '<div class="form-group"><input type="text" name="ip_descriptions[]" class="form-control" placeholder="설명"></div>' +
         '<div class="form-group" style="flex:0 0 60px; align-self: flex-end;"><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.ip-row\').remove()">X</button></div>' +
         '</div>';
     document.getElementById('ipRows').insertAdjacentHTML('beforeend', html);

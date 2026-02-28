@@ -10,7 +10,11 @@
     <div class="legend-item"><span class="legend-color server"></span> 자사 서버</div>
     <div class="legend-item"><span class="legend-color vendor"></span> 업체 장비</div>
     <div class="legend-item"><span class="legend-color switch"></span> 스위치</div>
-    <div class="legend-item"><span class="legend-color pdu"></span> PDU/UPS</div>
+    <div class="legend-item"><span class="legend-color kvm"></span> KVM</div>
+    <div class="legend-item"><span class="legend-color pdu"></span> PDU</div>
+    <div class="legend-item"><span class="legend-color ups"></span> UPS</div>
+    <div class="legend-item"><span class="legend-color storage"></span> 스토리지</div>
+    <div class="legend-item"><span class="legend-color other"></span> 기타</div>
     <div class="legend-item"><span class="legend-color empty"></span> 빈 공간</div>
     <span class="text-muted" style="font-size:12px;margin-left:auto;">랙을 드래그하여 위치를 변경할 수 있습니다.</span>
 </div>
@@ -48,7 +52,11 @@
             function wCls(info) {
                 if (!info) return 'server';
                 if (info.asset_type === 'switch') return 'switch';
-                if (info.asset_type === 'pdu' || info.asset_type === 'ups') return 'pdu';
+                if (info.asset_type === 'kvm') return 'kvm';
+                if (info.asset_type === 'pdu') return 'pdu';
+                if (info.asset_type === 'ups') return 'ups';
+                if (info.asset_type === 'storage') return 'storage';
+                if (info.asset_type === 'other') return 'other';
                 if (info.ownership === 'vendor') return 'vendor';
                 return 'server';
             }
@@ -85,10 +93,11 @@
                         %>
                         <% const cls = wCls(f); const hasDetail = f.assigned_user || f.purpose; %>
                         <% const uH = uSize > 1 ? 'height:' + (uSize * 16 + (uSize - 1) * 2) + 'px;' : ''; %>
-                        <div class="wide-unit <%= cls %> <%= uSize > 1 ? 'multi-u' : '' %> <%= hasDetail ? 'has-detail' : '' %> clickable-unit" style="<%= uH %>" data-asset-id="<%= f.asset_id %>">
+                        <% const detailTitle = (f.assigned_user || '') + (f.assigned_user && f.purpose ? ' | ' : '') + (f.purpose || ''); %>
+                        <div class="wide-unit <%= cls %> <%= uSize > 1 ? 'multi-u' : '' %> clickable-unit" style="<%= uH %>" data-asset-id="<%= f.asset_id %>" title="<%= (f.name || f.asset_type) + (f.management_number ? ' (' + f.management_number + ')' : '') + (detailTitle ? ' - ' + detailTitle : '') %>">
                             <span class="wide-unit-num">U<%= u %><% if (uSize > 1) { %>-<%= u + uSize - 1 %><% } %></span>
-                            <span class="wide-unit-name"><%= f.name || f.asset_type %></span>
-                            <% if (hasDetail) { %>
+                            <span class="wide-unit-name"><%= f.name || f.asset_type %><% if (f.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:8px;">(<%= f.management_number %>)</span><% } %></span>
+                            <% if (hasDetail && uSize > 1) { %>
                             <span class="wide-unit-detail"><%= f.assigned_user %><% if (f.assigned_user && f.purpose) { %> | <% } %><%= f.purpose %></span>
                             <% } %>
                         </div>
@@ -104,9 +113,10 @@
                             <span class="wide-unit-num" style="flex-shrink:0;min-width:24px;font-size:9px;opacity:0.8;font-weight:600;">U<%= u %></span>
                             <div class="wide-blade-pair">
                                 <% if (startEntry.left) { %>
-                                <div class="wide-blade-half <%= wCls(startEntry.left) %> clickable-unit" data-asset-id="<%= startEntry.left.asset_id %>">
-                                    <span><%= startEntry.left.name || '' %></span>
-                                    <% if (startEntry.left.assigned_user || startEntry.left.purpose) { %>
+                                <% const lDetail = (startEntry.left.assigned_user || '') + (startEntry.left.assigned_user && startEntry.left.purpose ? ' | ' : '') + (startEntry.left.purpose || ''); %>
+                                <div class="wide-blade-half <%= wCls(startEntry.left) %> clickable-unit" data-asset-id="<%= startEntry.left.asset_id %>" title="<%= (startEntry.left.name || '') + (startEntry.left.management_number ? ' (' + startEntry.left.management_number + ')' : '') + (lDetail ? ' - ' + lDetail : '') %>">
+                                    <span><%= startEntry.left.name || '' %><% if (startEntry.left.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:7px;">(<%= startEntry.left.management_number %>)</span><% } %></span>
+                                    <% if (uSize > 1 && (startEntry.left.assigned_user || startEntry.left.purpose)) { %>
                                     <span class="wide-unit-detail" style="font-size:8px;"><%= startEntry.left.assigned_user %><% if (startEntry.left.assigned_user && startEntry.left.purpose) { %> | <% } %><%= startEntry.left.purpose %></span>
                                     <% } %>
                                 </div>
@@ -114,9 +124,10 @@
                                 <div class="wide-blade-half blade-empty-mini"></div>
                                 <% } %>
                                 <% if (startEntry.right) { %>
-                                <div class="wide-blade-half <%= wCls(startEntry.right) %> clickable-unit" data-asset-id="<%= startEntry.right.asset_id %>">
-                                    <span><%= startEntry.right.name || '' %></span>
-                                    <% if (startEntry.right.assigned_user || startEntry.right.purpose) { %>
+                                <% const rDetail = (startEntry.right.assigned_user || '') + (startEntry.right.assigned_user && startEntry.right.purpose ? ' | ' : '') + (startEntry.right.purpose || ''); %>
+                                <div class="wide-blade-half <%= wCls(startEntry.right) %> clickable-unit" data-asset-id="<%= startEntry.right.asset_id %>" title="<%= (startEntry.right.name || '') + (startEntry.right.management_number ? ' (' + startEntry.right.management_number + ')' : '') + (rDetail ? ' - ' + rDetail : '') %>">
+                                    <span><%= startEntry.right.name || '' %><% if (startEntry.right.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:7px;">(<%= startEntry.right.management_number %>)</span><% } %></span>
+                                    <% if (uSize > 1 && (startEntry.right.assigned_user || startEntry.right.purpose)) { %>
                                     <span class="wide-unit-detail" style="font-size:8px;"><%= startEntry.right.assigned_user %><% if (startEntry.right.assigned_user && startEntry.right.purpose) { %> | <% } %><%= startEntry.right.purpose %></span>
                                     <% } %>
                                 </div>
@@ -361,9 +372,9 @@ function renderAdpTab(data, tab) {
             '</table>';
     } else if (tab === 'ip') {
         if (data.assetIps && data.assetIps.length > 0) {
-            html = '<table class="adp-table"><tr><th>유형</th><th>IP 주소</th><th>설명</th></tr>';
+            html = '<table class="adp-table"><tr><th>유형</th><th>인터페이스</th><th>속도</th><th>IP 주소</th><th>설명</th></tr>';
             data.assetIps.forEach(function(ip) {
-                html += '<tr><td>' + esc(ip.ip_type) + '</td><td><strong>' + esc(ip.ip_address) + '</strong></td><td>' + esc(ip.description || '') + '</td></tr>';
+                html += '<tr><td>' + esc(ipTypeLabel(ip)) + '</td><td>' + esc(ip.interface_type || '-') + '</td><td>' + esc(ip.speed || '-') + '</td><td><strong>' + esc(ip.ip_address) + '</strong></td><td>' + esc((ip.ip_type !== 'other' && ip.description) ? ip.description : '') + '</td></tr>';
             });
             html += '</table>';
         } else if (a.ip_address) {
@@ -375,7 +386,7 @@ function renderAdpTab(data, tab) {
         if (data.credentials && data.credentials.length > 0) {
             html = '<table class="adp-table"><tr><th>유형</th><th>사용자</th><th>비밀번호</th><th>설명</th></tr>';
             data.credentials.forEach(function(c) {
-                html += '<tr><td>' + esc(c.credential_type) + '</td><td>' + esc(c.username) + '</td><td><code class="pw-hide" onclick="this.classList.toggle(\'pw-show\')">' + esc(c.password || '') + '</code></td><td>' + esc(c.description || '') + '</td></tr>';
+                html += '<tr><td>' + esc(credTypeLabel(c.credential_type)) + '</td><td>' + esc(c.username) + '</td><td><code class="pw-hide" onclick="this.classList.toggle(\'pw-show\')">' + esc(c.password || '') + '</code></td><td>' + esc(c.description || '') + '</td></tr>';
             });
             html += '</table>';
         } else if (a.ssh_user) {
@@ -415,8 +426,10 @@ function tr(label, val) {
     return '<tr><td><strong>' + label + '</strong></td><td>' + esc(val || '-') + '</td></tr>';
 }
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
-function typeLabel(t) { var m = { server:'서버', switch:'스위치', pdu:'PDU', ups:'UPS', storage:'스토리지', other:'기타' }; return m[t] || t || '-'; }
+function typeLabel(t) { var m = { server:'서버', switch:'스위치', kvm:'KVM', pdu:'PDU', ups:'UPS', storage:'스토리지', other:'기타' }; return m[t] || t || '-'; }
 function statusLabel(s) { var m = { active:'운영중', inactive:'비활성', maintenance:'점검중', decommissioned:'폐기' }; return m[s] || s || '-'; }
+function ipTypeLabel(ip) { var m = { management:'Management', bmc:'BMC', ib:'InfiniBand', data:'Data', os:'OS', other:'기타' }; return (ip.ip_type === 'other' && ip.description) ? ip.description : (m[ip.ip_type] || ip.ip_type || '-'); }
+function credTypeLabel(t) { var m = { root:'Root', user:'User', admin:'Admin', bmc:'BMC', etc:'기타' }; return m[t] || t || '-'; }
 
 function openEditRoom(id, name, location, desc, type) {
     document.getElementById('editRoomForm').action = '/rooms/' + id + '/edit';

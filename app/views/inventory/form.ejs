@@ -1,0 +1,999 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<%
+  const l = log || {};
+  const action = isEdit ? '/inventory/' + l.id : '/inventory';
+%>
+
+<div class="page-header">
+    <h1><%= isEdit ? '수정' : '사용 등록' %></h1>
+    <a href="/inventory" class="btn btn-secondary">목록</a>
+</div>
+
+<form method="POST" action="<%= action %>">
+    <% if (typeof returnTo !== 'undefined' && returnTo) { %>
+    <input type="hidden" name="returnTo" value="<%= returnTo %>">
+    <% } %>
+
+<!-- Asset Type Selector (new registration only) -->
+<% if (!isEdit) { %>
+<div class="card">
+    <div class="card-header"><h2>자산유형 선택</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>자산유형</label>
+            <select id="usageTypeSelect" class="form-control" onchange="onUsageTypeChange()">
+                <option value="">장비 (기본)</option>
+                <optgroup label="장비">
+                    <% appConfig.assetTypes.forEach(t => { %>
+                    <option value="<%= t.value %>" data-category="equipment"><%= t.label %></option>
+                    <% }) %>
+                </optgroup>
+                <optgroup label="부품">
+                    <% appConfig.moduleTypes.forEach(t => { %>
+                    <option value="<%= t.value %>" data-category="module"><%= t.label %></option>
+                    <% }) %>
+                </optgroup>
+            </select>
+            <input type="hidden" name="usage_asset_type" id="usageAssetTypeHidden" value="">
+        </div>
+    </div>
+</div>
+<% } %>
+
+<!-- Basic Info -->
+<div class="card">
+    <div class="card-header"><h2>기본 정보</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>관리번호 *</label>
+            <input type="text" name="management_number" id="invMgmtInput" class="form-control" list="mgmt-list" value="<%= l.management_number || '' %>" required autocomplete="off">
+            <datalist id="mgmt-list">
+                <% if (typeof assets !== 'undefined') { assets.forEach(a => { if (a.management_number) { %>
+                <option value="<%= a.management_number %>" data-asset-id="<%= a.id %>"><%= a.management_number %> - <%= a.model_name || '' %></option>
+                <% }}) } %>
+            </datalist>
+        </div>
+        <div class="form-group" id="assetNumGroup">
+            <label>자산번호</label>
+            <input type="text" name="asset_number" id="invAssetNumInput" class="form-control" list="asset-num-list" value="<%= l.asset_number || '' %>" autocomplete="off">
+            <datalist id="asset-num-list">
+                <% if (typeof assets !== 'undefined') { assets.forEach(a => { if (a.asset_number) { %>
+                <option value="<%= a.asset_number %>" data-asset-id="<%= a.id %>"><%= a.asset_number %> - <%= a.management_number || '' %> <%= a.model_name || '' %></option>
+                <% }}) } %>
+            </datalist>
+        </div>
+        <div class="form-group">
+            <label>모델명</label>
+            <input type="text" name="model_name" class="form-control" value="<%= l.model_name || '' %>">
+        </div>
+        <div class="form-group">
+            <label>소유구분</label>
+            <select name="ownership" class="form-control">
+                <% appConfig.ownershipTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= (l.ownership || 'company') === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>사용날짜</label>
+            <input type="date" name="usage_date" class="form-control" value="<%= l.usage_date || (isEdit ? '' : new Date().toISOString().split('T')[0]) %>">
+        </div>
+        <% if (isEdit) { %>
+        <div class="form-group">
+            <label>반입일자</label>
+            <input type="date" name="return_date" class="form-control" value="<%= l.return_date || '' %>">
+        </div>
+        <div class="form-group">
+            <label>상태</label>
+            <select name="status" class="form-control">
+                <option value="입고" <%= l.status === '입고' ? 'selected' : '' %>>입고</option>
+                <option value="사용중" <%= l.status === '사용중' ? 'selected' : '' %>>사용중</option>
+                <option value="반납완료" <%= l.status === '반납완료' ? 'selected' : '' %>>반납완료</option>
+            </select>
+        </div>
+        <% } %>
+    </div>
+</div>
+
+<!-- Usage Info -->
+<div class="card">
+    <div class="card-header"><h2>사용 정보</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>사용자</label>
+            <input type="text" name="user_name" class="form-control" value="<%= l.user_name || '' %>">
+        </div>
+        <div class="form-group">
+            <label>시험명</label>
+            <input type="text" name="test_name" class="form-control" value="<%= l.test_name || '' %>">
+        </div>
+        <div class="form-group">
+            <label>상세시험명</label>
+            <input type="text" name="test_detail" class="form-control" value="<%= l.test_detail || '' %>">
+        </div>
+    </div>
+</div>
+
+<!-- Equipment-only sections (hidden in module mode) -->
+<div id="equipmentSections">
+
+<!-- Credentials (Dynamic) -->
+<div class="card">
+    <div class="card-header">
+        <h2>접속 정보</h2>
+        <small class="text-muted" style="margin-left:12px;">계정을 자유롭게 추가/삭제할 수 있습니다</small>
+    </div>
+    <div id="credRows">
+        <%
+          // Build initial credential rows from credentials_json or legacy columns
+          let credItems = [];
+          if (l.credentials_json) {
+            try { credItems = JSON.parse(l.credentials_json); } catch(e) {}
+          }
+          if (credItems.length === 0) {
+            // Legacy fallback: parse "user / password" format
+            if (l.credential_root) { const p = l.credential_root.split('/'); credItems.push({ type: 'root', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
+            if (l.credential_etc1) { const p = l.credential_etc1.split('/'); credItems.push({ type: 'etc', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
+            if (l.credential_etc2) { const p = l.credential_etc2.split('/'); credItems.push({ type: 'etc', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
+          }
+          // Handle old format {type, value} → {type, username, password}
+          credItems = credItems.map(c => {
+            if (c.value && !c.username) {
+              const p = c.value.split('/'); return { type: c.type, username: (p[0]||'').trim(), password: (p[1]||'').trim() };
+            }
+            return c;
+          });
+        %>
+        <% if (credItems.length > 0) { %>
+        <div class="form-row cred-row-header" style="font-weight:600; font-size:13px; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:8px;">
+            <div class="form-group" style="flex:0 0 120px; margin-bottom:0;"><label>유형</label></div>
+            <div class="form-group" style="flex:1; margin-bottom:0;"><label>사용자</label></div>
+            <div class="form-group" style="flex:1; margin-bottom:0;"><label>비밀번호</label></div>
+            <div class="form-group" style="flex:0 0 50px; margin-bottom:0;"></div>
+        </div>
+        <% } %>
+        <% credItems.forEach((cred, idx) => { %>
+        <div class="form-row inv-cred-row" style="align-items:center;">
+            <div class="form-group" style="flex:0 0 120px; margin-bottom:8px;">
+                <select name="cred_types[]" class="form-control">
+                    <option value="root" <%= cred.type === 'root' ? 'selected' : '' %>>root</option>
+                    <option value="bmc" <%= cred.type === 'bmc' ? 'selected' : '' %>>BMC/IPMI</option>
+                    <option value="os" <%= cred.type === 'os' ? 'selected' : '' %>>OS</option>
+                    <option value="etc" <%= cred.type === 'etc' ? 'selected' : '' %>>기타</option>
+                </select>
+            </div>
+            <div class="form-group" style="flex:1; margin-bottom:8px;">
+                <input type="text" name="cred_usernames[]" class="form-control" value="<%= cred.username || '' %>" placeholder="사용자">
+            </div>
+            <div class="form-group" style="flex:1; margin-bottom:8px;">
+                <input type="text" name="cred_passwords[]" class="form-control" value="<%= cred.password || '' %>" placeholder="비밀번호">
+            </div>
+            <div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">
+                <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.inv-cred-row').remove(); updateCredHeader();">X</button>
+            </div>
+        </div>
+        <% }) %>
+    </div>
+    <div style="margin-bottom:16px;">
+        <button type="button" class="btn btn-sm btn-outline" onclick="addCredRow('root')">+ root</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addCredRow('bmc')">+ BMC</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addCredRow('os')">+ OS</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addCredRow('etc')">+ 기타</button>
+    </div>
+</div>
+
+<!-- Network (Dynamic IP rows) -->
+<div class="card">
+    <div class="card-header"><h2>네트워크</h2></div>
+    <%
+      const ipTypeLabelMap = {};
+      const knownIpLabels = [];
+      appConfig.ipTypes.forEach(t => { ipTypeLabelMap[t.value] = t.label; knownIpLabels.push(t.label); });
+    %>
+    <div id="ipRows">
+        <%
+          // Build IP rows from ips_json first, fallback to legacy columns
+          let ipRows = [];
+          if (l.ips_json) {
+            try { ipRows = JSON.parse(l.ips_json); } catch(e) {}
+          }
+          if (ipRows.length === 0) {
+            if (l.ip1) ipRows.push({ purpose: 'management', ip: l.ip1 });
+            if (l.ip2) ipRows.push({ purpose: 'management', ip: l.ip2 });
+            if (l.ip3) ipRows.push({ purpose: 'management', ip: l.ip3 });
+            if (l.ip4) ipRows.push({ purpose: 'management', ip: l.ip4 });
+            if (l.bmc) ipRows.push({ purpose: 'bmc', ip: l.bmc });
+            if (l.ib1) ipRows.push({ purpose: 'ib', ip: l.ib1 });
+            if (l.ib2) ipRows.push({ purpose: 'ib', ip: l.ib2 });
+          }
+          const knownIpValues = appConfig.ipTypes.map(t => t.value);
+        %>
+        <% ipRows.forEach((ip, idx) => {
+          const purpose = ip.purpose || 'management';
+          const isKnown = knownIpValues.includes(purpose);
+        %>
+        <div class="form-row inv-ip-row">
+            <div class="form-group" style="flex:0 0 160px;">
+                <% if (idx === 0) { %><label>용도</label><% } %>
+                <select class="form-control ip-purpose-select" onchange="onIpPurposeSelect(this)">
+                    <% appConfig.ipTypes.forEach(t => { %>
+                    <option value="<%= t.value %>" <%= purpose === t.value ? 'selected' : '' %>><%= t.label %></option>
+                    <% }) %>
+                    <option value="__custom__" <%= !isKnown ? 'selected' : '' %>>기타(직접입력)</option>
+                </select>
+            </div>
+            <div class="form-group ip-custom-group" style="flex:0 0 120px; <%= !isKnown ? '' : 'display:none;' %>">
+                <% if (idx === 0) { %><label>&nbsp;</label><% } %>
+                <input type="text" class="form-control ip-purpose-custom" value="<%= !isKnown ? purpose : '' %>" placeholder="용도 입력" oninput="this.closest('.inv-ip-row').querySelector('.ip-purpose-hidden').value=this.value">
+            </div>
+            <input type="hidden" name="ip_purposes[]" class="ip-purpose-hidden" value="<%= purpose %>">
+            <div class="form-group" style="flex:0 0 120px;">
+                <% if (idx === 0) { %><label>인터페이스</label><% } %>
+                <select name="ip_iface_types[]" class="form-control">
+                    <option value="" <%= !ip.interface_type ? 'selected' : '' %>>-</option>
+                    <option value="Ethernet" <%= ip.interface_type === 'Ethernet' ? 'selected' : '' %>>Ethernet</option>
+                    <option value="InfiniBand" <%= ip.interface_type === 'InfiniBand' ? 'selected' : '' %>>InfiniBand</option>
+                </select>
+            </div>
+            <div class="form-group" style="flex:0 0 120px;">
+                <% if (idx === 0) { %><label>속도</label><% } %>
+                <%
+                  const invSpeedPresets = ['1GbE','10GbE','25GbE','40GbE','100GbE','200Gbps','400Gbps'];
+                  const invIsCustomSpeed = ip.speed && !invSpeedPresets.includes(ip.speed);
+                %>
+                <select name="ip_speed_selects[]" class="form-control inv-ip-speed-select" onchange="onInvSpeedChange(this)">
+                    <option value="" <%= !ip.speed ? 'selected' : '' %>>-</option>
+                    <option value="1GbE" <%= ip.speed === '1GbE' ? 'selected' : '' %>>1GbE</option>
+                    <option value="10GbE" <%= ip.speed === '10GbE' ? 'selected' : '' %>>10GbE</option>
+                    <option value="25GbE" <%= ip.speed === '25GbE' ? 'selected' : '' %>>25GbE</option>
+                    <option value="40GbE" <%= ip.speed === '40GbE' ? 'selected' : '' %>>40GbE</option>
+                    <option value="100GbE" <%= ip.speed === '100GbE' ? 'selected' : '' %>>100GbE</option>
+                    <option value="200Gbps" <%= ip.speed === '200Gbps' ? 'selected' : '' %>>200Gbps</option>
+                    <option value="400Gbps" <%= ip.speed === '400Gbps' ? 'selected' : '' %>>400Gbps</option>
+                    <option value="__custom__" <%= invIsCustomSpeed ? 'selected' : '' %>>직접입력</option>
+                </select>
+                <input type="hidden" name="ip_speeds[]" class="inv-ip-speed-value" value="<%= ip.speed || '' %>">
+            </div>
+            <div class="form-group inv-ip-speed-custom-group" style="flex:0 0 100px; <%= invIsCustomSpeed ? '' : 'display:none;' %>">
+                <% if (idx === 0) { %><label>&nbsp;</label><% } %>
+                <input type="text" class="form-control inv-ip-speed-custom" value="<%= invIsCustomSpeed ? ip.speed : '' %>" placeholder="속도" oninput="this.closest('.inv-ip-row').querySelector('.inv-ip-speed-value').value=this.value">
+            </div>
+            <div class="form-group">
+                <% if (idx === 0) { %><label>IP 주소</label><% } %>
+                <input type="text" name="ip_values[]" class="form-control" value="<%= ip.ip %>" placeholder="10.100.x.x">
+            </div>
+            <div class="form-group" style="flex:0 0 60px; align-self:flex-end;">
+                <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.inv-ip-row').remove()">X</button>
+            </div>
+        </div>
+        <% }) %>
+    </div>
+    <div style="margin-bottom:16px;">
+        <button type="button" class="btn btn-sm btn-outline" onclick="addInvIpRow()">+ IP 추가</button>
+    </div>
+</div>
+
+</div><!-- /equipmentSections -->
+
+<!-- Location for Equipment (Select list + manual input) -->
+<div class="card" id="locationEquipment">
+    <div class="card-header"><h2>위치</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>Room</label>
+            <%
+              const locTypeLabels = {};
+              appConfig.locationTypes.forEach(t => { locTypeLabels[t.value] = t.label; });
+            %>
+            <select id="invRoomSelect" class="form-control" onchange="onInvRoomChange()">
+                <option value="">선택</option>
+                <% serverRooms.forEach(r => { %>
+                <option value="<%= r.name %>" data-room-id="<%= r.id %>" data-loc-type="<%= r.location_type %>" <%= l.room === r.name ? 'selected' : '' %>><%= r.name %> (<%= locTypeLabels[r.location_type] || r.location_type %>)</option>
+                <% }) %>
+                <option value="__manual__" <%= (l.room && !serverRooms.some(r => r.name === l.room)) ? 'selected' : '' %>>직접 입력</option>
+            </select>
+        </div>
+        <div class="form-group" id="invRoomManualGroup" style="<%= (l.room && !serverRooms.some(r => r.name === l.room)) ? '' : 'display:none' %>">
+            <label>Room (직접 입력)</label>
+            <input type="text" id="invRoomManualInput" class="form-control" value="<%= (l.room && !serverRooms.some(r => r.name === l.room)) ? l.room : '' %>" placeholder="장소명 입력">
+        </div>
+        <input type="hidden" name="room" id="invRoomHidden" value="<%= l.room || '' %>">
+        <div class="form-group">
+            <label>Rack</label>
+            <select id="invRackSelect" class="form-control" onchange="onInvRackChange()">
+                <option value="">선택</option>
+                <% racks.forEach(r => { %>
+                <option value="<%= r.name %>" data-room-id="<%= r.room_id %>" <%= l.rack === r.name ? 'selected' : '' %>><%= r.room_name %> - <%= r.name %></option>
+                <% }) %>
+                <option value="__manual__" <%= (l.rack && !racks.some(r => r.name === l.rack)) ? 'selected' : '' %>>직접 입력</option>
+            </select>
+        </div>
+        <div class="form-group" id="invRackManualGroup" style="<%= (l.rack && !racks.some(r => r.name === l.rack)) ? '' : 'display:none' %>">
+            <label>Rack (직접 입력)</label>
+            <input type="text" id="invRackManualInput" class="form-control" value="<%= (l.rack && !racks.some(r => r.name === l.rack)) ? l.rack : '' %>" placeholder="랙 이름 입력">
+        </div>
+        <input type="hidden" name="rack" id="invRackHidden" value="<%= l.rack || '' %>">
+        <div class="form-group">
+            <label>Unit</label>
+            <input type="text" name="unit" class="form-control" value="<%= l.unit || '' %>" placeholder="예: U1-U4">
+        </div>
+    </div>
+</div>
+
+<!-- Location for Module (shown only in module mode) -->
+<div class="card" id="locationModule" style="display:none">
+    <div class="card-header"><h2>설치 위치</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>위치유형</label>
+            <select id="moduleLocationType" class="form-control" onchange="onModuleLocationTypeChange()">
+                <% appConfig.locationTypes.forEach(t => { %>
+                <option value="<%= t.value %>"><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+    </div>
+    <div class="form-row" id="moduleAssetSelectRow">
+        <div class="form-group" style="flex:2">
+            <label>설치 장비</label>
+            <input type="text" id="moduleTargetAssetInput" class="form-control" list="target-asset-list" placeholder="장비 관리번호 또는 모델명 입력" autocomplete="off">
+            <datalist id="target-asset-list">
+                <% if (typeof assets !== 'undefined') { assets.forEach(a => { if (a.management_number) { %>
+                <option value="<%= a.management_number %>" data-asset-id="<%= a.id %>"><%= a.management_number %> - <%= a.model_name || '' %></option>
+                <% }}) } %>
+            </datalist>
+        </div>
+        <div class="form-group">
+            <label>슬롯 정보</label>
+            <input type="text" name="module_slot_info" class="form-control" placeholder="예: DIMM A1, Slot 0">
+        </div>
+    </div>
+    <div class="form-row" id="moduleStorageRow" style="display:none">
+        <div class="form-group">
+            <label>보관 장소</label>
+            <input type="text" id="moduleStorageLocation" class="form-control" placeholder="보관 장소 입력">
+        </div>
+    </div>
+    <input type="hidden" name="target_asset_id" id="targetAssetIdHidden" value="">
+</div>
+
+<!-- Hardware (Equipment only) - Dynamic rows -->
+<div id="hardwareSection">
+<div class="card">
+    <div class="card-header">
+        <h2>하드웨어</h2>
+        <small class="text-muted" style="margin-left:12px;">유형별로 자유롭게 추가/삭제할 수 있습니다</small>
+    </div>
+
+    <!-- Datalists for each module type -->
+    <% appConfig.moduleTypes.forEach(mt => { %>
+    <datalist id="hw-list-<%= mt.value %>">
+        <% componentTypes.filter(c => c.module_type === mt.value).forEach(c => { %>
+        <option value="<%= c.item_code %>"><%= c.item_code %> - <%= c.model || '' %> <%= c.capacity || '' %></option>
+        <% }) %>
+    </datalist>
+    <% }) %>
+
+    <div id="hwRows">
+        <%
+          // Build initial hardware rows from hardware_json or legacy columns
+          let hwItems = [];
+          if (l.hardware_json) {
+            try { hwItems = JSON.parse(l.hardware_json); } catch(e) {}
+          }
+          if (hwItems.length === 0) {
+            // Reconstruct from legacy columns
+            if (l.cpu_type && l.cpu_num) hwItems.push({ type: 'cpu', code: l.cpu_type, num: l.cpu_num });
+            if (l.mem1_type && l.mem1_num) hwItems.push({ type: 'memory', code: l.mem1_type, num: l.mem1_num });
+            if (l.mem2_type && l.mem2_num) hwItems.push({ type: 'memory', code: l.mem2_type, num: l.mem2_num });
+            if (l.disk1_part && l.disk1_num) hwItems.push({ type: 'disk', code: l.disk1_part, num: l.disk1_num });
+            if (l.disk2_part && l.disk2_num) hwItems.push({ type: 'disk', code: l.disk2_part, num: l.disk2_num });
+            if (l.disk3_part && l.disk3_num) hwItems.push({ type: 'disk', code: l.disk3_part, num: l.disk3_num });
+            if (l.disk4_part && l.disk4_num) hwItems.push({ type: 'disk', code: l.disk4_part, num: l.disk4_num });
+            if (l.nic1_type && l.nic1_num) hwItems.push({ type: 'network', code: l.nic1_type, num: l.nic1_num });
+            if (l.nic2_type && l.nic2_num) hwItems.push({ type: 'network', code: l.nic2_type, num: l.nic2_num });
+            if (l.nic3_type && l.nic3_num) hwItems.push({ type: 'network', code: l.nic3_type, num: l.nic3_num });
+            if (l.nic4_type && l.nic4_num) hwItems.push({ type: 'network', code: l.nic4_type, num: l.nic4_num });
+            if (l.raid_type && l.raid_num) hwItems.push({ type: 'raid', code: l.raid_type, num: l.raid_num });
+            if (l.gpu1_type && l.gpu1_num) hwItems.push({ type: 'gpu', code: l.gpu1_type, num: l.gpu1_num });
+            if (l.gpu2_type && l.gpu2_num) hwItems.push({ type: 'gpu', code: l.gpu2_type, num: l.gpu2_num });
+          }
+        %>
+        <% if (hwItems.length > 0) { %>
+        <div class="form-row hw-row-header" style="font-weight:600; font-size:13px; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:8px;">
+            <div class="form-group" style="flex:0 0 140px; margin-bottom:0;"><label>유형</label></div>
+            <div class="form-group" style="flex:2; margin-bottom:0;"><label>부품 코드</label></div>
+            <div class="form-group" style="flex:0 0 80px; margin-bottom:0;"><label>수량</label></div>
+            <div class="form-group" style="flex:0 0 50px; margin-bottom:0;"></div>
+        </div>
+        <% } %>
+        <% hwItems.forEach((hw, idx) => { %>
+        <div class="form-row inv-hw-row" style="align-items:center;">
+            <div class="form-group" style="flex:0 0 140px; margin-bottom:8px;">
+                <select name="hw_types[]" class="form-control" onchange="onHwTypeChange(this)">
+                    <% appConfig.moduleTypes.forEach(mt => { %>
+                    <option value="<%= mt.value %>" <%= hw.type === mt.value ? 'selected' : '' %>><%= mt.label %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="form-group" style="flex:2; margin-bottom:8px;">
+                <input type="text" name="hw_codes[]" class="form-control" list="hw-list-<%= hw.type %>" value="<%= hw.code || '' %>" placeholder="코드 선택 또는 직접 입력">
+            </div>
+            <div class="form-group" style="flex:0 0 80px; margin-bottom:8px;">
+                <input type="number" name="hw_nums[]" class="form-control" value="<%= hw.num || '' %>" min="0" placeholder="수량">
+            </div>
+            <div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">
+                <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.inv-hw-row').remove(); updateHwHeader();">X</button>
+            </div>
+        </div>
+        <% }) %>
+    </div>
+    <div style="margin-bottom:16px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('cpu')">+ CPU</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('memory')">+ 메모리</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('disk')">+ 디스크</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('network')">+ NIC</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('raid')">+ RAID</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('gpu')">+ GPU</button>
+    </div>
+</div>
+</div><!-- /hardwareSection -->
+
+<!-- OS & Notes -->
+<div class="card">
+    <div class="card-header"><h2>기타</h2></div>
+    <div class="form-row">
+        <div class="form-group" id="osGroup">
+            <label>OS</label>
+            <input type="text" name="os" class="form-control" value="<%= l.os || '' %>">
+        </div>
+        <div class="form-group" style="flex:2">
+            <label>기타사항</label>
+            <input type="text" name="notes" class="form-control" value="<%= l.notes || '' %>">
+        </div>
+    </div>
+</div>
+
+<div class="form-actions" style="margin-bottom:24px;">
+    <button type="submit" class="btn btn-primary"><%= isEdit ? '수정' : '등록' %></button>
+    <a href="/inventory" class="btn btn-secondary">취소</a>
+</div>
+
+</form>
+
+<script>
+// Module type values for detection
+var moduleTypeValues = [<% appConfig.moduleTypes.forEach(function(t, i) { %>'<%= t.value %>'<% if (i < appConfig.moduleTypes.length - 1) { %>,<% } %><% }) %>];
+
+function isModuleType(val) {
+    return moduleTypeValues.indexOf(val) !== -1;
+}
+
+// Module inventory items for datalist
+var _moduleInventoryItems = <%- JSON.stringify(typeof moduleInventoryItems !== 'undefined' ? moduleInventoryItems : []) %>;
+
+// === Asset Type Change (usage form) ===
+function onUsageTypeChange() {
+    var sel = document.getElementById('usageTypeSelect');
+    if (!sel) return;
+    var val = sel.value;
+    var hidden = document.getElementById('usageAssetTypeHidden');
+    hidden.value = val;
+
+    var equipSections = document.getElementById('equipmentSections');
+    var hardwareSection = document.getElementById('hardwareSection');
+    var locationEquipment = document.getElementById('locationEquipment');
+    var locationModule = document.getElementById('locationModule');
+    var osGroup = document.getElementById('osGroup');
+    var assetNumGroup = document.getElementById('assetNumGroup');
+
+    if (isModuleType(val)) {
+        // Module mode: hide equipment-only sections
+        equipSections.style.display = 'none';
+        hardwareSection.style.display = 'none';
+        locationEquipment.style.display = 'none';
+        locationModule.style.display = '';
+        osGroup.style.display = 'none';
+        assetNumGroup.style.display = 'none';
+
+        // Update management_number datalist to show module_inventory items
+        updateModuleMgmtDatalist(val);
+    } else {
+        // Equipment mode: show all
+        equipSections.style.display = '';
+        hardwareSection.style.display = '';
+        locationEquipment.style.display = '';
+        locationModule.style.display = 'none';
+        osGroup.style.display = '';
+        assetNumGroup.style.display = '';
+
+        // Restore asset datalist
+        restoreAssetDatalist();
+    }
+}
+
+function updateModuleMgmtDatalist(moduleType) {
+    // Fetch module items via AJAX
+    fetch('/inventory/api/modules/' + moduleType)
+        .then(function(r) { return r.ok ? r.json() : []; })
+        .then(function(items) {
+            _moduleInventoryItems = items;
+            var datalist = document.getElementById('mgmt-list');
+            datalist.innerHTML = '';
+            items.forEach(function(m) {
+                var opt = document.createElement('option');
+                opt.value = m.item_code;
+                opt.textContent = m.item_code + ' - ' + (m.model || '') + ' ' + (m.capacity || '');
+                datalist.appendChild(opt);
+            });
+        });
+}
+
+// Store original asset datalist HTML
+var _originalMgmtDatalist = '';
+var _originalAssetNumDatalist = '';
+(function() {
+    var dl = document.getElementById('mgmt-list');
+    if (dl) _originalMgmtDatalist = dl.innerHTML;
+    var dl2 = document.getElementById('asset-num-list');
+    if (dl2) _originalAssetNumDatalist = dl2.innerHTML;
+})();
+
+function restoreAssetDatalist() {
+    document.getElementById('mgmt-list').innerHTML = _originalMgmtDatalist;
+    document.getElementById('asset-num-list').innerHTML = _originalAssetNumDatalist;
+}
+
+// Auto-fill when selecting from module datalist
+document.getElementById('invMgmtInput').addEventListener('input', function() {
+    var val = this.value;
+    var usageType = document.getElementById('usageAssetTypeHidden');
+    if (usageType && isModuleType(usageType.value)) {
+        // Module mode: auto-fill from module inventory
+        var match = _moduleInventoryItems.find(function(m) { return m.item_code === val; });
+        if (match) {
+            document.querySelector('[name="model_name"]').value = match.model || '';
+            var ownerSel = document.querySelector('[name="ownership"]');
+            if (ownerSel) {
+                // Keep current ownership
+            }
+        }
+        return;
+    }
+    // Equipment mode: existing asset auto-fill
+    var id = findAssetIdByMgmt(val);
+    if (id) onAssetSelect(id);
+});
+
+// Module location type change
+function onModuleLocationTypeChange() {
+    var locType = document.getElementById('moduleLocationType').value;
+    var assetRow = document.getElementById('moduleAssetSelectRow');
+    var storageRow = document.getElementById('moduleStorageRow');
+
+    if (locType === 'storage') {
+        assetRow.style.display = 'none';
+        storageRow.style.display = '';
+        document.getElementById('targetAssetIdHidden').value = '';
+    } else {
+        assetRow.style.display = '';
+        storageRow.style.display = 'none';
+    }
+}
+
+// Module target asset selection
+document.getElementById('moduleTargetAssetInput').addEventListener('input', function() {
+    var val = this.value;
+    // Find matching asset
+    var opts = document.querySelectorAll('#target-asset-list option');
+    for (var i = 0; i < opts.length; i++) {
+        if (opts[i].value === val) {
+            document.getElementById('targetAssetIdHidden').value = opts[i].getAttribute('data-asset-id') || '';
+            // Also set room to the location type
+            var locType = document.getElementById('moduleLocationType').value;
+            var roomHidden = document.getElementById('invRoomHidden');
+            if (roomHidden) {
+                if (locType === 'server_room') roomHidden.value = '서버실';
+                else if (locType === 'office') roomHidden.value = '사무실';
+            }
+            return;
+        }
+    }
+    document.getElementById('targetAssetIdHidden').value = '';
+});
+
+// Module storage location sync
+var moduleStorageLoc = document.getElementById('moduleStorageLocation');
+if (moduleStorageLoc) {
+    moduleStorageLoc.addEventListener('input', function() {
+        var roomHidden = document.getElementById('invRoomHidden');
+        if (roomHidden) roomHidden.value = this.value;
+    });
+}
+
+// === Dynamic Hardware rows ===
+var hwTypeOptions = '<% appConfig.moduleTypes.forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %>';
+var hwTypeLabels = {<% appConfig.moduleTypes.forEach((t, i) => { %>'<%= t.value %>':'<%= t.label %>'<% if (i < appConfig.moduleTypes.length - 1) { %>,<% } %><% }) %>};
+
+function addHwRow(defaultType) {
+    var container = document.getElementById('hwRows');
+    // Add header if this is the first row
+    updateHwHeader();
+    var html = '<div class="form-row inv-hw-row" style="align-items:center;">' +
+        '<div class="form-group" style="flex:0 0 140px; margin-bottom:8px;">' +
+        '<select name="hw_types[]" class="form-control" onchange="onHwTypeChange(this)">' + hwTypeOptions + '</select>' +
+        '</div>' +
+        '<div class="form-group" style="flex:2; margin-bottom:8px;">' +
+        '<input type="text" name="hw_codes[]" class="form-control" list="hw-list-' + defaultType + '" placeholder="코드 선택 또는 직접 입력">' +
+        '</div>' +
+        '<div class="form-group" style="flex:0 0 80px; margin-bottom:8px;">' +
+        '<input type="number" name="hw_nums[]" class="form-control" min="0" placeholder="수량">' +
+        '</div>' +
+        '<div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">' +
+        '<button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.inv-hw-row\').remove(); updateHwHeader();">X</button>' +
+        '</div>' +
+        '</div>';
+    container.insertAdjacentHTML('beforeend', html);
+    // Set the default type in the newly added row
+    var rows = container.querySelectorAll('.inv-hw-row');
+    var lastRow = rows[rows.length - 1];
+    var sel = lastRow.querySelector('select[name="hw_types[]"]');
+    if (sel) {
+        for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === defaultType) { sel.selectedIndex = i; break; }
+        }
+    }
+    updateHwHeader();
+}
+
+function onHwTypeChange(sel) {
+    // Update the datalist on the code input to match the selected type
+    var row = sel.closest('.inv-hw-row');
+    var codeInput = row.querySelector('input[name="hw_codes[]"]');
+    if (codeInput) {
+        codeInput.setAttribute('list', 'hw-list-' + sel.value);
+        codeInput.value = '';
+    }
+}
+
+function updateHwHeader() {
+    var container = document.getElementById('hwRows');
+    var rows = container.querySelectorAll('.inv-hw-row');
+    var header = container.querySelector('.hw-row-header');
+    if (rows.length > 0 && !header) {
+        var hdr = '<div class="form-row hw-row-header" style="font-weight:600; font-size:13px; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:8px;">' +
+            '<div class="form-group" style="flex:0 0 140px; margin-bottom:0;"><label>유형</label></div>' +
+            '<div class="form-group" style="flex:2; margin-bottom:0;"><label>부품 코드</label></div>' +
+            '<div class="form-group" style="flex:0 0 80px; margin-bottom:0;"><label>수량</label></div>' +
+            '<div class="form-group" style="flex:0 0 50px; margin-bottom:0;"></div>' +
+            '</div>';
+        container.insertAdjacentHTML('afterbegin', hdr);
+    } else if (rows.length === 0 && header) {
+        header.remove();
+    }
+}
+
+// === Dynamic Credential rows ===
+var credTypeOptions = '<option value="root">root</option><option value="bmc">BMC/IPMI</option><option value="os">OS</option><option value="etc">기타</option>';
+
+function addCredRow(defaultType) {
+    var container = document.getElementById('credRows');
+    updateCredHeader();
+    var html = '<div class="form-row inv-cred-row" style="align-items:center;">' +
+        '<div class="form-group" style="flex:0 0 120px; margin-bottom:8px;">' +
+        '<select name="cred_types[]" class="form-control">' + credTypeOptions + '</select>' +
+        '</div>' +
+        '<div class="form-group" style="flex:1; margin-bottom:8px;">' +
+        '<input type="text" name="cred_usernames[]" class="form-control" placeholder="사용자">' +
+        '</div>' +
+        '<div class="form-group" style="flex:1; margin-bottom:8px;">' +
+        '<input type="text" name="cred_passwords[]" class="form-control" placeholder="비밀번호">' +
+        '</div>' +
+        '<div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">' +
+        '<button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.inv-cred-row\').remove(); updateCredHeader();">X</button>' +
+        '</div>' +
+        '</div>';
+    container.insertAdjacentHTML('beforeend', html);
+    // Set default type
+    var rows = container.querySelectorAll('.inv-cred-row');
+    var lastRow = rows[rows.length - 1];
+    var sel = lastRow.querySelector('select[name="cred_types[]"]');
+    if (sel) {
+        for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === defaultType) { sel.selectedIndex = i; break; }
+        }
+    }
+    updateCredHeader();
+}
+
+function updateCredHeader() {
+    var container = document.getElementById('credRows');
+    var rows = container.querySelectorAll('.inv-cred-row');
+    var header = container.querySelector('.cred-row-header');
+    if (rows.length > 0 && !header) {
+        var hdr = '<div class="form-row cred-row-header" style="font-weight:600; font-size:13px; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:8px;">' +
+            '<div class="form-group" style="flex:0 0 120px; margin-bottom:0;"><label>유형</label></div>' +
+            '<div class="form-group" style="flex:1; margin-bottom:0;"><label>사용자</label></div>' +
+            '<div class="form-group" style="flex:1; margin-bottom:0;"><label>비밀번호</label></div>' +
+            '<div class="form-group" style="flex:0 0 50px; margin-bottom:0;"></div>' +
+            '</div>';
+        container.insertAdjacentHTML('afterbegin', hdr);
+    } else if (rows.length === 0 && header) {
+        header.remove();
+    }
+}
+
+// Dynamic IP rows
+// IP purpose select options HTML
+var ipPurposeOptions = '<% appConfig.ipTypes.forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %><option value="__custom__">기타(직접입력)</option>';
+var ipPurposeValueMap = {<% appConfig.ipTypes.forEach((t, i) => { %>'<%= t.value %>':'<%= t.value %>'<% if (i < appConfig.ipTypes.length - 1) { %>,<% } %><% }) %>};
+var invIpIfaceOptions = '<option value="">-</option><option value="Ethernet">Ethernet</option><option value="InfiniBand">InfiniBand</option>';
+var invIpSpeedOptions = '<option value="">-</option><option value="1GbE">1GbE</option><option value="10GbE">10GbE</option><option value="25GbE">25GbE</option><option value="40GbE">40GbE</option><option value="100GbE">100GbE</option><option value="200Gbps">200Gbps</option><option value="400Gbps">400Gbps</option><option value="__custom__">직접입력</option>';
+
+function onIpPurposeSelect(sel) {
+    var row = sel.closest('.inv-ip-row');
+    var customGroup = row.querySelector('.ip-custom-group');
+    var customInput = row.querySelector('.ip-purpose-custom');
+    var hidden = row.querySelector('.ip-purpose-hidden');
+    if (sel.value === '__custom__') {
+        customGroup.style.display = '';
+        customInput.focus();
+        hidden.value = customInput.value || '';
+    } else {
+        customGroup.style.display = 'none';
+        customInput.value = '';
+        hidden.value = sel.value;
+    }
+}
+
+function onInvSpeedChange(sel) {
+    var row = sel.closest('.inv-ip-row');
+    var customGroup = row.querySelector('.inv-ip-speed-custom-group');
+    var customInput = row.querySelector('.inv-ip-speed-custom');
+    var hiddenValue = row.querySelector('.inv-ip-speed-value');
+    if (sel.value === '__custom__') {
+        customGroup.style.display = '';
+        customInput.focus();
+        hiddenValue.value = customInput.value || '';
+    } else {
+        customGroup.style.display = 'none';
+        if (customInput) customInput.value = '';
+        hiddenValue.value = sel.value;
+    }
+}
+
+function addInvIpRow(defaultPurpose) {
+    var val = defaultPurpose || 'management';
+    var html = '<div class="form-row inv-ip-row">' +
+        '<div class="form-group" style="flex:0 0 160px;"><select class="form-control ip-purpose-select" onchange="onIpPurposeSelect(this)">' + ipPurposeOptions + '</select></div>' +
+        '<div class="form-group ip-custom-group" style="flex:0 0 120px; display:none;"><input type="text" class="form-control ip-purpose-custom" placeholder="용도 입력" oninput="this.closest(\'.inv-ip-row\').querySelector(\'.ip-purpose-hidden\').value=this.value"></div>' +
+        '<input type="hidden" name="ip_purposes[]" class="ip-purpose-hidden" value="' + val + '">' +
+        '<div class="form-group" style="flex:0 0 120px;"><select name="ip_iface_types[]" class="form-control">' + invIpIfaceOptions + '</select></div>' +
+        '<div class="form-group" style="flex:0 0 120px;"><select name="ip_speed_selects[]" class="form-control inv-ip-speed-select" onchange="onInvSpeedChange(this)">' + invIpSpeedOptions + '</select><input type="hidden" name="ip_speeds[]" class="inv-ip-speed-value" value=""></div>' +
+        '<div class="form-group inv-ip-speed-custom-group" style="flex:0 0 100px; display:none;"><input type="text" class="form-control inv-ip-speed-custom" placeholder="속도" oninput="this.closest(\'.inv-ip-row\').querySelector(\'.inv-ip-speed-value\').value=this.value"></div>' +
+        '<div class="form-group"><input type="text" name="ip_values[]" class="form-control" placeholder="10.100.x.x"></div>' +
+        '<div class="form-group" style="flex:0 0 60px; align-self:flex-end;"><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.inv-ip-row\').remove()">X</button></div>' +
+        '</div>';
+    document.getElementById('ipRows').insertAdjacentHTML('beforeend', html);
+    var rows = document.querySelectorAll('.inv-ip-row');
+    var lastRow = rows[rows.length - 1];
+    var sel = lastRow.querySelector('.ip-purpose-select');
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === val) { sel.selectedIndex = i; break; }
+    }
+}
+
+// Location select + manual input
+function onInvRoomChange() {
+    var sel = document.getElementById('invRoomSelect');
+    var manualGroup = document.getElementById('invRoomManualGroup');
+    var hidden = document.getElementById('invRoomHidden');
+    if (sel.value === '__manual__') {
+        manualGroup.style.display = '';
+        document.getElementById('invRoomManualInput').focus();
+        hidden.value = document.getElementById('invRoomManualInput').value;
+    } else {
+        manualGroup.style.display = 'none';
+        hidden.value = sel.value;
+    }
+    filterInvRacks();
+}
+
+function onInvRackChange() {
+    var sel = document.getElementById('invRackSelect');
+    var manualGroup = document.getElementById('invRackManualGroup');
+    var hidden = document.getElementById('invRackHidden');
+    if (sel.value === '__manual__') {
+        manualGroup.style.display = '';
+        document.getElementById('invRackManualInput').focus();
+        hidden.value = document.getElementById('invRackManualInput').value;
+    } else {
+        manualGroup.style.display = 'none';
+        hidden.value = sel.value;
+    }
+}
+
+// Sync manual inputs to hidden fields
+document.getElementById('invRoomManualInput').addEventListener('input', function() {
+    document.getElementById('invRoomHidden').value = this.value;
+});
+document.getElementById('invRackManualInput').addEventListener('input', function() {
+    document.getElementById('invRackHidden').value = this.value;
+});
+
+function filterInvRacks() {
+    var roomSel = document.getElementById('invRoomSelect');
+    var selOpt = roomSel.options[roomSel.selectedIndex];
+    var roomId = selOpt ? selOpt.getAttribute('data-room-id') : '';
+    var rackOpts = document.querySelectorAll('#invRackSelect option[data-room-id]');
+    rackOpts.forEach(function(o) {
+        o.style.display = (!roomId || o.getAttribute('data-room-id') === roomId) ? '' : 'none';
+    });
+}
+
+// Initialize rack filter on load
+filterInvRacks();
+
+// === Asset auto-fill logic ===
+<% if (typeof assets !== 'undefined') { %>
+var _assetMap = {};
+<% assets.forEach(a => { %>
+_assetMap['mgmt_<%= (a.management_number || '').replace(/'/g, "\\'") %>'] = <%= a.id %>;
+_assetMap['anum_<%= (a.asset_number || '').replace(/'/g, "\\'") %>'] = <%= a.id %>;
+<% }) %>
+
+function findAssetIdByMgmt(val) { return _assetMap['mgmt_' + val] || null; }
+function findAssetIdByAnum(val) { return _assetMap['anum_' + val] || null; }
+
+function onAssetSelect(assetId) {
+    if (!assetId) return;
+    fetch('/inventory/api/asset/' + assetId)
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+            if (!data) return;
+            var a = data.asset;
+            var ips = data.ips || [];
+            var creds = data.credentials || [];
+
+            // Fill basic fields
+            document.querySelector('[name="management_number"]').value = a.management_number || '';
+            document.querySelector('[name="asset_number"]').value = a.asset_number || '';
+            document.querySelector('[name="model_name"]').value = a.model_name || '';
+
+            // Ownership select
+            var ownerSel = document.querySelector('[name="ownership"]');
+            if (a.ownership) {
+                for (var i = 0; i < ownerSel.options.length; i++) {
+                    if (ownerSel.options[i].value === a.ownership) { ownerSel.selectedIndex = i; break; }
+                }
+            }
+
+            // Room
+            var roomSel = document.getElementById('invRoomSelect');
+            var roomMatched = false;
+            if (a.room_name) {
+                for (var i = 0; i < roomSel.options.length; i++) {
+                    if (roomSel.options[i].value === a.room_name) {
+                        roomSel.selectedIndex = i; roomMatched = true; break;
+                    }
+                }
+                if (!roomMatched) {
+                    // Select manual and fill
+                    for (var i = 0; i < roomSel.options.length; i++) {
+                        if (roomSel.options[i].value === '__manual__') { roomSel.selectedIndex = i; break; }
+                    }
+                    document.getElementById('invRoomManualInput').value = a.room_name;
+                }
+                onInvRoomChange();
+            }
+
+            // Rack
+            var rackSel = document.getElementById('invRackSelect');
+            var rackMatched = false;
+            if (a.rack_name) {
+                for (var i = 0; i < rackSel.options.length; i++) {
+                    if (rackSel.options[i].value === a.rack_name && rackSel.options[i].style.display !== 'none') {
+                        rackSel.selectedIndex = i; rackMatched = true; break;
+                    }
+                }
+                if (!rackMatched) {
+                    for (var i = 0; i < rackSel.options.length; i++) {
+                        if (rackSel.options[i].value === '__manual__') { rackSel.selectedIndex = i; break; }
+                    }
+                    document.getElementById('invRackManualInput').value = a.rack_name;
+                }
+                onInvRackChange();
+            }
+
+            // IPs — clear existing rows and add from asset
+            var ipContainer = document.getElementById('ipRows');
+            ipContainer.querySelectorAll('.inv-ip-row').forEach(function(r) { r.remove(); });
+            ips.forEach(function(ip) {
+                var purpose = ip.ip_type || 'management';
+                var isKnown = !!ipPurposeValueMap[purpose];
+                var selectVal = isKnown ? purpose : '__custom__';
+                var ifaceType = ip.interface_type || '';
+                var speedVal = ip.speed || '';
+                var speedPresets = ['1GbE','10GbE','25GbE','40GbE','100GbE','200Gbps','400Gbps'];
+                var isPresetSpeed = speedPresets.indexOf(speedVal) !== -1;
+                var speedSelectVal = speedVal ? (isPresetSpeed ? speedVal : '__custom__') : '';
+                var html = '<div class="form-row inv-ip-row">' +
+                    '<div class="form-group" style="flex:0 0 160px;"><select class="form-control ip-purpose-select" onchange="onIpPurposeSelect(this)">' + ipPurposeOptions + '</select></div>' +
+                    '<div class="form-group ip-custom-group" style="flex:0 0 120px; ' + (isKnown ? 'display:none;' : '') + '"><input type="text" class="form-control ip-purpose-custom" value="' + (!isKnown ? purpose : '') + '" placeholder="용도 입력" oninput="this.closest(\'.inv-ip-row\').querySelector(\'.ip-purpose-hidden\').value=this.value"></div>' +
+                    '<input type="hidden" name="ip_purposes[]" class="ip-purpose-hidden" value="' + purpose + '">' +
+                    '<div class="form-group" style="flex:0 0 120px;"><select name="ip_iface_types[]" class="form-control">' + invIpIfaceOptions + '</select></div>' +
+                    '<div class="form-group" style="flex:0 0 120px;"><select name="ip_speed_selects[]" class="form-control inv-ip-speed-select" onchange="onInvSpeedChange(this)">' + invIpSpeedOptions + '</select><input type="hidden" name="ip_speeds[]" class="inv-ip-speed-value" value="' + speedVal + '"></div>' +
+                    '<div class="form-group inv-ip-speed-custom-group" style="flex:0 0 100px; ' + (speedVal && !isPresetSpeed ? '' : 'display:none;') + '"><input type="text" class="form-control inv-ip-speed-custom" value="' + (speedVal && !isPresetSpeed ? speedVal : '') + '" placeholder="속도" oninput="this.closest(\'.inv-ip-row\').querySelector(\'.inv-ip-speed-value\').value=this.value"></div>' +
+                    '<div class="form-group"><input type="text" name="ip_values[]" class="form-control" placeholder="10.100.x.x" value="' + (ip.ip_address || '') + '"></div>' +
+                    '<div class="form-group" style="flex:0 0 60px; align-self:flex-end;"><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.inv-ip-row\').remove()">X</button></div>' +
+                    '</div>';
+                ipContainer.insertAdjacentHTML('beforeend', html);
+                var rows = ipContainer.querySelectorAll('.inv-ip-row');
+                var lastRow = rows[rows.length - 1];
+                var sel = lastRow.querySelector('.ip-purpose-select');
+                for (var j = 0; j < sel.options.length; j++) {
+                    if (sel.options[j].value === selectVal) { sel.selectedIndex = j; break; }
+                }
+                // Set interface type
+                var ifaceSel = lastRow.querySelector('select[name="ip_iface_types[]"]');
+                if (ifaceSel && ifaceType) {
+                    for (var j = 0; j < ifaceSel.options.length; j++) {
+                        if (ifaceSel.options[j].value === ifaceType) { ifaceSel.selectedIndex = j; break; }
+                    }
+                }
+                // Set speed
+                var speedSel = lastRow.querySelector('.inv-ip-speed-select');
+                if (speedSel && speedSelectVal) {
+                    for (var j = 0; j < speedSel.options.length; j++) {
+                        if (speedSel.options[j].value === speedSelectVal) { speedSel.selectedIndex = j; break; }
+                    }
+                }
+            });
+
+            // Credentials — clear existing rows and add from asset
+            var credContainer = document.getElementById('credRows');
+            credContainer.querySelectorAll('.inv-cred-row').forEach(function(r) { r.remove(); });
+            var credHeader = credContainer.querySelector('.cred-row-header');
+            if (credHeader) credHeader.remove();
+            creds.forEach(function(c) {
+                var cType = c.credential_type || 'etc';
+                var html = '<div class="form-row inv-cred-row" style="align-items:center;">' +
+                    '<div class="form-group" style="flex:0 0 120px; margin-bottom:8px;">' +
+                    '<select name="cred_types[]" class="form-control">' + credTypeOptions + '</select>' +
+                    '</div>' +
+                    '<div class="form-group" style="flex:1; margin-bottom:8px;">' +
+                    '<input type="text" name="cred_usernames[]" class="form-control" placeholder="사용자" value="' + (c.username || '').replace(/"/g, '&quot;') + '">' +
+                    '</div>' +
+                    '<div class="form-group" style="flex:1; margin-bottom:8px;">' +
+                    '<input type="text" name="cred_passwords[]" class="form-control" placeholder="비밀번호" value="' + (c.password || '').replace(/"/g, '&quot;') + '">' +
+                    '</div>' +
+                    '<div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">' +
+                    '<button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.inv-cred-row\').remove(); updateCredHeader();">X</button>' +
+                    '</div>' +
+                    '</div>';
+                credContainer.insertAdjacentHTML('beforeend', html);
+                var rows = credContainer.querySelectorAll('.inv-cred-row');
+                var lastRow = rows[rows.length - 1];
+                var sel = lastRow.querySelector('select');
+                for (var j = 0; j < sel.options.length; j++) {
+                    if (sel.options[j].value === cType) { sel.selectedIndex = j; break; }
+                }
+            });
+            updateCredHeader();
+        });
+}
+
+// Listen for asset_number input changes (equipment mode only)
+document.getElementById('invAssetNumInput').addEventListener('input', function() {
+    var usageType = document.getElementById('usageAssetTypeHidden');
+    if (usageType && isModuleType(usageType.value)) return;
+    var id = findAssetIdByAnum(this.value);
+    if (id) onAssetSelect(id);
+});
+<% } %>
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

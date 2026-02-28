@@ -14,7 +14,11 @@
 <%
 function getAssetClass(info) {
     if (info.asset_type === 'switch') return 'switch';
-    if (info.asset_type === 'pdu' || info.asset_type === 'ups') return 'pdu';
+    if (info.asset_type === 'kvm') return 'kvm';
+    if (info.asset_type === 'pdu') return 'pdu';
+    if (info.asset_type === 'ups') return 'ups';
+    if (info.asset_type === 'storage') return 'storage';
+    if (info.asset_type === 'other') return 'other';
     if (info.ownership === 'vendor') return 'vendor';
     return 'server';
 }
@@ -53,7 +57,7 @@ function slotPos(slot) {
                 <span class="hole-marker"></span>
                 <% if (isTop) { %>
                 <div class="slot-info-wrap">
-                    <span class="slot-name"><%= f.model_name %></span>
+                    <span class="slot-name"><%= f.model_name %><% if (f.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:10px;">(<%= f.management_number %>)</span><% } %></span>
                     <% if (f.assigned_user || f.purpose) { %>
                     <span class="slot-meta"><% if (f.assigned_user) { %><%= f.assigned_user %><% } %><% if (f.assigned_user && f.purpose) { %> | <% } %><% if (f.purpose) { %><%= f.purpose %><% } %></span>
                     <% } %>
@@ -98,7 +102,7 @@ function slotPos(slot) {
                     <div class="blade-half <%= getAssetClass(entry.left) %>"
                          data-asset-id="<%= entry.left.id %>" data-asset-slots="<%= anyInfo.slot_size %>" draggable="true">
                         <% if (isTop) { %>
-                        <span class="blade-label"><%= entry.left.model_name %></span>
+                        <span class="blade-label"><%= entry.left.model_name %><% if (entry.left.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:9px;">(<%= entry.left.management_number %>)</span><% } %></span>
                         <span class="slot-meta">
                             <% if (entry.left.assigned_user) { %><%= entry.left.assigned_user %><% } %>
                             <% if (entry.left.assigned_user && entry.left.purpose) { %> | <% } %>
@@ -113,7 +117,7 @@ function slotPos(slot) {
                     <div class="blade-half <%= getAssetClass(entry.right) %>"
                          data-asset-id="<%= entry.right.id %>" data-asset-slots="<%= anyInfo.slot_size %>" draggable="true">
                         <% if (isTop) { %>
-                        <span class="blade-label"><%= entry.right.model_name %></span>
+                        <span class="blade-label"><%= entry.right.model_name %><% if (entry.right.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:9px;">(<%= entry.right.management_number %>)</span><% } %></span>
                         <span class="slot-meta">
                             <% if (entry.right.assigned_user) { %><%= entry.right.assigned_user %><% } %>
                             <% if (entry.right.assigned_user && entry.right.purpose) { %> | <% } %>
@@ -164,7 +168,11 @@ function slotPos(slot) {
                 <div class="legend-item"><span class="legend-color server"></span> 자사 서버</div>
                 <div class="legend-item"><span class="legend-color vendor"></span> 업체 장비</div>
                 <div class="legend-item"><span class="legend-color switch"></span> 스위치</div>
+                <div class="legend-item"><span class="legend-color kvm"></span> KVM</div>
                 <div class="legend-item"><span class="legend-color pdu"></span> PDU</div>
+                <div class="legend-item"><span class="legend-color ups"></span> UPS</div>
+                <div class="legend-item"><span class="legend-color storage"></span> 스토리지</div>
+                <div class="legend-item"><span class="legend-color other"></span> 기타</div>
                 <div class="legend-item"><span class="legend-color empty"></span> 빈 공간</div>
             </div>
             <p style="font-size:11px;color:#94a3b8;margin-top:8px;">1U = 3구멍, 선반+2U = 7칸</p>
@@ -382,33 +390,75 @@ function slotPosStr(slot) { return 'U' + slotToU(slot) + '(' + slotHole(slot) + 
     }
 })();
 
+var ipTypeLabels = {<% appConfig.ipTypes.forEach(function(t,i) { %>'<%= t.value %>':'<%= t.label %>'<% if(i<appConfig.ipTypes.length-1){%>,<%}%><%})%>};
+function ipLabel(ip) {
+    if (ip.ip_type === 'other' && ip.description) return ip.description;
+    return ipTypeLabels[ip.ip_type] || ip.ip_type;
+}
+function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+
+var _popupCache = {};
 function showAssetPopup(assetId) {
-    var asset = assetsData.find(function(a) { return a.id === assetId; });
-    if (!asset) return;
-    var uSize = Math.floor((asset.rack_unit_size || 3) / 3);
-    var extraSlots = (asset.rack_unit_size || 3) % 3;
-    var sizeText = uSize + 'U' + (extraSlots ? '+' + extraSlots + '칸' : '');
-    var startPos = asset.rack_unit_start ? slotPosStr(asset.rack_unit_start) : 'U?';
-    var endSlot = asset.rack_unit_start + (asset.rack_unit_size || 3) - 1;
-    var endPos = slotPosStr(endSlot);
-    var posText = startPos + ((asset.rack_unit_size || 3) > 1 ? '-' + endPos : '') + ' / ' + sizeText;
-    document.getElementById('popupTitle').textContent = asset.model_name || asset.asset_type;
-    document.getElementById('popupContent').innerHTML =
-        '<div class="form-row">' +
-        '<div class="form-group"><label>유형</label><p>' + asset.asset_type + '</p></div>' +
-        '<div class="form-group"><label>소유</label><p>' + (asset.ownership === 'company' ? '자사' : '업체') + '</p></div>' +
-        '<div class="form-group"><label>위치</label><p>' + posText + (asset.blade_slot ? ' (' + (asset.blade_slot==='left'?'좌':'우') + ')' : '') + '</p></div>' +
-        '</div>' +
-        '<div class="form-row">' +
-        '<div class="form-group"><label>IP</label><p>' + (asset.ip_address || '-') + '</p></div>' +
-        '<div class="form-group"><label>S/N</label><p>' + (asset.serial_number || '-') + '</p></div>' +
-        '<div class="form-group"><label>사용자</label><p>' + (asset.assigned_user || '-') + '</p></div>' +
-        '</div>' +
-        '<div class="btn-group mt-2">' +
-        '<a href="/assets/' + asset.id + '" class="btn btn-primary">상세 보기</a>' +
-        '<a href="/assets/' + asset.id + '/edit" class="btn btn-outline">수정</a>' +
-        '</div>';
+    document.getElementById('popupTitle').textContent = '로딩중...';
+    document.getElementById('popupContent').innerHTML = '<p class="text-muted">로딩중...</p>';
     openModal('assetPopup');
+
+    if (_popupCache[assetId]) { renderPopup(assetId, _popupCache[assetId]); return; }
+
+    fetch('/assets/' + assetId + '/json')
+        .then(function(r) { return r.json(); })
+        .then(function(data) { _popupCache[assetId] = data; renderPopup(assetId, data); })
+        .catch(function() { document.getElementById('popupContent').innerHTML = '<p style="color:#ef4444;">데이터를 불러올 수 없습니다.</p>'; });
+}
+
+function renderPopup(assetId, data) {
+    var a = data.asset;
+    var uSize = Math.floor((a.rack_unit_size || 3) / 3);
+    var extraSlots = (a.rack_unit_size || 3) % 3;
+    var sizeText = uSize + 'U' + (extraSlots ? '+' + extraSlots + '칸' : '');
+    var startPos = a.rack_unit_start ? slotPosStr(a.rack_unit_start) : 'U?';
+    var endSlot = a.rack_unit_start + (a.rack_unit_size || 3) - 1;
+    var endPos = slotPosStr(endSlot);
+    var posText = startPos + ((a.rack_unit_size || 3) > 1 ? '-' + endPos : '') + ' / ' + sizeText;
+    document.getElementById('popupTitle').textContent = a.model_name || a.asset_type;
+
+    var html = '<div class="form-row">' +
+        '<div class="form-group"><label>관리번호</label><p>' + esc(a.management_number || '-') + '</p></div>' +
+        '<div class="form-group"><label>유형</label><p>' + esc(a.asset_type) + '</p></div>' +
+        '<div class="form-group"><label>소유</label><p>' + (a.ownership === 'company' ? '자사' : '업체') + '</p></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+        '<div class="form-group"><label>위치</label><p>' + posText + (a.blade_slot ? ' (' + (a.blade_slot==='left'?'좌':'우') + ')' : '') + '</p></div>' +
+        '<div class="form-group"><label>담당자</label><p>' + esc(a.assigned_user || '-') + '</p></div>' +
+        '<div class="form-group"><label>용도</label><p>' + esc(a.purpose || '-') + '</p></div>' +
+        '</div>';
+
+    // IPs
+    if (data.assetIps && data.assetIps.length > 0) {
+        html += '<div style="margin-top:8px;"><label style="font-weight:600;font-size:12px;">네트워크</label>';
+        data.assetIps.forEach(function(ip) {
+            var extra = '';
+            if (ip.speed) extra += ' ' + esc(ip.speed);
+            if (ip.interface_type) extra += ' ' + esc(ip.interface_type);
+            html += '<div style="font-size:13px;"><span class="badge badge-info" style="font-size:10px;">' + esc(ipLabel(ip)) + '</span>' + extra + ' <strong>' + esc(ip.ip_address) + '</strong></div>';
+        });
+        html += '</div>';
+    }
+
+    // Credentials
+    if (data.credentials && data.credentials.length > 0) {
+        html += '<div style="margin-top:8px;"><label style="font-weight:600;font-size:12px;">접속정보</label>';
+        data.credentials.forEach(function(c) {
+            html += '<div style="font-size:13px;"><span class="badge" style="font-size:10px;">' + esc(c.credential_type) + '</span> ' + esc(c.username) + ' / <code>' + esc(c.password || '') + '</code></div>';
+        });
+        html += '</div>';
+    }
+
+    html += '<div class="btn-group mt-2">' +
+        '<a href="/assets/' + assetId + '" class="btn btn-primary">상세 보기</a>' +
+        '<a href="/assets/' + assetId + '/edit" class="btn btn-outline">수정</a>' +
+        '</div>';
+    document.getElementById('popupContent').innerHTML = html;
 }
 </script>
 
