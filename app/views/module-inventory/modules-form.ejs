@@ -1,0 +1,84 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= module ? '모듈 수정' : '모듈 등록' %></h1>
+    <a href="/module-inventory?tab=installed" class="btn btn-secondary">목록</a>
+</div>
+
+<form method="POST" action="<%= module ? '/module-inventory/modules/' + module.id : '/module-inventory/modules' %>" class="card">
+    <% if (typeof returnTo !== 'undefined' && returnTo) { %>
+    <input type="hidden" name="returnTo" value="<%= returnTo %>">
+    <% } %>
+    <div class="form-row">
+        <div class="form-group">
+            <label>서버 *</label>
+            <select name="asset_id" class="form-control" required>
+                <option value="">선택</option>
+                <% assets.forEach(a => { %>
+                <option value="<%= a.id %>"
+                    <%= (module && module.asset_id == a.id) || preselectedAssetId == a.id ? 'selected' : '' %>>
+                    <%= a.asset_number || '' %> - <%= a.model_name || a.ip_address || 'ID:' + a.id %>
+                </option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>모듈 유형 *</label>
+            <select name="module_type" class="form-control" required>
+                <% appConfig.moduleTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= module?.module_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>설치 유형</label>
+            <select name="is_onboard" class="form-control">
+                <option value="0" <%= module?.is_onboard ? '' : 'selected' %>>애드온 (PCIe)</option>
+                <option value="1" <%= module?.is_onboard ? 'selected' : '' %>>온보드 (내장)</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>모델</label>
+            <input type="text" name="model" class="form-control" value="<%= module?.model || '' %>" placeholder="예: Intel Xeon Gold 6348">
+        </div>
+        <div class="form-group">
+            <label>제조사</label>
+            <input type="text" name="manufacturer" class="form-control" value="<%= module?.manufacturer || '' %>">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>용량</label>
+            <input type="text" name="capacity" class="form-control" value="<%= module?.capacity || '' %>" placeholder="예: 32GB, 1TB, 10GbE">
+        </div>
+        <div class="form-group">
+            <label>수량</label>
+            <input type="number" name="count" class="form-control" value="<%= module?.count || 1 %>" min="1">
+        </div>
+        <div class="form-group">
+            <label>슬롯 정보</label>
+            <input type="text" name="slot_info" class="form-control" value="<%= module?.slot_info || '' %>" placeholder="예: DIMM A1, Slot 0">
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>사양/스펙</label>
+        <input type="text" name="specification" class="form-control" value="<%= module?.specification || '' %>" placeholder="예: DDR4 3200MHz ECC">
+    </div>
+
+    <div class="form-group">
+        <label>비고</label>
+        <textarea name="notes" class="form-control"><%= module?.notes || '' %></textarea>
+    </div>
+
+    <div class="btn-group mt-2">
+        <button type="submit" class="btn btn-primary"><%= module ? '수정' : '등록' %></button>
+        <a href="/module-inventory?tab=installed" class="btn btn-secondary">취소</a>
+    </div>
+</form>
+
+<%- include('../partials/footer', { extraJs }) %>

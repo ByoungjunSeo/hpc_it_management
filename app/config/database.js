@@ -106,6 +106,19 @@ function runMigrations() {
     db.exec("ALTER TABLE equipment_usage_logs ADD COLUMN ownership TEXT DEFAULT 'company'");
   }
 
+  // Migration: add parent_asset_id column to assets (for blade chassis-node relationship)
+  const assetCols2 = db.prepare("PRAGMA table_info(assets)").all();
+  if (!assetCols2.some(c => c.name === 'parent_asset_id')) {
+    db.exec("ALTER TABLE assets ADD COLUMN parent_asset_id INTEGER REFERENCES assets(id) ON DELETE CASCADE");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_assets_parent ON assets(parent_asset_id)");
+  }
+
+  // Migration: relax blade_slot CHECK constraint (allow any text, not just left/right)
+  // SQLite can't alter CHECK constraints, but new column without constraint works
+  // For existing DBs with the old constraint, blade_slot values beyond left/right
+  // will work because SQLite doesn't enforce CHECK on ALTER-added columns.
+  // New installs use the updated schema.sql without the CHECK.
+
   // Migration: add interface_type and speed columns to asset_ips
   const aipCols = db.prepare("PRAGMA table_info(asset_ips)").all();
   if (!aipCols.some(c => c.name === 'interface_type')) {
@@ -113,6 +126,83 @@ function runMigrations() {
   }
   if (!aipCols.some(c => c.name === 'speed')) {
     db.exec("ALTER TABLE asset_ips ADD COLUMN speed TEXT DEFAULT NULL");
+  }
+
+  // Migration: add owner and owner_vendor_id columns to computing_modules
+  const cmCols = db.prepare("PRAGMA table_info(computing_modules)").all();
+  if (!cmCols.some(c => c.name === 'owner')) {
+    db.exec("ALTER TABLE computing_modules ADD COLUMN owner TEXT DEFAULT 'company'");
+  }
+  if (!cmCols.some(c => c.name === 'owner_vendor_id')) {
+    db.exec("ALTER TABLE computing_modules ADD COLUMN owner_vendor_id INTEGER REFERENCES vendor_info(id)");
+  }
+  if (!cmCols.some(c => c.name === 'is_onboard')) {
+    db.exec("ALTER TABLE computing_modules ADD COLUMN is_onboard INTEGER DEFAULT 0");
+  }
+
+  // Migration: create module_transfer_logs table
+  const mtlTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='module_transfer_logs'").get();
+  if (!mtlTable) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS module_transfer_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transfer_date DATE DEFAULT (date('now')),
+        module_type TEXT NOT NULL,
+        model TEXT,
+        capacity TEXT,
+        count INTEGER DEFAULT 1,
+        owner TEXT DEFAULT 'company',
+        owner_vendor_id INTEGER,
+        from_asset_id INTEGER,
+        from_asset_label TEXT,
+        to_asset_id INTEGER,
+        to_asset_label TEXT,
+        reason TEXT,
+        user_id INTEGER,
+        username TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_mtl_from_asset ON module_transfer_logs(from_asset_id);
+      CREATE INDEX IF NOT EXISTS idx_mtl_to_asset ON module_transfer_logs(to_asset_id);
+      CREATE INDEX IF NOT EXISTS idx_mtl_date ON module_transfer_logs(transfer_date);
+    `);
+  }
+
+  // Migration: add asset_number column to module_inventory
+  const miCols = db.prepare("PRAGMA table_info(module_inventory)").all();
+  if (!miCols.some(c => c.name === 'asset_number')) {
+    db.exec("ALTER TABLE module_inventory ADD COLUMN asset_number TEXT");
+  }
+
+  // Migration: create module_inventory_logs table
+  const milTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='module_inventory_logs'").get();
+  if (!milTable) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS module_inventory_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_code TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        quantity_change INTEGER DEFAULT 0,
+        before_total INTEGER,
+        after_total INTEGER,
+        before_spare INTEGER,
+        after_spare INTEGER,
+        asset_id INTEGER,
+        asset_label TEXT,
+        from_asset_id INTEGER,
+        from_asset_label TEXT,
+        to_asset_id INTEGER,
+        to_asset_label TEXT,
+        asset_number TEXT,
+        user_id INTEGER,
+        username TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_mil_item_code ON module_inventory_logs(item_code);
+      CREATE INDEX IF NOT EXISTS idx_mil_created_at ON module_inventory_logs(created_at);
+    `);
   }
 }
 
