@@ -33,7 +33,15 @@ echo "===DISK_START==="
 lsblk -d -o NAME,MAJ:MIN,RM,SIZE,RO,TYPE,MODEL 2>/dev/null
 echo "===DISK_END==="
 echo "===NETWORK_START==="
-lspci 2>/dev/null | grep -i ethernet
+lspci -D 2>/dev/null | grep -i ethernet | while IFS= read -r line; do
+  PCI=$(echo "$line" | awk '{print $1}')
+  SDEV=$(lspci -vmms "$PCI" 2>/dev/null | awk -F':\t' '/^SDevice:/{print $2}')
+  if echo "$SDEV" | grep -qE '^Device [0-9a-fA-F]{4}$'; then
+    echo "[ONBOARD] $line"
+  else
+    echo "$line"
+  fi
+done
 echo "===NETWORK_END==="
 echo "===RAID_START==="
 lspci 2>/dev/null | grep -i raid

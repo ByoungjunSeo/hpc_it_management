@@ -186,20 +186,29 @@ function parseNetwork(output) {
   if (!section) return [];
 
   // Parse PCI address + model from lspci output
-  // Format: "01:00.0 Ethernet controller: Intel Corporation X550 (rev 01)"
-  const entries = [];
+  // Format: "0000:01:00.0 Ethernet controller: Intel Corporation X550 (rev 01)"
+  // Onboard devices are tagged: "[ONBOARD] 0000:67:00.0 Ethernet controller: ..."
+  const allEntries = [];
+  const addonEntries = [];
   const lines = section.split('\n').filter(l => l.trim());
 
   lines.forEach(line => {
-    const match = line.match(/^(\S+)\s+Ethernet controller:?\s*(.*)/i);
+    const isOnboard = line.startsWith('[ONBOARD]');
+    const cleanLine = isOnboard ? line.replace(/^\[ONBOARD\]\s*/, '') : line;
+    const match = cleanLine.match(/^(\S+)\s+Ethernet controller:?\s*(.*)/i);
     if (match) {
-      const pciAddr = match[1]; // e.g. "01:00.0"
+      const pciAddr = match[1]; // e.g. "0000:01:00.0"
       const model = match[2].trim();
       // Extract bus:device (without function) to identify physical card
-      const busDevice = pciAddr.replace(/\.\d+$/, ''); // "01:00.0" → "01:00"
-      entries.push({ pciAddr, busDevice, model });
+      const busDevice = pciAddr.replace(/\.\d+$/, ''); // "0000:01:00.0" → "0000:01:00"
+      const entry = { pciAddr, busDevice, model };
+      allEntries.push(entry);
+      if (!isOnboard) addonEntries.push(entry);
     }
   });
+
+  // Use add-in cards only if available, otherwise fallback to all
+  const entries = addonEntries.length > 0 ? addonEntries : allEntries;
 
   // Group by bus:device (same physical card) + model
   const cards = {};
