@@ -96,14 +96,27 @@ else
       fi
     fi
   done
-  # smartctl fallback
+  # smartctl fallback (including MegaRAID physical disks via --scan-open)
   SMARTCTL=$(command -v smartctl 2>/dev/null)
   if [ -n "$SMARTCTL" ]; then
     echo "===SMARTCTL_START==="
-    for dev in $(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}'); do
-      echo "===DEV:$dev==="
-      sudo $SMARTCTL -i "$dev" 2>/dev/null || $SMARTCTL -i "$dev" 2>/dev/null
-    done
+    # Use --scan-open to detect RAID-behind disks (megaraid,N etc.)
+    SCAN_RESULT=$(sudo $SMARTCTL --scan-open 2>/dev/null || $SMARTCTL --scan-open 2>/dev/null)
+    if [ -n "$SCAN_RESULT" ]; then
+      echo "$SCAN_RESULT" | while IFS= read -r line; do
+        DEV_SPEC=$(echo "$line" | sed 's/#.*//' | xargs)
+        if [ -n "$DEV_SPEC" ]; then
+          echo "===DEV:$DEV_SPEC==="
+          sudo $SMARTCTL -i $DEV_SPEC 2>/dev/null || $SMARTCTL -i $DEV_SPEC 2>/dev/null
+        fi
+      done
+    else
+      # Fallback: scan block devices directly
+      for dev in $(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}'); do
+        echo "===DEV:$dev==="
+        sudo $SMARTCTL -i "$dev" 2>/dev/null || $SMARTCTL -i "$dev" 2>/dev/null
+      done
+    fi
     echo "===SMARTCTL_END==="
   fi
 fi

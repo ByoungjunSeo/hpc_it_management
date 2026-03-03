@@ -285,7 +285,7 @@ function parseSmartctlDisks(section) {
   const smartSection = section.match(/===SMARTCTL_START===([\s\S]*?)===SMARTCTL_END===/);
   if (!smartSection) return [];
   const modules = [];
-  const devices = smartSection[1].split(/===DEV:\/dev\/\w+===/);
+  const devices = smartSection[1].split(/===DEV:[^=]+===/);
   devices.forEach(dev => {
     if (!dev.trim()) return;
     const info = {};
