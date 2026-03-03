@@ -188,8 +188,8 @@ function parseNetwork(output) {
   // Parse PCI address + model from lspci output
   // Format: "0000:01:00.0 Ethernet controller: Intel Corporation X550 (rev 01)"
   // Onboard devices are tagged: "[ONBOARD] 0000:67:00.0 Ethernet controller: ..."
-  const allEntries = [];
   const addonEntries = [];
+  const onboardEntries = [];
   const lines = section.split('\n').filter(l => l.trim());
 
   lines.forEach(line => {
@@ -197,43 +197,48 @@ function parseNetwork(output) {
     const cleanLine = isOnboard ? line.replace(/^\[ONBOARD\]\s*/, '') : line;
     const match = cleanLine.match(/^(\S+)\s+Ethernet controller:?\s*(.*)/i);
     if (match) {
-      const pciAddr = match[1]; // e.g. "0000:01:00.0"
+      const pciAddr = match[1];
       const model = match[2].trim();
-      // Extract bus:device (without function) to identify physical card
-      const busDevice = pciAddr.replace(/\.\d+$/, ''); // "0000:01:00.0" → "0000:01:00"
+      const busDevice = pciAddr.replace(/\.\d+$/, '');
       const entry = { pciAddr, busDevice, model };
-      allEntries.push(entry);
-      if (!isOnboard) addonEntries.push(entry);
+      if (isOnboard) onboardEntries.push(entry);
+      else addonEntries.push(entry);
     }
   });
 
-  // Only show add-in cards; onboard NICs are not tracked as separate modules
-  const entries = addonEntries;
+  // Helper: group entries into consolidated modules
+  function groupEntries(entries, specSuffix) {
+    const cards = {};
+    entries.forEach(e => {
+      const key = e.busDevice + '|' + e.model;
+      if (!cards[key]) cards[key] = { model: e.model, ports: 0 };
+      cards[key].ports++;
+    });
+    const consolidated = {};
+    Object.values(cards).forEach(card => {
+      const key = card.model + '|' + card.ports;
+      if (consolidated[key]) {
+        consolidated[key].count++;
+      } else {
+        consolidated[key] = {
+          module_type: 'network',
+          model: card.model,
+          count: 1,
+          specification: card.ports + '포트' + (specSuffix ? ' ' + specSuffix : '')
+        };
+      }
+    });
+    return Object.values(consolidated);
+  }
 
-  // Group by bus:device (same physical card) + model
-  const cards = {};
-  entries.forEach(e => {
-    const key = e.busDevice + '|' + e.model;
-    if (!cards[key]) {
-      cards[key] = { model: e.model, ports: 0 };
-    }
-    cards[key].ports++;
-  });
-
-  // Now consolidate cards with same model across different bus:device (multiple cards)
+  // Add-in cards first, then onboard separately tagged
+  const addonModules = groupEntries(addonEntries, '');
+  const onboardModules = groupEntries(onboardEntries, '(온보드)');
   const consolidated = {};
-  Object.values(cards).forEach(card => {
-    const key = card.model + '|' + card.ports;
-    if (consolidated[key]) {
-      consolidated[key].count++;
-    } else {
-      consolidated[key] = {
-        module_type: 'network',
-        model: card.model,
-        count: 1,
-        specification: card.ports + '포트'
-      };
-    }
+  [...addonModules, ...onboardModules].forEach(m => {
+    const key = m.model + '|' + m.specification;
+    if (consolidated[key]) consolidated[key].count += m.count;
+    else consolidated[key] = { ...m };
   });
 
   return Object.values(consolidated);
