@@ -593,7 +593,7 @@ function renderComparisonList(items, side) {
     if (items.length === 0) return '<p class="text-muted" style="font-size:13px;">없음</p>';
 
     var html = '<table style="width:100%; font-size:13px;">';
-    html += '<thead><tr><th>유형</th><th>모델</th><th>용량</th><th>사양</th><th>수량</th><th>소유자</th><th></th></tr></thead><tbody>';
+    html += '<thead><tr><th>유형</th><th>모델</th><th>용량</th><th>코드</th><th>수량</th><th>소유자</th><th></th></tr></thead><tbody>';
     items.forEach(function(item) {
         var statusIcon = '';
         var rowStyle = '';
