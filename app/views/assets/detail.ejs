@@ -214,13 +214,22 @@
             <tbody>
                 <% modules.forEach(m => { %>
                 <tr>
-                    <td><span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span></td>
+                    <td>
+                        <span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span>
+                        <% if (m.is_onboard) { %><span class="badge badge-secondary">온보드</span><% } %>
+                    </td>
                     <td><%= m.model || '-' %></td>
                     <td><%= m.manufacturer || '-' %></td>
                     <td><%= m.capacity || '' %> <%= m.specification || '' %></td>
                     <td><%= m.count %></td>
                     <td><%= m.slot_info || '-' %></td>
-                    <td><a href="/module-inventory/modules/<%= m.id %>/edit" class="btn btn-sm btn-outline">수정</a></td>
+                    <td>
+                        <a href="/module-inventory/modules/<%= m.id %>/edit" class="btn btn-sm btn-outline">수정</a>
+                        <form method="POST" action="/module-inventory/modules/<%= m.id %>/delete" style="display:inline" onsubmit="return confirm('이 모듈을 삭제하시겠습니까?')">
+                            <input type="hidden" name="returnTo" value="/assets/<%= asset.id %>">
+                            <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                        </form>
+                    </td>
                 </tr>
                 <% }) %>
             </tbody>
