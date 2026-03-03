@@ -207,8 +207,8 @@ function parseNetwork(output) {
     }
   });
 
-  // Use add-in cards only if available, otherwise fallback to all
-  const entries = addonEntries.length > 0 ? addonEntries : allEntries;
+  // Only show add-in cards; onboard NICs are not tracked as separate modules
+  const entries = addonEntries;
 
   // Group by bus:device (same physical card) + model
   const cards = {};
