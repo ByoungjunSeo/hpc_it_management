@@ -1,0 +1,1185 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>자산 매칭</h1>
+    <div class="btn-group">
+        <button class="btn btn-primary" onclick="scanAllAssets()" id="scanAllBtn">전체 스캔</button>
+        <button class="btn btn-outline" onclick="toggleManualScan()">수동 스캔</button>
+    </div>
+</div>
+
+<% if (typeof error !== 'undefined' && error) { %>
+<div class="alert alert-error">자산 로드 오류: <%= error %></div>
+<% } %>
+
+<%
+  var catMap = {};
+  var totalWithChildren = 0;
+  if (typeof assets !== 'undefined') {
+    assets.forEach(function(a) {
+      var mn = a.management_number || '';
+      var cat = mn.replace(/-\d+$/, '');
+      if (!catMap[cat]) catMap[cat] = 0;
+      catMap[cat]++;
+      totalWithChildren++;
+      if (a.children) {
+        catMap[cat] += a.children.length;
+        totalWithChildren += a.children.length;
+      }
+    });
+  }
+  var catKeys = Object.keys(catMap).sort();
+%>
+
+<!-- Asset Matching Table -->
+<div class="card" id="assetMatchingCard">
+    <div class="card-header">
+        <h2>서버실 자산 목록</h2>
+        <span class="text-muted" style="font-size:13px;" id="assetCount">
+            총 <strong><%= totalWithChildren %></strong>개 자산
+        </span>
+    </div>
+
+    <!-- Category filter -->
+    <div id="categoryFilter" style="padding:10px 16px; border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
+        <span style="font-size:12px; color:var(--text-secondary); margin-right:4px;">분류:</span>
+        <button class="btn btn-sm btn-primary category-btn" data-category="all" onclick="filterCategory('all')" style="font-size:11px; padding:2px 10px;">전체</button>
+        <% catKeys.forEach(function(cat) { %>
+        <button class="btn btn-sm btn-outline category-btn" data-category="<%= cat %>" onclick="filterCategory('<%= cat %>')" style="font-size:11px; padding:2px 10px;"><%= cat %> <span class="text-muted">(<%= catMap[cat] %>)</span></button>
+        <% }); %>
+    </div>
+
+    <!-- Progress bar (hidden by default) -->
+    <div id="scanAllProgress" style="display:none; padding:12px 16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span id="scanAllProgressText" style="font-size:13px;">스캔 준비중...</span>
+            <span id="scanAllProgressCount" style="font-size:13px; color:var(--text-secondary);">0/0</span>
+        </div>
+        <div class="progress-bar" style="height:8px;">
+            <div class="progress-fill" id="scanAllProgressFill" style="width:0%; background:var(--primary); transition:width 0.3s;"></div>
+        </div>
+    </div>
+
+    <div style="overflow-x:auto;">
+        <table id="assetTable">
+            <thead>
+                <tr>
+                    <th style="width:40px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
+                    <th>관리번호</th>
+                    <th>모델</th>
+                    <th>위치</th>
+                    <th>IP</th>
+                    <th>등록 모듈</th>
+                    <th>실제 모듈</th>
+                    <th>상태</th>
+                    <th style="width:100px;">작업</th>
+                </tr>
+            </thead>
+            <tbody id="assetTableBody">
+                <% if (typeof assets !== 'undefined' && assets.length > 0) { %>
+                <% assets.forEach(function(asset) { %>
+                <% var _cat = (asset.management_number || '').replace(/-\d+$/, ''); %>
+                <tr id="asset-row-<%= asset.id %>" data-asset-id="<%= asset.id %>" data-category="<%= _cat %>">
+                    <td><input type="checkbox" class="asset-check" value="<%= asset.id %>"></td>
+                    <td>
+                        <a href="/assets/<%= asset.id %>" target="_blank" style="font-weight:600;">
+                            <%= asset.management_number || asset.asset_number || 'ID:' + asset.id %>
+                        </a>
+                        <% if (asset.children && asset.children.length > 0) { %>
+                        <span class="badge badge-info" style="font-size:10px; margin-left:4px;" title="하위 노드 <%= asset.children.length %>개">+<%= asset.children.length %></span>
+                        <% } %>
+                    </td>
+                    <td><%= asset.model_name || '-' %><% if (asset.manufacturer) { %> <span class="text-muted" style="font-size:11px;">(<%= asset.manufacturer %>)</span><% } %></td>
+                    <td style="font-size:12px;">
+                        <% if (asset.room_name) { %><%= asset.room_name %><% } %>
+                        <% if (asset.rack_name) { %> / <%= asset.rack_name %><% } %>
+                    </td>
+                    <td style="font-size:12px;">
+                        <% if (asset.ips && asset.ips.length > 0) { %>
+                            <% var mgmtIp = asset.ips.find(function(i) { return i.ip_type === 'management'; }) || asset.ips.find(function(i) { return i.ip_type === 'os'; }) || asset.ips.find(function(i) { return i.ip_type !== 'bmc'; }) || asset.ips[0]; %>
+                            <code><%= mgmtIp.ip_address %></code>
+                            <% if (asset.ips.length > 1) { %>
+                            <span class="text-muted">(+<%= asset.ips.length - 1 %>)</span>
+                            <% } %>
+                        <% } else if (asset.ip_address) { %>
+                            <code><%= asset.ip_address %></code>
+                        <% } else { %>
+                            <span class="text-muted">-</span>
+                        <% } %>
+                    </td>
+                    <td style="font-size:11px; line-height:1.6;" id="registered-modules-<%= asset.id %>">
+                        <% if (asset.registered_modules && asset.registered_modules.length > 0) { %>
+                            <% var regGroup = {};
+                               asset.registered_modules.forEach(function(m) {
+                                 if (!regGroup[m.module_type]) regGroup[m.module_type] = 0;
+                                 regGroup[m.module_type] += (m.count || 1);
+                               });
+                               var typeLabels = { cpu:'CPU', memory:'MEM', disk:'DISK', network:'NIC', raid:'RAID', gpu:'GPU' };
+                            %>
+                            <% Object.keys(regGroup).forEach(function(t) { %>
+                                <span class="badge badge-secondary" style="font-size:10px; margin:1px;"><%= typeLabels[t] || t %> <%= regGroup[t] %></span>
+                            <% }); %>
+                        <% } else { %>
+                            <span class="text-muted">-</span>
+                        <% } %>
+                    </td>
+                    <td style="font-size:11px; line-height:1.6;" id="discovered-count-<%= asset.id %>">
+                        <span class="text-muted">-</span>
+                    </td>
+                    <td style="text-align:center;" id="match-status-<%= asset.id %>">
+                        <span class="badge badge-secondary" title="대기">&#x23F3; 대기</span>
+                    </td>
+                    <td>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-outline" onclick="scanAsset(<%= asset.id %>)" id="scan-btn-<%= asset.id %>" title="스캔">&#x1F50D;</button>
+                            <button class="btn btn-sm btn-outline" onclick="showDetail(<%= asset.id %>)" id="detail-btn-<%= asset.id %>" title="상세" style="display:none;">&#x1F4CB;</button>
+                        </div>
+                    </td>
+                </tr>
+                <tr id="asset-detail-<%= asset.id %>" data-category="<%= _cat %>" style="display:none;">
+                    <td colspan="9" style="padding:0;">
+                        <div id="asset-detail-content-<%= asset.id %>" style="padding:16px; background:var(--bg-secondary, #f8f9fa);"></div>
+                    </td>
+                </tr>
+                <% if (asset.children && asset.children.length > 0) { %>
+                <% asset.children.forEach(function(child) { %>
+                <% var _childCat = _cat; %>
+                <tr id="asset-row-<%= child.id %>" data-asset-id="<%= child.id %>" data-category="<%= _childCat %>" data-parent-id="<%= asset.id %>">
+                    <td><input type="checkbox" class="asset-check" value="<%= child.id %>"></td>
+                    <td style="padding-left:28px;">
+                        <span style="color:var(--text-secondary); margin-right:4px;">&#x2514;</span>
+                        <a href="/assets/<%= child.id %>" target="_blank" style="font-weight:600;">
+                            <%= child.management_number || child.asset_number || 'ID:' + child.id %>
+                        </a>
+                        <% if (child.blade_slot) { %>
+                        <span class="badge badge-secondary" style="font-size:9px; margin-left:4px;">슬롯 <%= child.blade_slot %></span>
+                        <% } %>
+                    </td>
+                    <td><%= child.model_name || '-' %></td>
+                    <td style="font-size:12px;"><span class="text-muted">&#x2514; <%= asset.management_number || '' %></span></td>
+                    <td style="font-size:12px;">
+                        <% if (child.ips && child.ips.length > 0) { %>
+                            <% var childMgmtIp = child.ips.find(function(i) { return i.ip_type === 'management'; }) || child.ips.find(function(i) { return i.ip_type === 'os'; }) || child.ips.find(function(i) { return i.ip_type !== 'bmc'; }) || child.ips[0]; %>
+                            <code><%= childMgmtIp.ip_address %></code>
+                            <% if (child.ips.length > 1) { %>
+                            <span class="text-muted">(+<%= child.ips.length - 1 %>)</span>
+                            <% } %>
+                        <% } else { %>
+                            <span class="text-muted">-</span>
+                        <% } %>
+                    </td>
+                    <td style="font-size:11px; line-height:1.6;" id="registered-modules-<%= child.id %>">
+                        <% if (child.registered_modules && child.registered_modules.length > 0) { %>
+                            <% var childRegGroup = {};
+                               child.registered_modules.forEach(function(m) {
+                                 if (!childRegGroup[m.module_type]) childRegGroup[m.module_type] = 0;
+                                 childRegGroup[m.module_type] += (m.count || 1);
+                               });
+                               var typeLabels2 = { cpu:'CPU', memory:'MEM', disk:'DISK', network:'NIC', raid:'RAID', gpu:'GPU' };
+                            %>
+                            <% Object.keys(childRegGroup).forEach(function(t) { %>
+                                <span class="badge badge-secondary" style="font-size:10px; margin:1px;"><%= typeLabels2[t] || t %> <%= childRegGroup[t] %></span>
+                            <% }); %>
+                        <% } else { %>
+                            <span class="text-muted">-</span>
+                        <% } %>
+                    </td>
+                    <td style="font-size:11px; line-height:1.6;" id="discovered-count-<%= child.id %>">
+                        <span class="text-muted">-</span>
+                    </td>
+                    <td style="text-align:center;" id="match-status-<%= child.id %>">
+                        <span class="badge badge-secondary" title="대기">&#x23F3; 대기</span>
+                    </td>
+                    <td>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-outline" onclick="scanAsset(<%= child.id %>)" id="scan-btn-<%= child.id %>" title="스캔">&#x1F50D;</button>
+                            <button class="btn btn-sm btn-outline" onclick="showDetail(<%= child.id %>)" id="detail-btn-<%= child.id %>" title="상세" style="display:none;">&#x1F4CB;</button>
+                        </div>
+                    </td>
+                </tr>
+                <tr id="asset-detail-<%= child.id %>" data-category="<%= _childCat %>" style="display:none;">
+                    <td colspan="9" style="padding:0;">
+                        <div id="asset-detail-content-<%= child.id %>" style="padding:16px; background:var(--bg-secondary, #f8f9fa);"></div>
+                    </td>
+                </tr>
+                <% }); %>
+                <% } %>
+                <% }); %>
+                <% } else { %>
+                <tr>
+                    <td colspan="9" style="text-align:center; padding:40px; color:var(--text-secondary);">
+                        서버실에 등록된 자산이 없습니다.
+                    </td>
+                </tr>
+                <% } %>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Manual Scan Section (collapsed by default) -->
+<div id="manualScanSection" style="display:none;">
+    <div class="card">
+        <div class="card-header">
+            <h2>수동 스캔</h2>
+            <button class="btn btn-sm btn-outline" onclick="toggleManualScan()">닫기</button>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>스캔 방식</label>
+                <select id="scanMode" class="form-control" onchange="toggleScanMode()">
+                    <option value="single">단일 IP</option>
+                    <option value="range">IP 범위</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="singleIpFields">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>IP 주소 *</label>
+                    <input type="text" id="scanIp" class="form-control" placeholder="10.20.1.100" onblur="lookupIp(this.value)">
+                </div>
+            </div>
+            <div id="ipMatchResult" style="display:none; margin-bottom:16px;"></div>
+        </div>
+
+        <div id="rangeIpFields" style="display:none">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>시작 IP *</label>
+                    <input type="text" id="startIp" class="form-control" placeholder="10.20.1.1">
+                </div>
+                <div class="form-group">
+                    <label>끝 IP *</label>
+                    <input type="text" id="endIp" class="form-control" placeholder="10.20.1.254">
+                </div>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>사용자</label>
+                <input type="text" id="sshUser" class="form-control" value="root" placeholder="root">
+            </div>
+            <div class="form-group">
+                <label>비밀번호</label>
+                <input type="password" id="sshPassword" class="form-control" placeholder="기본: qwe123">
+            </div>
+            <div class="form-group">
+                <label>포트</label>
+                <input type="number" id="sshPort" class="form-control" value="22">
+            </div>
+        </div>
+
+        <div class="btn-group mt-2">
+            <button class="btn btn-primary" onclick="startManualScan()" id="manualScanBtn">스캔 시작</button>
+        </div>
+    </div>
+
+    <div id="manualScanProgress" class="card" style="display:none">
+        <div class="card-header"><h2>스캔 진행</h2></div>
+        <div class="progress-bar" style="height:12px; margin-bottom:12px;">
+            <div class="progress-fill" id="manualProgressFill" style="width:0%; background:var(--primary);"></div>
+        </div>
+        <p id="manualProgressText" class="text-muted">준비중...</p>
+    </div>
+
+    <div id="manualScanResults" style="display:none">
+        <div class="card">
+            <div class="card-header">
+                <h2>스캔 결과</h2>
+                <div class="btn-group">
+                    <button class="btn btn-success" onclick="applyAllManualResults()">모두 자산에 반영</button>
+                </div>
+            </div>
+            <div id="manualResultsList"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── State ──
+var scanResults = {};  // asset_id → scan result
+var manualScanResultsData = [];
+var currentCategory = 'all';
+
+// ── Utility ──
+function escapeHtml(text) {
+    var d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+}
+
+function moduleTypeBadge(type) {
+    var labels = { cpu: 'CPU', memory: 'MEM', disk: 'DISK', network: 'NIC', raid: 'RAID', gpu: 'GPU' };
+    return labels[type] || type;
+}
+
+function moduleSummaryHtml(modules) {
+    if (!modules || modules.length === 0) return '<span class="text-muted">-</span>';
+    var group = {};
+    modules.forEach(function(m) {
+        var t = m.module_type;
+        if (!group[t]) group[t] = 0;
+        group[t] += (m.count || 1);
+    });
+    var html = '';
+    Object.keys(group).forEach(function(t) {
+        html += '<span class="badge badge-info" style="font-size:10px; margin:1px;">' + moduleTypeBadge(t) + ' ' + group[t] + '</span>';
+    });
+    return html;
+}
+
+function moduleTypeLabel(type) {
+    var labels = { cpu: 'CPU', memory: '메모리', disk: '디스크', network: '네트워크', raid: 'RAID', gpu: 'GPU' };
+    return labels[type] || type;
+}
+
+function ownerDisplayName(mod) {
+    if (mod.owner === 'vendor') {
+        return mod.owner_vendor_name || '업체';
+    }
+    return 'TTA';
+}
+
+function buildVendorOptions(vendors, selectedOwner, selectedVendorId) {
+    var html = '<option value="company"' + (selectedOwner !== 'vendor' ? ' selected' : '') + '>TTA</option>';
+    if (vendors && vendors.length > 0) {
+        vendors.forEach(function(v) {
+            var sel = (selectedOwner === 'vendor' && selectedVendorId == v.id) ? ' selected' : '';
+            html += '<option value="vendor_' + v.id + '"' + sel + '>' + escapeHtml(v.vendor_name) + '</option>';
+        });
+    }
+    return html;
+}
+
+// ── Category Filter ──
+function filterCategory(cat) {
+    currentCategory = cat;
+    // Update button states
+    var btns = document.querySelectorAll('.category-btn');
+    for (var i = 0; i < btns.length; i++) {
+        if (btns[i].getAttribute('data-category') === cat) {
+            btns[i].classList.add('btn-primary');
+            btns[i].classList.remove('btn-outline');
+        } else {
+            btns[i].classList.remove('btn-primary');
+            btns[i].classList.add('btn-outline');
+        }
+    }
+
+    // Filter rows
+    var rows = document.querySelectorAll('tr[data-category]');
+    var visibleCount = 0;
+    for (var i = 0; i < rows.length; i++) {
+        var rowCat = rows[i].getAttribute('data-category');
+        var isDetailRow = rows[i].id && rows[i].id.indexOf('asset-detail-') === 0;
+        if (cat === 'all' || rowCat === cat) {
+            if (!isDetailRow) {
+                rows[i].style.display = '';
+                visibleCount++;
+            }
+            // detail rows keep their own display state (toggled by showDetail)
+            // but if hidden by filter, force hide
+        } else {
+            rows[i].style.display = 'none';
+        }
+    }
+
+    // Update count
+    var totalAssets = document.querySelectorAll('tr[data-asset-id]').length;
+    var countEl = document.getElementById('assetCount');
+    if (cat === 'all') {
+        countEl.innerHTML = '총 <strong>' + totalAssets + '</strong>개 자산';
+    } else {
+        countEl.innerHTML = '총 <strong>' + totalAssets + '</strong>개 중 <strong>' + visibleCount + '</strong>개 표시';
+    }
+
+    // Uncheck select-all
+    document.getElementById('selectAll').checked = false;
+}
+
+// ── Select All (visible only) ──
+function toggleSelectAll(cb) {
+    var rows = document.querySelectorAll('tr[data-asset-id]');
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].style.display === 'none') continue;
+        var check = rows[i].querySelector('.asset-check');
+        if (check) check.checked = cb.checked;
+    }
+}
+
+// ── Toggle Manual Scan ──
+function toggleManualScan() {
+    var sec = document.getElementById('manualScanSection');
+    sec.style.display = sec.style.display === 'none' ? '' : 'none';
+}
+
+function toggleScanMode() {
+    var mode = document.getElementById('scanMode').value;
+    document.getElementById('singleIpFields').style.display = mode === 'single' ? '' : 'none';
+    document.getElementById('rangeIpFields').style.display = mode === 'range' ? '' : 'none';
+}
+
+// ── Scan Single Asset ──
+function scanAsset(assetId) {
+    var btn = document.getElementById('scan-btn-' + assetId);
+    var statusCell = document.getElementById('match-status-' + assetId);
+    var discoveredCell = document.getElementById('discovered-count-' + assetId);
+
+    btn.disabled = true;
+    btn.textContent = '...';
+    statusCell.innerHTML = '<span class="badge badge-info">&#x1F50D; 스캔중</span>';
+
+    fetch('/discovery/scan-asset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset_id: assetId })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        scanResults[assetId] = data;
+        btn.disabled = false;
+        btn.textContent = '\u{1F50D}';
+
+        if (data.status === 'success') {
+            discoveredCell.innerHTML = moduleSummaryHtml(data.discovered_modules);
+
+            if (data.comparison) {
+                var comp = data.comparison;
+                if (comp.mismatched.length === 0 && comp.missing.length === 0 && comp.extra.length === 0) {
+                    statusCell.innerHTML = '<span class="badge badge-success" title="일치">&#x2705; 일치</span>';
+                } else {
+                    statusCell.innerHTML = '<span class="badge badge-warning" title="불일치">&#x26A0;&#xFE0F; 불일치</span>';
+                }
+            } else {
+                statusCell.innerHTML = '<span class="badge badge-success">&#x2705; 완료</span>';
+            }
+
+            // Show detail button
+            document.getElementById('detail-btn-' + assetId).style.display = '';
+            // Auto-show detail
+            showDetail(assetId);
+        } else if (data.status === 'auth_failed') {
+            discoveredCell.innerHTML = '<span class="text-muted">-</span>';
+            statusCell.innerHTML = '<span class="badge badge-danger" title="인증 실패">&#x274C; 인증실패</span>';
+        } else if (data.status === 'unreachable') {
+            discoveredCell.innerHTML = '<span class="text-muted">-</span>';
+            statusCell.innerHTML = '<span class="badge badge-danger" title="접속 불가">&#x274C; 접속불가</span>';
+        } else {
+            discoveredCell.innerHTML = '<span class="text-muted">-</span>';
+            statusCell.innerHTML = '<span class="badge badge-danger" title="' + escapeHtml(data.error || '오류') + '">&#x274C; 오류</span>';
+        }
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = '\u{1F50D}';
+        statusCell.innerHTML = '<span class="badge badge-danger">&#x274C; 오류</span>';
+        console.error('Scan error:', err);
+    });
+}
+
+// ── Show Detail Comparison Panel ──
+function showDetail(assetId, forceRefresh) {
+    var detailRow = document.getElementById('asset-detail-' + assetId);
+    var content = document.getElementById('asset-detail-content-' + assetId);
+    var data = scanResults[assetId];
+
+    if (!data) {
+        detailRow.style.display = 'none';
+        return;
+    }
+
+    // Toggle visibility (unless force refresh e.g. after split)
+    if (!forceRefresh && detailRow.style.display !== 'none' && content.innerHTML !== '') {
+        detailRow.style.display = 'none';
+        return;
+    }
+
+    var html = '';
+
+    if (data.status !== 'success') {
+        html = '<div class="alert alert-error" style="margin:0;">오류: ' + escapeHtml(data.error || '알 수 없는 오류') + '</div>';
+        content.innerHTML = html;
+        detailRow.style.display = '';
+        return;
+    }
+
+    if (data.hostname) {
+        html += '<p style="margin-bottom:8px;"><strong>호스트명:</strong> ' + escapeHtml(data.hostname) + '</p>';
+    }
+    if (data.totalMemory) {
+        html += '<p style="margin-bottom:12px;"><strong>총 메모리:</strong> ' + escapeHtml(data.totalMemory) + '</p>';
+    }
+
+    if (data.comparison) {
+        html += renderComparison(data, assetId);
+    } else {
+        // No comparison available, just show discovered modules
+        html += '<h4 style="margin-bottom:8px;">수집된 모듈</h4>';
+        html += renderDiscoveredModuleTable(data, assetId);
+    }
+
+    // Apply button + history button
+    html += '<div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center;">';
+    html += '<button class="btn btn-outline" onclick="showTransferLogs(' + assetId + ')">이력 보기</button>';
+    if (data.discovered_modules && data.discovered_modules.length > 0) {
+        html += '<button class="btn btn-success" onclick="applyAsset(' + assetId + ')">실제 모듈로 갱신</button>';
+    }
+    html += '</div>';
+
+    // Transfer log container
+    html += '<div id="transfer-logs-' + assetId + '" style="display:none; margin-top:12px;"></div>';
+
+    content.innerHTML = html;
+    detailRow.style.display = '';
+}
+
+function renderComparison(data, assetId) {
+    var comp = data.comparison;
+    var vendors = data.vendors || [];
+    var html = '<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">';
+
+    // Left: Registered modules (with owner column)
+    html += '<div>';
+    html += '<h4 style="margin-bottom:8px; color:var(--text-secondary);">등록된 모듈</h4>';
+    var regItems = [];
+    if (comp.matched) comp.matched.forEach(function(m) {
+        var ownerName = 'TTA';
+        if (m.registered_items && m.registered_items.length > 0) {
+            ownerName = ownerDisplayName(m.registered_items[0]);
+        }
+        var ri = m.registered_items && m.registered_items[0] || {};
+        regItems.push({ type: m._type, model: m.model, capacity: ri.capacity || '', specification: ri.specification || '', count: m.registered_count, status: 'matched', ownerName: ownerName });
+    });
+    if (comp.mismatched) comp.mismatched.forEach(function(m) {
+        var ownerName = 'TTA';
+        if (m.registered_items && m.registered_items.length > 0) {
+            ownerName = ownerDisplayName(m.registered_items[0]);
+        }
+        var ri = m.registered_items && m.registered_items[0] || {};
+        regItems.push({ type: m._type, model: m.model, capacity: ri.capacity || '', specification: ri.specification || '', count: m.registered_count, status: 'mismatched', ownerName: ownerName });
+    });
+    if (comp.missing) comp.missing.forEach(function(m) {
+        regItems.push({ type: m._type || m.module_type, model: m.model, capacity: m.capacity || '', specification: m.specification || '', count: m.count || 1, status: 'missing', ownerName: ownerDisplayName(m) });
+    });
+    html += renderComparisonList(regItems, 'registered');
+    html += '</div>';
+
+    // Right: Discovered modules (with owner edit dropdown)
+    html += '<div>';
+    html += '<h4 style="margin-bottom:8px; color:var(--text-secondary);">실제 모듈</h4>';
+    html += renderDiscoveredModuleTable(data, assetId);
+    html += '</div>';
+
+    html += '</div>';
+
+    // Summary
+    var summary = [];
+    if (comp.matched && comp.matched.length > 0) summary.push('<span class="badge badge-success">&#x2705; 일치 ' + comp.matched.length + '</span>');
+    if (comp.mismatched && comp.mismatched.length > 0) summary.push('<span class="badge badge-warning">&#x26A0;&#xFE0F; 불일치 ' + comp.mismatched.length + '</span>');
+    if (comp.extra && comp.extra.length > 0) summary.push('<span class="badge badge-info">&#x1F195; 미등록 ' + comp.extra.length + '</span>');
+    if (comp.missing && comp.missing.length > 0) summary.push('<span class="badge badge-danger">&#x274C; 누락 ' + comp.missing.length + '</span>');
+    if (summary.length > 0) {
+        html += '<div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">' + summary.join('') + '</div>';
+    }
+
+    return html;
+}
+
+function renderComparisonList(items, side) {
+    if (items.length === 0) return '<p class="text-muted" style="font-size:13px;">없음</p>';
+
+    var html = '<table style="width:100%; font-size:13px;">';
+    html += '<thead><tr><th>유형</th><th>모델</th><th>용량</th><th>사양</th><th>수량</th><th>소유자</th><th></th></tr></thead><tbody>';
+    items.forEach(function(item) {
+        var statusIcon = '';
+        var rowStyle = '';
+        if (item.status === 'matched') {
+            statusIcon = '&#x2705;';
+        } else if (item.status === 'mismatched') {
+            statusIcon = '&#x26A0;&#xFE0F;';
+            rowStyle = 'background:rgba(255,193,7,0.1);';
+        } else if (item.status === 'missing' && side === 'registered') {
+            statusIcon = '&#x274C;';
+            rowStyle = 'background:rgba(220,53,69,0.1);';
+        } else if (item.status === 'extra' && side === 'discovered') {
+            statusIcon = '&#x1F195;';
+            rowStyle = 'background:rgba(0,123,255,0.1);';
+        }
+
+        html += '<tr style="' + rowStyle + '">';
+        html += '<td><span class="badge badge-secondary">' + moduleTypeLabel(item.type) + '</span></td>';
+        html += '<td>' + escapeHtml(item.model || '-') + '</td>';
+        html += '<td>' + escapeHtml(item.capacity || '-') + '</td>';
+        html += '<td>' + escapeHtml(item.specification || '-') + '</td>';
+        html += '<td style="text-align:center;">' + item.count + '</td>';
+        html += '<td>' + escapeHtml(item.ownerName || 'TTA') + '</td>';
+        html += '<td style="text-align:center;">' + statusIcon + '</td>';
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+}
+
+function renderDiscoveredModuleTable(data, assetId) {
+    var modules = data.discovered_modules;
+    var vendors = data.vendors || [];
+    var defaultOwner = (data.asset_ownership === 'vendor') ? 'vendor' : 'company';
+    var defaultVendorId = (data.asset_ownership === 'vendor') ? data.asset_vendor_id : null;
+
+    if (!modules || modules.length === 0) return '<p class="text-muted">수집된 모듈이 없습니다.</p>';
+
+    // Assign default owner to discovered modules that don't have one
+    modules.forEach(function(m, idx) {
+        if (!m.owner) {
+            m.owner = defaultOwner;
+            m.owner_vendor_id = defaultVendorId;
+        }
+        m._idx = idx;
+    });
+
+    var html = '<table style="width:100%; font-size:13px;" id="disc-table-' + assetId + '">';
+    html += '<thead><tr><th>유형</th><th>모델</th><th>용량</th><th>사양</th><th>수량</th><th>소유자</th><th></th></tr></thead><tbody>';
+
+    modules.forEach(function(m, idx) {
+        var ownerVal = m.owner === 'vendor' && m.owner_vendor_id ? 'vendor_' + m.owner_vendor_id : 'company';
+        html += '<tr id="disc-row-' + assetId + '-' + idx + '">';
+        html += '<td><span class="badge badge-secondary">' + moduleTypeLabel(m.module_type) + '</span></td>';
+        html += '<td>' + escapeHtml(m.model || '-') + '</td>';
+        html += '<td>' + escapeHtml(m.capacity || '-') + '</td>';
+        html += '<td>' + escapeHtml(m.specification || '-') + '</td>';
+        html += '<td style="text-align:center;" id="disc-count-' + assetId + '-' + idx + '">' + (m.count || 1) + '</td>';
+        html += '<td>';
+        html += '<select class="form-control" style="font-size:12px; padding:2px 4px; min-width:90px;" ';
+        html += 'onchange="changeModuleOwner(' + assetId + ',' + idx + ',this.value)">';
+        html += buildVendorOptions(vendors, m.owner, m.owner_vendor_id);
+        html += '</select>';
+        html += '</td>';
+        html += '<td style="text-align:center;">';
+        if ((m.count || 1) > 1) {
+            html += '<button class="btn btn-sm btn-outline" style="font-size:11px; padding:1px 6px;" onclick="splitModule(' + assetId + ',' + idx + ')" title="수량 분리">분리</button>';
+        }
+        html += '</td>';
+        html += '</tr>';
+    });
+
+    html += '</tbody></table>';
+    return html;
+}
+
+function changeModuleOwner(assetId, idx, val) {
+    var data = scanResults[assetId];
+    if (!data || !data.discovered_modules) return;
+    var mod = data.discovered_modules[idx];
+    if (!mod) return;
+
+    if (val === 'company') {
+        mod.owner = 'company';
+        mod.owner_vendor_id = null;
+    } else if (val.indexOf('vendor_') === 0) {
+        mod.owner = 'vendor';
+        mod.owner_vendor_id = parseInt(val.replace('vendor_', ''), 10);
+    }
+}
+
+function splitModule(assetId, idx) {
+    var data = scanResults[assetId];
+    if (!data || !data.discovered_modules) return;
+    var mod = data.discovered_modules[idx];
+    if (!mod || (mod.count || 1) <= 1) return;
+
+    var total = mod.count || 1;
+    var splitCount = prompt('분리할 수량을 입력하세요 (1~' + (total - 1) + '):', '1');
+    if (!splitCount) return;
+    splitCount = parseInt(splitCount, 10);
+    if (isNaN(splitCount) || splitCount < 1 || splitCount >= total) {
+        alert('유효하지 않은 수량입니다. 1~' + (total - 1) + ' 사이 값을 입력하세요.');
+        return;
+    }
+
+    // Create new module row with the split count
+    var newMod = JSON.parse(JSON.stringify(mod));
+    newMod.count = splitCount;
+    newMod._idx = data.discovered_modules.length;
+
+    // Reduce original count
+    mod.count = total - splitCount;
+
+    // Insert new module after the current one
+    data.discovered_modules.splice(idx + 1, 0, newMod);
+
+    // Re-render the detail panel (force refresh)
+    showDetail(assetId, true);
+}
+
+function renderModuleTable(modules) {
+    if (!modules || modules.length === 0) return '<p class="text-muted">수집된 모듈이 없습니다.</p>';
+    var html = '<table style="font-size:13px;"><thead><tr><th>유형</th><th>모델</th><th>용량</th><th>수량</th><th>사양</th></tr></thead><tbody>';
+    modules.forEach(function(m) {
+        html += '<tr>';
+        html += '<td><span class="badge badge-secondary">' + moduleTypeLabel(m.module_type) + '</span></td>';
+        html += '<td>' + escapeHtml(m.model || '-') + '</td>';
+        html += '<td>' + escapeHtml(m.capacity || '-') + '</td>';
+        html += '<td>' + (m.count || 1) + '</td>';
+        html += '<td>' + escapeHtml(m.specification || '-') + '</td>';
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
+}
+
+// ── Transfer Logs ──
+function showTransferLogs(assetId) {
+    var container = document.getElementById('transfer-logs-' + assetId);
+    if (!container) return;
+
+    // Toggle visibility
+    if (container.style.display !== 'none') {
+        container.style.display = 'none';
+        return;
+    }
+
+    container.innerHTML = '<p class="text-muted">이력 로드중...</p>';
+    container.style.display = '';
+
+    fetch('/discovery/transfer-logs/' + assetId)
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (!result.logs || result.logs.length === 0) {
+            container.innerHTML = '<p class="text-muted" style="font-size:13px;">이동 이력이 없습니다.</p>';
+            return;
+        }
+
+        var html = '<h4 style="margin-bottom:8px; font-size:14px;">모듈 이동 이력</h4>';
+        html += '<table style="width:100%; font-size:12px;">';
+        html += '<thead><tr><th>날짜</th><th>모듈</th><th>수량</th><th>소유자</th><th>이전</th><th></th><th>이후</th><th>사유</th></tr></thead><tbody>';
+
+        result.logs.forEach(function(log) {
+            var fromLabel = log.from_asset_label || '-';
+            var toLabel = log.to_asset_label || '-';
+            var ownerLabel = log.owner === 'vendor' ? (log.owner_vendor_name || '업체') : 'TTA';
+            var moduleLabel = moduleTypeLabel(log.module_type) + (log.model ? ' ' + log.model : '');
+
+            html += '<tr>';
+            html += '<td style="white-space:nowrap;">' + escapeHtml(log.transfer_date || log.created_at || '-') + '</td>';
+            html += '<td>' + escapeHtml(moduleLabel) + '</td>';
+            html += '<td style="text-align:center;">' + (log.count || 1) + '</td>';
+            html += '<td>' + escapeHtml(ownerLabel) + '</td>';
+            html += '<td>' + escapeHtml(fromLabel) + '</td>';
+            html += '<td style="text-align:center;">&rarr;</td>';
+            html += '<td>' + escapeHtml(toLabel) + '</td>';
+            html += '<td>' + escapeHtml(log.reason || '-') + '</td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    })
+    .catch(function(err) {
+        container.innerHTML = '<p class="text-muted" style="color:red;">이력 로드 오류: ' + escapeHtml(err.message) + '</p>';
+    });
+}
+
+// ── Apply Asset ──
+function applyAsset(assetId) {
+    var data = scanResults[assetId];
+    if (!data || !data.discovered_modules) return;
+
+    if (!confirm('실제 수집된 모듈로 등록된 모듈을 갱신하시겠습니까?\n(소유자 정보가 함께 반영됩니다)')) return;
+
+    // Prepare modules with owner info
+    var modulesToSend = data.discovered_modules.map(function(m) {
+        return {
+            module_type: m.module_type,
+            model: m.model,
+            manufacturer: m.manufacturer,
+            capacity: m.capacity,
+            count: m.count || 1,
+            specification: m.specification,
+            slot_info: m.slot_info,
+            notes: m.notes,
+            owner: m.owner || 'company',
+            owner_vendor_id: m.owner_vendor_id || null
+        };
+    });
+
+    fetch('/discovery/apply-asset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            asset_id: assetId,
+            modules: modulesToSend
+        })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (result.success) {
+            alert('모듈이 갱신되었습니다. (소유자 정보 및 이력 포함)');
+            // Update the registered modules column with type badges
+            var regModCell = document.getElementById('registered-modules-' + assetId);
+            if (regModCell) {
+                regModCell.innerHTML = moduleSummaryHtml(data.discovered_modules).replace(/badge-info/g, 'badge-secondary');
+            }
+            // Update status to matched
+            var statusCell = document.getElementById('match-status-' + assetId);
+            if (statusCell) {
+                statusCell.innerHTML = '<span class="badge badge-success">&#x2705; 일치</span>';
+            }
+            // Close detail
+            document.getElementById('asset-detail-' + assetId).style.display = 'none';
+        } else {
+            alert('오류: ' + (result.error || '알 수 없는 오류'));
+        }
+    })
+    .catch(function(err) { alert('오류: ' + err.message); });
+}
+
+// ── Scan All Assets (client-side sequential) ──
+var scanAllRunning = false;
+var scanAllCancelled = false;
+
+function scanAllAssets() {
+    var btn = document.getElementById('scanAllBtn');
+
+    // If already running, cancel
+    if (scanAllRunning) {
+        scanAllCancelled = true;
+        btn.textContent = '중지 중...';
+        return;
+    }
+
+    var rows = document.querySelectorAll('tr[data-asset-id]');
+    var assetIds = [];
+    for (var i = 0; i < rows.length; i++) {
+        // Only scan visible (filtered) assets
+        if (rows[i].style.display === 'none') continue;
+        assetIds.push(parseInt(rows[i].getAttribute('data-asset-id')));
+    }
+    if (assetIds.length === 0) {
+        alert('스캔할 자산이 없습니다.');
+        return;
+    }
+
+    scanAllRunning = true;
+    scanAllCancelled = false;
+    btn.textContent = '스캔 중지';
+
+    var progressDiv = document.getElementById('scanAllProgress');
+    var progressText = document.getElementById('scanAllProgressText');
+    var progressCount = document.getElementById('scanAllProgressCount');
+    var progressFill = document.getElementById('scanAllProgressFill');
+    progressDiv.style.display = '';
+    progressFill.style.width = '0%';
+    progressText.textContent = '스캔 시작...';
+    progressCount.textContent = '0/' + assetIds.length;
+
+    var total = assetIds.length;
+    var completed = 0;
+    var successCount = 0;
+    var errorCount = 0;
+
+    function scanNext(idx) {
+        if (idx >= total || scanAllCancelled) {
+            scanAllRunning = false;
+            scanAllCancelled = false;
+            btn.disabled = false;
+            btn.textContent = '전체 스캔';
+            progressFill.style.width = '100%';
+            if (idx >= total) {
+                progressText.textContent = '스캔 완료! 성공: ' + successCount + ', 오류: ' + errorCount + ' / 총 ' + total + '개';
+            } else {
+                progressText.textContent = '스캔 중지됨. 완료: ' + completed + '/' + total;
+            }
+            return;
+        }
+
+        var assetId = assetIds[idx];
+        var assetRow = document.getElementById('asset-row-' + assetId);
+        var assetLabel = assetRow ? (assetRow.querySelector('a') ? assetRow.querySelector('a').textContent.trim() : 'ID:' + assetId) : 'ID:' + assetId;
+        progressText.textContent = '스캔 중: ' + assetLabel + ' (' + (idx + 1) + '/' + total + ')';
+
+        // Set scanning status on row
+        var statusCell = document.getElementById('match-status-' + assetId);
+        if (statusCell) statusCell.innerHTML = '<span class="badge badge-info">&#x1F50D; 스캔중</span>';
+
+        fetch('/discovery/scan-asset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_id: assetId })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            scanResults[assetId] = data;
+            updateAssetRow(data);
+            completed++;
+            if (data.status === 'success') successCount++;
+            else errorCount++;
+
+            var pct = Math.round((completed / total) * 100);
+            progressFill.style.width = pct + '%';
+            progressCount.textContent = completed + '/' + total;
+
+            // Show detail button
+            if (data.status === 'success') {
+                var detailBtn = document.getElementById('detail-btn-' + assetId);
+                if (detailBtn) detailBtn.style.display = '';
+            }
+
+            scanNext(idx + 1);
+        })
+        .catch(function(err) {
+            completed++;
+            errorCount++;
+            var pct = Math.round((completed / total) * 100);
+            progressFill.style.width = pct + '%';
+            progressCount.textContent = completed + '/' + total;
+            if (statusCell) statusCell.innerHTML = '<span class="badge badge-danger">&#x274C; 오류</span>';
+            scanNext(idx + 1);
+        });
+    }
+
+    scanNext(0);
+}
+
+function updateAssetRow(data) {
+    var statusCell = document.getElementById('match-status-' + data.asset_id);
+    var discoveredCell = document.getElementById('discovered-count-' + data.asset_id);
+
+    if (!statusCell || !discoveredCell) return;
+
+    if (data.status === 'success') {
+        discoveredCell.innerHTML = moduleSummaryHtml(data.discovered_modules);
+
+        if (data.comparison) {
+            var comp = data.comparison;
+            if (comp.mismatched.length === 0 && comp.missing.length === 0 && comp.extra.length === 0) {
+                statusCell.innerHTML = '<span class="badge badge-success" title="일치">&#x2705; 일치</span>';
+            } else {
+                statusCell.innerHTML = '<span class="badge badge-warning" title="불일치">&#x26A0;&#xFE0F; 불일치</span>';
+            }
+        } else {
+            statusCell.innerHTML = '<span class="badge badge-success">&#x2705; 완료</span>';
+        }
+
+        document.getElementById('detail-btn-' + data.asset_id).style.display = '';
+    } else if (data.status === 'auth_failed') {
+        discoveredCell.innerHTML = '<span class="text-muted">-</span>';
+        statusCell.innerHTML = '<span class="badge badge-danger">&#x274C; 인증실패</span>';
+    } else if (data.status === 'unreachable') {
+        discoveredCell.innerHTML = '<span class="text-muted">-</span>';
+        statusCell.innerHTML = '<span class="badge badge-danger">&#x274C; 접속불가</span>';
+    } else {
+        discoveredCell.innerHTML = '<span class="text-muted">-</span>';
+        statusCell.innerHTML = '<span class="badge badge-danger">&#x274C; 오류</span>';
+    }
+}
+
+// ══════════════════════════════════════════════════════
+//  MANUAL SCAN (legacy, kept for backward compatibility)
+// ══════════════════════════════════════════════════════
+
+function lookupIp(ip) {
+    if (!ip || !ip.trim()) {
+        document.getElementById('ipMatchResult').style.display = 'none';
+        return;
+    }
+    fetch('/discovery/lookup-ip?ip=' + encodeURIComponent(ip.trim()))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var container = document.getElementById('ipMatchResult');
+        if (!data.results || data.results.length === 0) {
+            container.innerHTML = '<div class="alert" style="background:#fff3cd; border:1px solid #ffc107; padding:8px 12px; border-radius:6px; font-size:13px;">등록된 자산 없음 - 이 IP에 매칭되는 자산이 없습니다.</div>';
+            container.style.display = '';
+            return;
+        }
+        var html = '<div style="background:#d4edda; border:1px solid #28a745; padding:12px; border-radius:6px;">';
+        html += '<strong style="color:#155724;">매칭된 자산 정보</strong>';
+        data.results.forEach(function(r) {
+            html += '<div style="margin-top:8px; padding:8px; background:white; border-radius:4px;">';
+            html += '<span class="badge badge-success">등록됨</span> ';
+            html += '<strong>' + escapeHtml(r.asset_number || '') + '</strong> ';
+            html += escapeHtml(r.model_name || '') + ' (' + escapeHtml(r.manufacturer || '') + ')';
+            html += ' <a href="/assets/' + r.asset_id + '" target="_blank" style="font-size:12px;">[상세]</a>';
+            if (r.credentials && r.credentials.length > 0) {
+                html += '<div style="margin-top:6px; font-size:13px;">';
+                html += '<strong>등록된 자격증명:</strong>';
+                html += '<table style="margin-top:4px; font-size:12px; width:100%;"><thead><tr><th>유형</th><th>사용자</th><th>비밀번호</th><th></th></tr></thead><tbody>';
+                r.credentials.forEach(function(c) {
+                    html += '<tr>';
+                    html += '<td><span class="badge badge-info">' + escapeHtml(c.credential_type) + '</span></td>';
+                    html += '<td>' + escapeHtml(c.username) + '</td>';
+                    html += '<td><code>' + escapeHtml(c.password || '') + '</code></td>';
+                    html += '<td><button class="btn btn-sm btn-outline" onclick="useCredential(\'' + escapeHtml(c.username) + '\', \'' + escapeHtml(c.password || '') + '\')">이 계정 사용</button></td>';
+                    html += '</tr>';
+                });
+                html += '</tbody></table></div>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+        container.innerHTML = html;
+        container.style.display = '';
+    })
+    .catch(function(err) { console.error('IP lookup error:', err); });
+}
+
+function useCredential(username, password) {
+    document.getElementById('sshUser').value = username;
+    document.getElementById('sshPassword').value = password;
+}
+
+function startManualScan() {
+    var mode = document.getElementById('scanMode').value;
+    var user = document.getElementById('sshUser').value;
+    var password = document.getElementById('sshPassword').value;
+    var port = document.getElementById('sshPort').value;
+
+    document.getElementById('manualScanBtn').disabled = true;
+    document.getElementById('manualScanBtn').textContent = '스캔 중...';
+    document.getElementById('manualScanProgress').style.display = '';
+    document.getElementById('manualScanResults').style.display = 'none';
+    document.getElementById('manualProgressFill').style.width = '0%';
+    document.getElementById('manualProgressText').textContent = '스캔 시작...';
+
+    var url, body;
+
+    if (mode === 'single') {
+        var ip = document.getElementById('scanIp').value;
+        if (!ip) { alert('IP 주소를 입력하세요.'); resetManualScanBtn(); return; }
+        url = '/discovery/scan';
+        body = { ip: ip, user: user, password: password, port: port };
+    } else {
+        var startIp = document.getElementById('startIp').value;
+        var endIp = document.getElementById('endIp').value;
+        if (!startIp || !endIp) { alert('IP 범위를 입력하세요.'); resetManualScanBtn(); return; }
+        url = '/discovery/scan-range';
+        body = { start_ip: startIp, end_ip: endIp, user: user, password: password, port: port };
+    }
+
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var results = Array.isArray(data) ? data : [data];
+        manualScanResultsData = results;
+        document.getElementById('manualProgressFill').style.width = '100%';
+        document.getElementById('manualProgressText').textContent = '완료! ' + results.length + '개 호스트 스캔됨';
+
+        if (mode === 'range') {
+            var lookupPromises = results.map(function(r) {
+                return fetch('/discovery/lookup-ip?ip=' + encodeURIComponent(r.ip))
+                    .then(function(resp) { return resp.json(); })
+                    .then(function(d) { r._matchInfo = d.results || []; })
+                    .catch(function() { r._matchInfo = []; });
+            });
+            Promise.all(lookupPromises).then(function() {
+                renderManualResults(results);
+                resetManualScanBtn();
+            });
+        } else {
+            renderManualResults(results);
+            resetManualScanBtn();
+        }
+    })
+    .catch(function(err) {
+        document.getElementById('manualProgressText').textContent = '오류: ' + err.message;
+        resetManualScanBtn();
+    });
+}
+
+function resetManualScanBtn() {
+    document.getElementById('manualScanBtn').disabled = false;
+    document.getElementById('manualScanBtn').textContent = '스캔 시작';
+}
+
+function renderManualResults(results) {
+    document.getElementById('manualScanResults').style.display = '';
+    var html = '';
+
+    results.forEach(function(r, idx) {
+        var statusBadge = '';
+        if (r.status === 'success') statusBadge = '<span class="badge badge-success">성공</span>';
+        else if (r.status === 'auth_failed') statusBadge = '<span class="badge badge-warning">인증 실패</span>';
+        else if (r.status === 'unreachable') statusBadge = '<span class="badge badge-danger">접속 불가</span>';
+        else statusBadge = '<span class="badge badge-secondary">' + r.status + '</span>';
+
+        var matchBadge = '';
+        if (r._matchInfo && r._matchInfo.length > 0) {
+            matchBadge = ' <span class="badge badge-info">등록됨</span>';
+        } else if (r._matchInfo) {
+            matchBadge = ' <span class="badge badge-secondary">미등록</span>';
+        }
+
+        html += '<div style="padding:16px; border-bottom:1px solid var(--border);">';
+        html += '<div class="d-flex justify-between align-center mb-1">';
+        html += '<strong>' + escapeHtml(r.ip) + '</strong> ' + statusBadge + matchBadge;
+        if (r.status === 'success') {
+            html += ' <button class="btn btn-sm btn-success" onclick="applyManualResult(' + idx + ')">자산에 반영</button>';
+        }
+        html += '</div>';
+
+        if (r.hostname) html += '<p>호스트명: ' + escapeHtml(r.hostname) + '</p>';
+        if (r.totalMemory) html += '<p>총 메모리: ' + escapeHtml(r.totalMemory) + '</p>';
+
+        if (r.modules && r.modules.length > 0) {
+            html += '<table style="margin-top:8px;"><thead><tr><th>유형</th><th>모델</th><th>용량</th><th>수량</th><th>사양</th></tr></thead><tbody>';
+            r.modules.forEach(function(m) {
+                html += '<tr><td>' + escapeHtml(m.module_type) + '</td><td>' + escapeHtml(m.model || '-') + '</td><td>' + escapeHtml(m.capacity || '-') + '</td><td>' + (m.count || 1) + '</td><td>' + escapeHtml(m.specification || '-') + '</td></tr>';
+            });
+            html += '</tbody></table>';
+        }
+
+        if (r.error) html += '<p class="text-muted" style="font-size:12px;">오류: ' + escapeHtml(r.error) + '</p>';
+        html += '</div>';
+    });
+
+    document.getElementById('manualResultsList').innerHTML = html;
+}
+
+function applyManualResult(idx) {
+    var r = manualScanResultsData[idx];
+    if (!r || r.status !== 'success') return;
+
+    fetch('/discovery/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: r.ip, hostname: r.hostname, modules: r.modules, create_new: true })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.success) {
+            alert('자산이 등록/업데이트되었습니다. (ID: ' + data.asset_id + ')');
+        } else {
+            alert('오류: ' + (data.error || '알 수 없는 오류'));
+        }
+    })
+    .catch(function(err) { alert('오류: ' + err.message); });
+}
+
+function applyAllManualResults() {
+    var successResults = manualScanResultsData.filter(function(r) { return r.status === 'success'; });
+    if (successResults.length === 0) { alert('반영할 결과가 없습니다.'); return; }
+    if (!confirm(successResults.length + '개 호스트를 자산에 반영하시겠습니까?')) return;
+
+    var promises = successResults.map(function(r) {
+        return fetch('/discovery/apply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: r.ip, hostname: r.hostname, modules: r.modules, create_new: true })
+        }).then(function(res) { return res.json(); });
+    });
+
+    Promise.all(promises).then(function(results) {
+        var ok = results.filter(function(r) { return r.success; }).length;
+        alert(ok + '/' + results.length + '개 자산이 반영되었습니다.');
+    });
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
