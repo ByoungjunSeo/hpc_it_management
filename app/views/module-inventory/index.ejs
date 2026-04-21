@@ -1,0 +1,912 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>부품 현황</h1>
+</div>
+
+<%
+  const typeLabels = { cpu: 'CPU', memory: '메모리', disk: '디스크/스토리지', network: 'NIC', raid: 'RAID', gpu: 'GPU', cable: '케이블' };
+  const activeTab = tab || 'inventory';
+%>
+
+<!-- Tabs -->
+<div class="tabs" style="display:flex; gap:0; margin-bottom:20px; border-bottom:2px solid var(--border, #ddd);">
+    <a href="/module-inventory?tab=inventory<%= selectedType ? '&type=' + selectedType : '' %>"
+       class="tab-link" style="padding:10px 24px; font-weight:<%= activeTab === 'inventory' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'inventory' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'inventory' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
+        부품 재고
+    </a>
+    <a href="/module-inventory?tab=installed<%= filters.module_type ? '&module_type=' + filters.module_type : '' %><%= filters.search ? '&search=' + encodeURIComponent(filters.search) : '' %>"
+       class="tab-link" style="padding:10px 24px; font-weight:<%= activeTab === 'installed' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'installed' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'installed' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
+        설치 현황
+    </a>
+    <a href="/module-inventory?tab=history"
+       class="tab-link" style="padding:10px 24px; font-weight:<%= activeTab === 'history' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'history' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'history' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
+        입출고 이력
+    </a>
+</div>
+
+<% if (activeTab === 'inventory') { %>
+<!-- ===== Tab 1: 부품 재고 ===== -->
+
+<div class="stats-grid">
+    <% statsByType.forEach(s => { %>
+    <div class="stat-card">
+        <div class="stat-value"><%= s.total || 0 %></div>
+        <div class="stat-label"><%= typeLabels[s.module_type] || s.module_type %> (총)</div>
+        <div class="mt-1" style="font-size:13px;">
+            <span style="color:#6b7280;">장비실: <%= s.storage || 0 %></span> /
+            <span style="color:var(--primary);">사용: <%= s.in_use || 0 %></span> /
+            <span style="color:var(--success);">여유: <%= s.spare || 0 %></span>
+        </div>
+    </div>
+    <% }) %>
+</div>
+
+<div class="card">
+    <form class="filters" method="GET" action="/module-inventory">
+        <input type="hidden" name="tab" value="inventory">
+        <div class="form-group">
+            <label>유형 필터</label>
+            <select name="type" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% appConfig.moduleTypes.forEach(m => { %>
+                <option value="<%= m.value %>" <%= selectedType === m.value ? 'selected' : '' %>><%= m.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group" style="display:flex; align-items:center; gap:6px; margin-top:20px;">
+            <input type="checkbox" name="spare_only" value="1" id="spareOnlyChk" <%= spareOnly ? 'checked' : '' %> onchange="this.form.submit()">
+            <label for="spareOnlyChk" style="margin:0; cursor:pointer;">여유분만 보기</label>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>코드</th>
+                    <th>자산번호</th>
+                    <th>제조사</th>
+                    <th>모델</th>
+                    <th>용량/사양</th>
+                    <th>스펙</th>
+                    <th>총수량</th>
+                    <th>장비실</th>
+                    <th>사용중</th>
+                    <th>여유</th>
+                    <th>입출고</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% if (items.length === 0) { %>
+                <tr><td colspan="12" class="text-center text-muted">부품 데이터가 없습니다.</td></tr>
+                <% } %>
+                <% items.forEach(item => { %>
+                <tr class="<%= item.spare_quantity > 0 ? '' : 'text-muted' %>" style="<%= item.spare_quantity > 0 ? 'background:#f0fdf4;' : '' %>">
+                    <td><span class="badge badge-secondary"><%= typeLabels[item.module_type] || item.module_type %></span></td>
+                    <td>
+                        <a href="#" class="comp-code-link" data-code="<%= item.item_code %>" style="font-weight:bold; cursor:pointer;">
+                            <code><%= item.item_code || '-' %></code>
+                        </a>
+                    </td>
+                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="asset_number" title="클릭하여 수정"><%= item.asset_number || '-' %></td>
+                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="manufacturer" title="클릭하여 수정"><%= item.manufacturer || '-' %></td>
+                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="model" title="클릭하여 수정"><%= item.model || '-' %></td>
+                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="capacity" title="클릭하여 수정"><%= item.capacity || '-' %></td>
+                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="specification" title="클릭하여 수정" style="font-size:12px;"><%= item.specification || '-' %></td>
+                    <td><strong><%= item.total_quantity %></strong></td>
+                    <td><%= item.storage_quantity || 0 %></td>
+                    <td><%= item.in_use_quantity %></td>
+                    <td><strong style="color: <%= item.spare_quantity > 0 ? 'var(--success)' : 'var(--text-light)' %>"><%= item.spare_quantity %></strong></td>
+                    <td>
+                        <button class="btn btn-sm btn-outline adjust-btn" data-inv-id="<%= item.id %>" data-code="<%= item.item_code %>" data-total="<%= item.total_quantity %>" onclick="openAdjustModal(this)">+/-</button>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted mt-1">총 <%= items.length %>종</p>
+</div>
+
+<!-- Adjust Quantity Modal -->
+<div id="adjustModal" class="modal-overlay">
+    <div class="modal-content" style="max-width:480px;">
+        <div class="modal-header">
+            <h3 id="adjustTitle">수량 조정</h3>
+            <button class="modal-close" onclick="closeModal('adjustModal')">&times;</button>
+        </div>
+        <div style="margin-bottom:16px;">
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <button type="button" class="btn btn-sm" id="adjTypeIncoming" onclick="setAdjustType('incoming')" style="flex:1; background:#22c55e; color:white;">입고 (+)</button>
+                <button type="button" class="btn btn-sm" id="adjTypeOutgoing" onclick="setAdjustType('outgoing')" style="flex:1; background:#94a3b8; color:white;">출고 (-)</button>
+            </div>
+            <div class="form-group" style="margin-bottom:10px;">
+                <label>수량</label>
+                <input type="number" id="adjQuantity" class="form-control" min="1" value="1" style="font-size:18px; text-align:center;">
+            </div>
+            <div class="form-group" style="margin-bottom:10px;">
+                <label>자산번호 (선택)</label>
+                <input type="text" id="adjAssetNumber" class="form-control" placeholder="입고 시 자산번호">
+            </div>
+            <div class="form-group" style="margin-bottom:10px;">
+                <label>비고</label>
+                <input type="text" id="adjNotes" class="form-control" placeholder="사유, 메모">
+            </div>
+            <div id="adjResult" style="font-size:13px; min-height:20px; margin-bottom:8px;"></div>
+            <button type="button" class="btn btn-primary" onclick="submitAdjust()" style="width:100%;">적용</button>
+        </div>
+    </div>
+</div>
+
+<!-- Usage Detail Modal -->
+<div id="usageModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">부품 상세</h3>
+            <button class="modal-close" onclick="closeModal('usageModal')">&times;</button>
+        </div>
+        <div id="modalSpec" style="margin-bottom:12px;"></div>
+        <!-- Modal Tabs -->
+        <div class="modal-tabs" style="display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid var(--border, #ddd);">
+            <button type="button" class="modal-tab active" data-tab="usage" onclick="switchModalTab('usage')" style="padding:8px 20px; border:none; background:none; cursor:pointer; font-weight:bold; border-bottom:2px solid var(--primary, #2563eb); margin-bottom:-2px; color:var(--primary, #2563eb);">사용 현황</button>
+            <button type="button" class="modal-tab" data-tab="history" onclick="switchModalTab('history')" style="padding:8px 20px; border:none; background:none; cursor:pointer; font-weight:normal; border-bottom:2px solid transparent; margin-bottom:-2px; color:var(--text-secondary, #666);">이력</button>
+        </div>
+        <div id="modalBody">
+            <p class="text-muted">로딩 중...</p>
+        </div>
+        <div id="modalHistoryBody" style="display:none;">
+            <p class="text-muted">로딩 중...</p>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5); z-index: 1000;
+    display: none; align-items: center; justify-content: center;
+}
+.modal-overlay.active {
+    display: flex;
+}
+.modal-content {
+    background: var(--bg, #fff); border-radius: 8px; padding: 24px;
+    max-width: 900px; width: 90%; max-height: 80vh; overflow-y: auto;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border, #ddd);
+}
+.modal-header h3 { margin: 0; }
+.modal-close {
+    background: none; border: none; font-size: 28px; cursor: pointer;
+    color: var(--text-light, #999); padding: 4px 8px; line-height: 1;
+}
+.modal-close:hover { color: var(--danger, #e00); }
+.spec-info { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-light); }
+.spec-info span { background: var(--bg-alt, #f5f5f5); padding: 2px 8px; border-radius: 4px; }
+</style>
+
+<script>
+var currentModalCode = '';
+var _adjInvId = null;
+var _adjType = 'incoming';
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { closeModal('usageModal'); closeModal('adjustModal'); }
+});
+
+function setAdjustType(type) {
+    _adjType = type;
+    var inc = document.getElementById('adjTypeIncoming');
+    var out = document.getElementById('adjTypeOutgoing');
+    if (type === 'incoming') {
+        inc.style.background = '#22c55e'; out.style.background = '#94a3b8';
+    } else {
+        out.style.background = '#ef4444'; inc.style.background = '#94a3b8';
+    }
+}
+
+function openAdjustModal(btn) {
+    _adjInvId = btn.dataset.invId;
+    var code = btn.dataset.code;
+    var total = btn.dataset.total;
+    document.getElementById('adjustTitle').textContent = code + ' 수량 조정 (현재: ' + total + '개)';
+    document.getElementById('adjQuantity').value = 1;
+    document.getElementById('adjAssetNumber').value = '';
+    document.getElementById('adjNotes').value = '';
+    document.getElementById('adjResult').textContent = '';
+    setAdjustType('incoming');
+    openModal('adjustModal');
+}
+
+function submitAdjust() {
+    var qty = parseInt(document.getElementById('adjQuantity').value) || 0;
+    if (qty <= 0) { alert('수량을 입력해주세요.'); return; }
+    var change = _adjType === 'incoming' ? qty : -qty;
+    var resultEl = document.getElementById('adjResult');
+    resultEl.textContent = '처리 중...';
+    resultEl.style.color = '#3b82f6';
+
+    fetch('/module-inventory/api/inventory/' + _adjInvId + '/adjust', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            quantity_change: change,
+            event_type: _adjType,
+            asset_number: document.getElementById('adjAssetNumber').value.trim() || null,
+            notes: document.getElementById('adjNotes').value.trim() || null
+        })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            resultEl.style.color = '#22c55e';
+            resultEl.textContent = '완료: ' + data.before_total + ' → ' + data.after_total + '개';
+            setTimeout(function() { location.reload(); }, 800);
+        } else {
+            resultEl.style.color = '#ef4444';
+            resultEl.textContent = '실패: ' + (data.error || '');
+        }
+    })
+    .catch(function(err) {
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = '오류: ' + err.message;
+    });
+}
+
+function switchModalTab(tabName) {
+    var tabs = document.querySelectorAll('.modal-tab');
+    tabs.forEach(function(t) {
+        var isActive = t.getAttribute('data-tab') === tabName;
+        t.style.fontWeight = isActive ? 'bold' : 'normal';
+        t.style.borderBottom = isActive ? '2px solid var(--primary, #2563eb)' : '2px solid transparent';
+        t.style.color = isActive ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)';
+        if (isActive) t.classList.add('active'); else t.classList.remove('active');
+    });
+    document.getElementById('modalBody').style.display = tabName === 'usage' ? '' : 'none';
+    document.getElementById('modalHistoryBody').style.display = tabName === 'history' ? '' : 'none';
+
+    if (tabName === 'history' && currentModalCode) {
+        loadHistory(currentModalCode);
+    }
+}
+
+function loadHistory(code) {
+    var histBody = document.getElementById('modalHistoryBody');
+    histBody.innerHTML = '<p class="text-muted">로딩 중...</p>';
+
+    fetch('/module-inventory/api/history/' + encodeURIComponent(code))
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (!data.logs || data.logs.length === 0) {
+                histBody.innerHTML = '<p class="text-muted">이력이 없습니다.</p>';
+                return;
+            }
+
+            var eventLabels = { incoming: '입고', outgoing: '출고', installed: '설치', removed: '제거', transfer: '이동', adjust: '조정' };
+            var eventColors = { incoming: 'success', outgoing: 'warning', installed: 'info', removed: 'danger', transfer: 'secondary', adjust: 'secondary' };
+
+            // Asset number summary from incoming logs
+            var assetSummary = {};
+            data.logs.forEach(function(log) {
+                if (log.event_type === 'incoming' && log.asset_number) {
+                    if (!assetSummary[log.asset_number]) assetSummary[log.asset_number] = 0;
+                    assetSummary[log.asset_number] += (log.quantity_change || 0);
+                }
+            });
+
+            var html = '';
+
+            // Show asset number summary if any
+            var assetKeys = Object.keys(assetSummary);
+            if (assetKeys.length > 0) {
+                html += '<div style="margin-bottom:12px; padding:8px 12px; background:var(--bg-alt, #f5f5f5); border-radius:6px;">';
+                html += '<strong style="font-size:13px;">자산번호별 수량:</strong> ';
+                assetKeys.forEach(function(an, i) {
+                    if (i > 0) html += ', ';
+                    html += '<span class="badge badge-info" style="margin:2px;">' + an + ': ' + assetSummary[an] + '개</span>';
+                });
+                html += '</div>';
+            }
+
+            html += '<div class="table-wrapper"><table><thead><tr>';
+            html += '<th>일시</th><th>유형</th><th>수량변동</th><th>총수량</th><th>여유</th><th>서버</th><th>자산번호</th><th>사용자</th><th>비고</th>';
+            html += '</tr></thead><tbody>';
+
+            data.logs.forEach(function(log) {
+                var dt = log.created_at ? log.created_at.replace('T', ' ').substring(0, 16) : '-';
+                var evLabel = eventLabels[log.event_type] || log.event_type;
+                var evColor = eventColors[log.event_type] || 'secondary';
+                var qtyStr = log.quantity_change > 0 ? '+' + log.quantity_change : (log.quantity_change || '-');
+                var assetInfo = log.asset_label || log.to_asset_label || log.from_asset_label || '-';
+                if (log.from_asset_label && log.to_asset_label) {
+                    assetInfo = log.from_asset_label + ' → ' + log.to_asset_label;
+                }
+
+                html += '<tr>';
+                html += '<td style="font-size:12px; white-space:nowrap;">' + dt + '</td>';
+                html += '<td><span class="badge badge-' + evColor + '">' + evLabel + '</span></td>';
+                html += '<td style="font-weight:bold;">' + qtyStr + '</td>';
+                html += '<td>' + (log.after_total != null ? log.after_total : '-') + '</td>';
+                html += '<td>' + (log.after_spare != null ? log.after_spare : '-') + '</td>';
+                html += '<td>' + assetInfo + '</td>';
+                html += '<td>' + (log.asset_number || '-') + '</td>';
+                html += '<td>' + (log.username || '-') + '</td>';
+                html += '<td style="font-size:12px;">' + (log.notes || '-') + '</td>';
+                html += '</tr>';
+            });
+
+            html += '</tbody></table></div>';
+            html += '<p class="text-muted mt-1">총 ' + data.logs.length + '건</p>';
+            histBody.innerHTML = html;
+        })
+        .catch(function(err) {
+            histBody.innerHTML = '<p style="color:red;">오류: ' + err.message + '</p>';
+        });
+}
+
+document.querySelectorAll('.comp-code-link').forEach(function(link) {
+    link.addEventListener('click', function(e) {
+        e.preventDefault();
+        var code = this.getAttribute('data-code');
+        currentModalCode = code;
+        var modal = document.getElementById('usageModal');
+        var modalTitle = document.getElementById('modalTitle');
+        var modalSpec = document.getElementById('modalSpec');
+        var modalBody = document.getElementById('modalBody');
+        var histBody = document.getElementById('modalHistoryBody');
+
+        modalTitle.textContent = code + ' 상세';
+        modalSpec.innerHTML = '<p class="text-muted">로딩 중...</p>';
+        modalBody.innerHTML = '';
+        histBody.innerHTML = '';
+        histBody.style.display = 'none';
+        modalBody.style.display = '';
+        // Reset to usage tab
+        switchModalTab('usage');
+        modal.classList.add('active');
+
+        fetch('/module-inventory/api/usage/' + encodeURIComponent(code))
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                var specHtml = '';
+                if (data.spec) {
+                    specHtml = '<div class="spec-info">';
+                    if (data.spec.module_type) specHtml += '<span><strong>' + data.spec.module_type.toUpperCase() + '</strong></span>';
+                    if (data.spec.manufacturer) specHtml += '<span>제조사: ' + data.spec.manufacturer + '</span>';
+                    if (data.spec.model) specHtml += '<span>모델: ' + data.spec.model + '</span>';
+                    if (data.spec.capacity) specHtml += '<span>용량: ' + data.spec.capacity + '</span>';
+                    if (data.spec.specification) specHtml += '<span>스펙: ' + data.spec.specification + '</span>';
+                    specHtml += '<span>총: ' + (data.spec.total_quantity || 0) + '</span>';
+                    specHtml += '<span>사용: ' + (data.spec.in_use_quantity || 0) + '</span>';
+                    specHtml += '<span>여유: ' + (data.spec.spare_quantity || 0) + '</span>';
+                    if (data.spec.asset_number) specHtml += '<span>자산번호: ' + data.spec.asset_number + '</span>';
+                    specHtml += '</div>';
+                }
+                modalSpec.innerHTML = specHtml;
+
+                if (!data.usage || data.usage.length === 0) {
+                    modalBody.innerHTML = '<p class="text-muted">이 부품을 사용 중인 장비가 없습니다.</p>';
+                    return;
+                }
+
+                var html = '<div class="table-wrapper"><table><thead><tr>';
+                html += '<th>관리번호</th><th>모델명</th><th>사용자</th><th>위치</th><th>슬롯</th><th>수량</th>';
+                html += '</tr></thead><tbody>';
+
+                data.usage.forEach(function(u) {
+                    html += '<tr>';
+                    html += '<td><a href="/inventory/equipment/' + encodeURIComponent(u.management_number) + '">' + (u.management_number || '-') + '</a></td>';
+                    html += '<td>' + (u.model_name || '-') + '</td>';
+                    html += '<td>' + (u.user_name || '-') + '</td>';
+                    html += '<td>' + (u.location || '-') + '</td>';
+                    html += '<td>' + (u.slot || '-') + '</td>';
+                    html += '<td>' + (u.count || 0) + '</td>';
+                    html += '</tr>';
+                });
+
+                html += '</tbody></table></div>';
+                html += '<p class="text-muted mt-1">사용중: ' + data.usage.length + '건</p>';
+                html += '<p class="text-muted" style="font-size:12px;">반납/이동 이력은 <a href="#" onclick="switchModalTab(\'history\'); return false;">이력</a> 탭에서 확인하세요.</p>';
+                modalBody.innerHTML = html;
+            })
+            .catch(function(err) {
+                modalBody.innerHTML = '<p style="color:red;">오류: ' + err.message + '</p>';
+            });
+    });
+});
+
+// === Inventory tab inline editing ===
+(function() {
+    var cells = document.querySelectorAll('.inv-editable');
+    cells.forEach(function(cell) {
+        cell.addEventListener('click', function() {
+            if (cell.classList.contains('editing')) return;
+            startInvEdit(cell);
+        });
+    });
+
+    function startInvEdit(cell) {
+        var invId = cell.getAttribute('data-inv-id');
+        var field = cell.getAttribute('data-field');
+        var currentValue = cell.textContent.trim();
+        if (currentValue === '-') currentValue = '';
+
+        cell.classList.add('editing');
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'inline-edit-input';
+        input.value = currentValue;
+        cell.textContent = '';
+        cell.appendChild(input);
+        input.focus();
+        input.select();
+
+        function save() {
+            var newValue = input.value.trim();
+            if (newValue === currentValue) { cancel(); return; }
+            cell.classList.add('inline-edit-saving');
+
+            fetch('/module-inventory/api/inventory/' + invId + '/inline-update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ field: field, value: newValue })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                cell.classList.remove('editing', 'inline-edit-saving');
+                if (data.success) {
+                    cell.textContent = newValue || '-';
+                    if (data.syncCount > 0) {
+                        var msg = document.createElement('span');
+                        msg.style.cssText = 'position:absolute; top:-18px; right:0; font-size:11px; color:var(--success,#16a34a); white-space:nowrap; animation:fadeOut 2s forwards;';
+                        msg.textContent = data.syncCount + '건 동기화';
+                        cell.style.position = 'relative';
+                        cell.appendChild(msg);
+                        setTimeout(function() { if (msg.parentNode) msg.remove(); }, 2500);
+                    }
+                } else {
+                    cell.textContent = currentValue || '-';
+                    alert('수정 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(function(err) {
+                cell.classList.remove('editing', 'inline-edit-saving');
+                cell.textContent = currentValue || '-';
+                alert('수정 오류: ' + err.message);
+            });
+        }
+
+        function cancel() {
+            cell.classList.remove('editing');
+            cell.textContent = currentValue || '-';
+        }
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); save(); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+            else if (e.key === 'Tab') {
+                e.preventDefault(); save();
+                var nextCell = cell.nextElementSibling;
+                while (nextCell && !nextCell.classList.contains('inv-editable')) {
+                    nextCell = nextCell.nextElementSibling;
+                }
+                if (nextCell) setTimeout(function() { nextCell.click(); }, 50);
+            }
+        });
+
+        input.addEventListener('blur', function() {
+            setTimeout(function() {
+                if (cell.classList.contains('editing') && !cell.classList.contains('inline-edit-saving')) save();
+            }, 100);
+        });
+    }
+})();
+</script>
+
+<style>
+.editable-cell {
+    cursor: pointer;
+    position: relative;
+}
+.editable-cell:hover {
+    background: rgba(37, 99, 235, 0.06);
+    outline: 1px dashed var(--primary, #2563eb);
+    outline-offset: -1px;
+}
+.editable-cell.editing {
+    padding: 0 !important;
+    outline: none;
+    background: none;
+}
+.editable-cell .inline-edit-input {
+    width: 100%;
+    border: 2px solid var(--primary, #2563eb);
+    border-radius: 4px;
+    padding: 4px 6px;
+    font-size: inherit;
+    font-family: inherit;
+    box-sizing: border-box;
+    outline: none;
+}
+.editable-cell .inline-edit-input:focus {
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+.inline-edit-saving {
+    opacity: 0.6;
+    pointer-events: none;
+}
+@keyframes fadeOut {
+    0% { opacity: 1; }
+    70% { opacity: 1; }
+    100% { opacity: 0; }
+}
+</style>
+
+<% } else if (activeTab === 'installed') { %>
+<!-- ===== Tab 2: 설치 현황 ===== -->
+
+<div class="card" style="display:flex; justify-content:space-between; align-items:center; padding:12px 16px;">
+    <form class="filters" method="GET" action="/module-inventory" style="display:flex; gap:12px; align-items:flex-end; margin:0;">
+        <input type="hidden" name="tab" value="installed">
+        <div class="form-group" style="margin:0;">
+            <label>유형</label>
+            <select name="module_type" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% appConfig.moduleTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= filters.module_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>검색</label>
+            <input type="text" name="search" class="form-control" placeholder="모델, 제조사..." value="<%= filters.search || '' %>">
+        </div>
+        <div class="form-group" style="margin:0;">
+            <button type="submit" class="btn btn-primary">검색</button>
+        </div>
+    </form>
+    <a href="/module-inventory/modules/new" class="btn btn-primary">+ 모듈 등록</a>
+</div>
+
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>서버</th>
+                    <th>자산번호</th>
+                    <th>모델</th>
+                    <th>제조사</th>
+                    <th>용량</th>
+                    <th>수량</th>
+                    <th>사양</th>
+                    <th>슬롯</th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% if (modules.length === 0) { %>
+                <tr><td colspan="10" class="text-center text-muted">등록된 모듈이 없습니다.</td></tr>
+                <% } %>
+                <% modules.forEach(m => { %>
+                <tr>
+                    <td><span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span></td>
+                    <td><a href="/assets/<%= m.asset_id %>"><%= m.asset_model || '-' %></a></td>
+                    <td><%= m.asset_number || '-' %></td>
+                    <td class="editable-cell" data-module-id="<%= m.id %>" data-field="model" title="클릭하여 수정"><%= m.model || '-' %></td>
+                    <td class="editable-cell" data-module-id="<%= m.id %>" data-field="manufacturer" title="클릭하여 수정"><%= m.manufacturer || '-' %></td>
+                    <td class="editable-cell" data-module-id="<%= m.id %>" data-field="capacity" title="클릭하여 수정"><%= m.capacity || '-' %></td>
+                    <td><%= m.count %></td>
+                    <td class="editable-cell" data-module-id="<%= m.id %>" data-field="specification" title="클릭하여 수정"><%= m.specification || '-' %></td>
+                    <td><%= m.slot_info || '-' %></td>
+                    <td>
+                        <div class="btn-group">
+                            <button class="btn btn-sm btn-outline transfer-btn" data-module-id="<%= m.id %>" data-module-label="<%= (m.module_type || '').toUpperCase() + ' ' + (m.model || '') %>" data-from="<%= m.asset_model || '' %>" onclick="openTransferModal(this)">이동</button>
+                            <a href="/module-inventory/modules/<%= m.id %>/edit" class="btn btn-sm btn-outline">수정</a>
+                            <form method="POST" action="/module-inventory/modules/<%= m.id %>/delete" style="display:inline" onsubmit="return confirmDelete()">
+                                <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted mt-1">총 <%= modules.length %>건</p>
+</div>
+
+<!-- Transfer Modal -->
+<div id="transferModal" class="modal-overlay">
+    <div class="modal-content" style="max-width:500px;">
+        <div class="modal-header">
+            <h3 id="transferTitle">모듈 이동</h3>
+            <button class="modal-close" onclick="closeModal('transferModal')">&times;</button>
+        </div>
+        <div>
+            <p id="transferInfo" style="font-size:13px; color:var(--text-secondary); margin-bottom:12px;"></p>
+            <div class="form-group" style="margin-bottom:10px;">
+                <label>이동 대상 서버 *</label>
+                <select id="transferTarget" class="form-control">
+                    <option value="">로딩 중...</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:10px;">
+                <label>사유 (선택)</label>
+                <input type="text" id="transferReason" class="form-control" placeholder="이동 사유">
+            </div>
+            <div id="transferResult" style="font-size:13px; min-height:20px; margin-bottom:8px;"></div>
+            <button type="button" class="btn btn-primary" onclick="submitTransfer()" style="width:100%;">이동</button>
+        </div>
+    </div>
+</div>
+
+<script>
+var _transferModuleId = null;
+var _transferAssetsLoaded = false;
+
+function openTransferModal(btn) {
+    _transferModuleId = btn.dataset.moduleId;
+    var label = btn.dataset.moduleLabel;
+    var from = btn.dataset.from;
+    document.getElementById('transferTitle').textContent = '모듈 이동';
+    document.getElementById('transferInfo').textContent = label + ' (' + from + ' 에서 이동)';
+    document.getElementById('transferReason').value = '';
+    document.getElementById('transferResult').textContent = '';
+    openModal('transferModal');
+
+    if (!_transferAssetsLoaded) {
+        fetch('/module-inventory/api/assets')
+            .then(function(r) { return r.json(); })
+            .then(function(assets) {
+                var sel = document.getElementById('transferTarget');
+                sel.innerHTML = '<option value="">선택</option>';
+                assets.forEach(function(a) {
+                    var opt = document.createElement('option');
+                    opt.value = a.id;
+                    opt.textContent = a.label;
+                    sel.appendChild(opt);
+                });
+                _transferAssetsLoaded = true;
+            });
+    }
+}
+
+function submitTransfer() {
+    var toAssetId = document.getElementById('transferTarget').value;
+    if (!toAssetId) { alert('이동 대상 서버를 선택해주세요.'); return; }
+    var resultEl = document.getElementById('transferResult');
+    resultEl.textContent = '처리 중...';
+    resultEl.style.color = '#3b82f6';
+
+    fetch('/module-inventory/modules/' + _transferModuleId + '/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            to_asset_id: toAssetId,
+            reason: document.getElementById('transferReason').value.trim() || null
+        })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.success) {
+            resultEl.style.color = '#22c55e';
+            resultEl.textContent = '완료: ' + data.from + ' → ' + data.to;
+            setTimeout(function() { location.reload(); }, 800);
+        } else {
+            resultEl.style.color = '#ef4444';
+            resultEl.textContent = '실패: ' + (data.error || '');
+        }
+    })
+    .catch(function(err) {
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = '오류: ' + err.message;
+    });
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeModal('transferModal');
+});
+
+(function() {
+    var cells = document.querySelectorAll('.editable-cell');
+    cells.forEach(function(cell) {
+        cell.addEventListener('click', function() {
+            if (cell.classList.contains('editing')) return;
+            startInlineEdit(cell);
+        });
+    });
+
+    function startInlineEdit(cell) {
+        var moduleId = cell.getAttribute('data-module-id');
+        var field = cell.getAttribute('data-field');
+        var currentValue = cell.textContent.trim();
+        if (currentValue === '-') currentValue = '';
+
+        cell.classList.add('editing');
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'inline-edit-input';
+        input.value = currentValue;
+        cell.textContent = '';
+        cell.appendChild(input);
+        input.focus();
+        input.select();
+
+        function save() {
+            var newValue = input.value.trim();
+            if (newValue === currentValue) {
+                cancel();
+                return;
+            }
+            cell.classList.add('inline-edit-saving');
+
+            fetch('/module-inventory/modules/' + moduleId + '/inline-update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ field: field, value: newValue })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                cell.classList.remove('editing', 'inline-edit-saving');
+                if (data.success) {
+                    cell.textContent = newValue || '-';
+                } else {
+                    cell.textContent = currentValue || '-';
+                    alert('수정 실패: ' + (data.error || '알 수 없는 오류'));
+                }
+            })
+            .catch(function(err) {
+                cell.classList.remove('editing', 'inline-edit-saving');
+                cell.textContent = currentValue || '-';
+                alert('수정 오류: ' + err.message);
+            });
+        }
+
+        function cancel() {
+            cell.classList.remove('editing');
+            cell.textContent = currentValue || '-';
+        }
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                save();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancel();
+            } else if (e.key === 'Tab') {
+                e.preventDefault();
+                save();
+                var nextCell = cell.nextElementSibling;
+                while (nextCell && !nextCell.classList.contains('editable-cell')) {
+                    nextCell = nextCell.nextElementSibling;
+                }
+                if (nextCell) {
+                    setTimeout(function() { nextCell.click(); }, 50);
+                }
+            }
+        });
+
+        input.addEventListener('blur', function() {
+            setTimeout(function() {
+                if (cell.classList.contains('editing') && !cell.classList.contains('inline-edit-saving')) {
+                    save();
+                }
+            }, 100);
+        });
+    }
+})();
+</script>
+
+<% } else if (activeTab === 'history') { %>
+<!-- ===== Tab 3: 입출고 이력 ===== -->
+<%
+  var hEventLabels = { incoming: '입고', outgoing: '출고', installed: '설치', removed: '제거', transfer: '이동', adjust: '조정' };
+  var hEventColors = { incoming: 'success', outgoing: 'warning', installed: 'info', removed: 'danger', transfer: 'secondary', adjust: 'secondary' };
+%>
+
+<div class="card" style="padding:12px 16px;">
+    <form class="filters" method="GET" action="/module-inventory" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; margin:0;">
+        <input type="hidden" name="tab" value="history">
+        <div class="form-group" style="margin:0;">
+            <label>유형</label>
+            <select name="event_type" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <option value="incoming" <%= historyFilters.event_type === 'incoming' ? 'selected' : '' %>>입고</option>
+                <option value="outgoing" <%= historyFilters.event_type === 'outgoing' ? 'selected' : '' %>>출고</option>
+                <option value="installed" <%= historyFilters.event_type === 'installed' ? 'selected' : '' %>>설치</option>
+                <option value="removed" <%= historyFilters.event_type === 'removed' ? 'selected' : '' %>>제거</option>
+                <option value="adjust" <%= historyFilters.event_type === 'adjust' ? 'selected' : '' %>>조정</option>
+            </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>부품코드</label>
+            <select name="item_code" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% allItemCodes.forEach(function(code) { %>
+                <option value="<%= code %>" <%= historyFilters.item_code === code ? 'selected' : '' %>><%= code %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>시작일</label>
+            <input type="date" name="date_from" class="form-control" value="<%= historyFilters.date_from || '' %>">
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>종료일</label>
+            <input type="date" name="date_to" class="form-control" value="<%= historyFilters.date_to || '' %>">
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>검색</label>
+            <input type="text" name="hist_search" class="form-control" placeholder="서버, 코드, 비고..." value="<%= historyFilters.search || '' %>">
+        </div>
+        <div class="form-group" style="margin:0;">
+            <button type="submit" class="btn btn-primary">검색</button>
+            <a href="/module-inventory?tab=history" class="btn btn-secondary">초기화</a>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>일시</th>
+                    <th>유형</th>
+                    <th>부품코드</th>
+                    <th>수량변동</th>
+                    <th>총수량</th>
+                    <th>여유</th>
+                    <th>서버</th>
+                    <th>자산번호</th>
+                    <th>사용자</th>
+                    <th>비고</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% if (historyLogs.length === 0) { %>
+                <tr><td colspan="10" class="text-center text-muted">이력이 없습니다.</td></tr>
+                <% } %>
+                <% historyLogs.forEach(function(log) { %>
+                <%
+                    var dt = log.created_at ? log.created_at.replace('T', ' ').substring(0, 16) : '-';
+                    var evLabel = hEventLabels[log.event_type] || log.event_type;
+                    var evColor = hEventColors[log.event_type] || 'secondary';
+                    var qtyStr = log.quantity_change > 0 ? '+' + log.quantity_change : (log.quantity_change || '-');
+                    var assetInfo = log.asset_label || log.to_asset_label || log.from_asset_label || '-';
+                    if (log.from_asset_label && log.to_asset_label) {
+                        assetInfo = log.from_asset_label + ' → ' + log.to_asset_label;
+                    }
+                %>
+                <tr>
+                    <td style="font-size:12px; white-space:nowrap;"><%= dt %></td>
+                    <td><span class="badge badge-<%= evColor %>"><%= evLabel %></span></td>
+                    <td><code style="font-weight:bold;"><%= log.item_code %></code></td>
+                    <td style="font-weight:bold; color:<%= log.quantity_change > 0 ? 'var(--success, #22c55e)' : 'var(--danger, #ef4444)' %>;"><%= qtyStr %></td>
+                    <td><%= log.after_total != null ? log.after_total : '-' %></td>
+                    <td><%= log.after_spare != null ? log.after_spare : '-' %></td>
+                    <td><%= assetInfo %></td>
+                    <td><%= log.asset_number || '-' %></td>
+                    <td><%= log.username || '-' %></td>
+                    <td style="font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis;"><%= log.notes || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted mt-1">총 <%= historyLogs.length %>건</p>
+</div>
+
+<% } %>
+
+<%- include('../partials/footer', { extraJs }) %>
