@@ -9,6 +9,28 @@
     </div>
 </div>
 
+<% if (rackStats) { %>
+<div class="rack-stats-summary">
+    <div class="rack-stats-usage">
+        <div class="rack-stats-usage-bar">
+            <div class="rack-stats-usage-fill<%= rackStats.utilization >= 90 ? ' critical' : rackStats.utilization >= 70 ? ' warning' : '' %>" style="width:<%= rackStats.utilization %>%"></div>
+        </div>
+        <span class="rack-stats-usage-text"><%= rackStats.usedU %>/<%= rackStats.totalU %>U 사용 (<%= rackStats.utilization %>%)</span>
+    </div>
+    <div class="rack-stats-chips">
+        <span class="rack-stats-chip">장비 <strong><%= rackStats.totalAssets %></strong></span>
+        <% if (rackStats.childAssets > 0) { %><span class="rack-stats-chip">노드 <strong><%= rackStats.childAssets %></strong></span><% } %>
+        <span class="rack-stats-chip">여유 <strong><%= rackStats.freeU %>U</strong></span>
+        <% if (rackStats.companyCount > 0) { %><span class="rack-stats-chip company">자사 <strong><%= rackStats.companyCount %></strong></span><% } %>
+        <% if (rackStats.vendorCount > 0) { %><span class="rack-stats-chip vendor">업체 <strong><%= rackStats.vendorCount %></strong></span><% } %>
+        <% var typeLabels = { server:'서버', switch:'스위치', storage:'스토리지', pdu:'PDU', ups:'UPS', kvm:'KVM', other:'기타' }; %>
+        <% Object.keys(rackStats.typeCounts).forEach(function(t) { %>
+        <span class="rack-stats-chip type-<%= t %>"><%= typeLabels[t] || t %> <strong><%= rackStats.typeCounts[t] %></strong></span>
+        <% }) %>
+    </div>
+</div>
+<% } %>
+
 <div class="rack-detail-layout">
     <div class="rack-visual">
         <p class="text-muted" style="font-size:12px;margin-bottom:8px;">장비를 드래그하여 위치를 변경할 수 있습니다. (1U = 상/중/하 3구멍)</p>
@@ -719,23 +741,28 @@ function renderPopup(assetId, data) {
 
 // --- Power Status Check via IPMI ---
 var _powerChecked = false;
-function checkPowerStatus() {
-    if (_powerChecked) return;
-    var btn = document.getElementById('btnPowerCheck');
-    btn.disabled = true;
-    btn.innerHTML = '&#x26A1; 확인 중...';
+var _powerRefreshTimer = null;
 
-    // Show loading dots on all power indicators
-    document.querySelectorAll('.power-dot').forEach(function(dot) {
-        dot.className = 'power-dot loading';
-        dot.title = '확인 중...';
-    });
+function checkPowerStatus(isAuto) {
+    var btn = document.getElementById('btnPowerCheck');
+    if (!isAuto) {
+        btn.disabled = true;
+        btn.innerHTML = '&#x26A1; 확인 중...';
+        // Show loading dots on first check only
+        if (!_powerChecked) {
+            document.querySelectorAll('.power-dot').forEach(function(dot) {
+                dot.className = 'power-dot loading';
+                dot.title = '확인 중...';
+            });
+        }
+    }
 
     fetch('/racks/' + rackId + '/power-status')
         .then(function(r) { return r.json(); })
         .then(function(data) {
             _powerChecked = true;
-            btn.innerHTML = '&#x26A1; 전원 확인 완료';
+            btn.innerHTML = '&#x26A1; 새로고침';
+            btn.disabled = false;
 
             // Update sidebar legend
             var legendCard = document.getElementById('powerLegend');
@@ -764,14 +791,20 @@ function checkPowerStatus() {
                 var labels = { on: 'ON', off: 'OFF', no_bmc: 'BMC 미등록', error: '연결실패', unknown: '알수없음' };
                 badge.textContent = labels[info.status] || info.status;
             });
+
+            // Start auto-refresh after first check (every 30s)
+            if (!_powerRefreshTimer) {
+                _powerRefreshTimer = setInterval(function() { checkPowerStatus(true); }, 30000);
+            }
         })
         .catch(function() {
-            btn.innerHTML = '&#x26A1; 확인 실패';
+            btn.innerHTML = '&#x26A1; 확인 실패 (재시도)';
             btn.disabled = false;
-            _powerChecked = false;
-            document.querySelectorAll('.power-dot').forEach(function(dot) {
-                dot.className = 'power-dot';
-            });
+            if (!_powerChecked) {
+                document.querySelectorAll('.power-dot').forEach(function(dot) {
+                    dot.className = 'power-dot';
+                });
+            }
         });
 }
 

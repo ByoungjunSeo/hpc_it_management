@@ -1717,3 +1717,180 @@ h1 .rack-type-badge.immersion {
     line-height: 16px;
     opacity: 0.8;
 }
+
+/* === Room Stats Bar === */
+.room-stats-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 0;
+    flex-wrap: wrap;
+}
+
+.room-stat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.room-stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+}
+
+.room-stat-label {
+    font-size: 11px;
+    color: #64748b;
+}
+
+.room-stat-util {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    min-width: 120px;
+}
+
+.room-util-bar {
+    width: 100%;
+    height: 6px;
+    background: #e2e8f0;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.room-util-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #3b82f6);
+    border-radius: 3px;
+    transition: width 0.3s;
+}
+
+.room-stat-types {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-left: auto;
+}
+
+.room-type-chip {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    background: #f1f5f9;
+    color: #475569;
+    font-weight: 600;
+}
+.room-type-chip.server { background: #dbeafe; color: #1e40af; }
+.room-type-chip.switch { background: #d1fae5; color: #065f46; }
+.room-type-chip.storage { background: #fef3c7; color: #92400e; }
+.room-type-chip.pdu { background: #fce7f3; color: #9d174d; }
+.room-type-chip.ups { background: #ede9fe; color: #5b21b6; }
+.room-type-chip.kvm { background: #e0e7ff; color: #3730a3; }
+
+/* Room detail stats card */
+.room-detail-stats .room-stats-bar {
+    padding: 0;
+}
+
+/* === Rack Stats Summary Bar === */
+.rack-stats-summary {
+    background: var(--bg-white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.rack-stats-usage {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 200px;
+}
+
+.rack-stats-usage-bar {
+    flex: 1;
+    height: 8px;
+    background: #e2e8f0;
+    border-radius: 4px;
+    overflow: hidden;
+    min-width: 80px;
+}
+
+.rack-stats-usage-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #3b82f6);
+    border-radius: 4px;
+    transition: width 0.3s;
+}
+.rack-stats-usage-fill.warning {
+    background: linear-gradient(90deg, #f59e0b, #ef4444);
+}
+.rack-stats-usage-fill.critical {
+    background: linear-gradient(90deg, #ef4444, #dc2626);
+}
+
+.rack-stats-usage-text {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.rack-stats-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.rack-stats-chip {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    background: #f1f5f9;
+    color: #475569;
+}
+.rack-stats-chip strong {
+    font-weight: 700;
+}
+.rack-stats-chip.company { background: #dbeafe; color: #1e40af; }
+.rack-stats-chip.vendor { background: #fef3c7; color: #92400e; }
+.rack-stats-chip.type-server { background: #eff6ff; color: #1d4ed8; }
+.rack-stats-chip.type-switch { background: #ecfdf5; color: #059669; }
+.rack-stats-chip.type-storage { background: #fffbeb; color: #d97706; }
+.rack-stats-chip.type-pdu { background: #fdf2f8; color: #be185d; }
+.rack-stats-chip.type-ups { background: #f5f3ff; color: #7c3aed; }
+.rack-stats-chip.type-kvm { background: #eef2ff; color: #4338ca; }
+
+/* === Rack Thumb Actions (room detail) === */
+.rack-thumb-actions {
+    display: flex;
+    align-items: center;
+    gap: 0;
+}
+
+.rack-thumb-actions .rack-thumb-link {
+    flex: 1;
+}
+
+.rack-thumb-btn {
+    background: none;
+    border: none;
+    border-left: 1px solid var(--border);
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #64748b;
+    transition: background 0.15s, color 0.15s;
+}
+.rack-thumb-btn:hover {
+    background: #f1f5f9;
+    color: #1e293b;
+}

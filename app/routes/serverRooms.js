@@ -18,11 +18,21 @@ router.get('/', (req, res) => {
 
   rooms.forEach(room => {
     const racks = Rack.findByRoom(room.id);
+    // Room-level stats
+    let roomTotalU = 0, roomUsedU = 0, roomTotalAssets = 0;
+    const roomTypeCounts = {};
+
     racks.forEach(rack => {
       const assets = Asset.findByRack(rack.id, { includeInactive: true });
       const uMap = {};
       assets.forEach(asset => {
         if (!asset.rack_unit_start || asset.parent_asset_id) return;
+        // Count stats for active assets
+        if (asset.status === 'active') {
+          roomTotalAssets++;
+          const t = asset.asset_type || 'other';
+          roomTypeCounts[t] = (roomTypeCounts[t] || 0) + 1;
+        }
         const startSlot = asset.rack_unit_start;
         const slotSize = asset.rack_unit_size || 3;
         const startU = Math.floor((startSlot - 1) / 3) + 1;
@@ -52,8 +62,18 @@ router.get('/', (req, res) => {
       rack.uMap = uMap;
       rack.totalUnits = rack.total_units || 42;
       rack.assetList = assets;
+      roomTotalU += rack.totalUnits;
+      roomUsedU += rack.used_units || 0;
     });
     room.racks = racks;
+    room.stats = {
+      totalU: roomTotalU,
+      usedU: roomUsedU,
+      utilization: roomTotalU > 0 ? Math.round(roomUsedU / roomTotalU * 100) : 0,
+      totalAssets: roomTotalAssets,
+      rackCount: racks.length,
+      typeCounts: roomTypeCounts
+    };
   });
 
   res.render('racks/rooms', {
@@ -102,6 +122,32 @@ router.get('/:id', (req, res) => {
     return res.redirect('/rooms');
   }
   const racks = Rack.findByRoom(room.id);
+
+  // Room-level stats
+  let roomTotalU = 0, roomUsedU = 0, roomTotalAssets = 0;
+  const roomTypeCounts = {};
+  racks.forEach(rack => {
+    roomTotalU += rack.total_units || 42;
+    roomUsedU += rack.used_units || 0;
+    roomTotalAssets += rack.asset_count || 0;
+    // Get type breakdown for this rack
+    const rackAssets = Asset.findByRack(rack.id);
+    rackAssets.forEach(a => {
+      if (!a.parent_asset_id && a.status === 'active') {
+        const t = a.asset_type || 'other';
+        roomTypeCounts[t] = (roomTypeCounts[t] || 0) + 1;
+      }
+    });
+  });
+  room.stats = {
+    totalU: roomTotalU,
+    usedU: roomUsedU,
+    utilization: roomTotalU > 0 ? Math.round(roomUsedU / roomTotalU * 100) : 0,
+    totalAssets: roomTotalAssets,
+    rackCount: racks.length,
+    typeCounts: roomTypeCounts
+  };
+
   // For storage-type rooms, load module inventory with storage quantities
   const storageModules = room.location_type === 'storage' ? ModuleInventory.findStorageModules() : [];
   res.render('racks/room', {

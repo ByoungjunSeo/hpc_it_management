@@ -37,7 +37,7 @@
 <div class="room-section">
     <div class="room-section-header">
         <h2><a href="/rooms/<%= room.id %>"><%= room.name %></a></h2>
-        <span class="text-muted"><%= room.location || '' %> &middot; 랙 <%= room.racks.length %>개</span>
+        <span class="text-muted"><%= room.location || '' %></span>
         <button class="btn btn-sm btn-warning power-check-btn" data-room-id="<%= room.id %>" data-rack-ids="<%= room.racks.map(r=>r.id).join(',') %>" onclick="checkRoomPower(this)" style="margin-left:8px;">&#x26A1; 전원 확인</button>
         <a href="/rooms/<%= room.id %>/assets" class="btn btn-sm btn-outline">자산 목록</a>
         <a href="/rooms/<%= room.id %>/modules" class="btn btn-sm btn-outline">모듈 현황</a>
@@ -46,6 +46,33 @@
             <button type="submit" class="btn btn-sm btn-danger">삭제</button>
         </form>
     </div>
+
+    <% if (room.stats) { %>
+    <div class="room-stats-bar">
+        <div class="room-stat">
+            <span class="room-stat-value"><%= room.stats.rackCount %></span>
+            <span class="room-stat-label">랙</span>
+        </div>
+        <div class="room-stat">
+            <span class="room-stat-value"><%= room.stats.totalAssets %></span>
+            <span class="room-stat-label">장비</span>
+        </div>
+        <div class="room-stat room-stat-util">
+            <div class="room-util-bar">
+                <div class="room-util-fill" style="width:<%= room.stats.utilization %>%"></div>
+            </div>
+            <span class="room-stat-label"><%= room.stats.usedU %>/<%= room.stats.totalU %>U (<%= room.stats.utilization %>%)</span>
+        </div>
+        <% if (room.stats.typeCounts) { %>
+        <div class="room-stat room-stat-types">
+            <% var typeLabels = { server:'서버', switch:'스위치', storage:'스토리지', pdu:'PDU', ups:'UPS', kvm:'KVM', other:'기타' }; %>
+            <% Object.keys(room.stats.typeCounts).forEach(function(t) { %>
+            <span class="room-type-chip <%= t %>"><%= typeLabels[t] || t %> <%= room.stats.typeCounts[t] %></span>
+            <% }) %>
+        </div>
+        <% } %>
+    </div>
+    <% } %>
 
     <% if (room.racks.length === 0) { %>
     <p class="text-muted" style="padding: 12px 0;">등록된 랙이 없습니다.</p>

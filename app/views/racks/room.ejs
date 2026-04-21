@@ -13,10 +13,40 @@
     </div>
 </div>
 
-<% if (room.location || room.description) { %>
-<div class="card mb-2">
-    <% if (room.location) { %><p><strong>위치:</strong> <%= room.location %></p><% } %>
-    <% if (room.description) { %><p><strong>설명:</strong> <%= room.description %></p><% } %>
+<% if (room.stats || room.location || room.description) { %>
+<div class="card mb-2 room-detail-stats">
+    <% if (room.location || room.description) { %>
+    <div style="margin-bottom:8px;font-size:13px;color:#64748b;">
+        <% if (room.location) { %><strong>위치:</strong> <%= room.location %><% } %>
+        <% if (room.description) { %> &middot; <%= room.description %><% } %>
+    </div>
+    <% } %>
+    <% if (room.stats) { %>
+    <div class="room-stats-bar">
+        <div class="room-stat">
+            <span class="room-stat-value"><%= room.stats.rackCount %></span>
+            <span class="room-stat-label">랙</span>
+        </div>
+        <div class="room-stat">
+            <span class="room-stat-value"><%= room.stats.totalAssets %></span>
+            <span class="room-stat-label">장비</span>
+        </div>
+        <div class="room-stat room-stat-util">
+            <div class="room-util-bar">
+                <div class="room-util-fill" style="width:<%= room.stats.utilization %>%"></div>
+            </div>
+            <span class="room-stat-label"><%= room.stats.usedU %>/<%= room.stats.totalU %>U (<%= room.stats.utilization %>%)</span>
+        </div>
+        <% if (room.stats.typeCounts && Object.keys(room.stats.typeCounts).length > 0) { %>
+        <div class="room-stat room-stat-types">
+            <% var typeLabels = { server:'서버', switch:'스위치', storage:'스토리지', pdu:'PDU', ups:'UPS', kvm:'KVM', other:'기타' }; %>
+            <% Object.keys(room.stats.typeCounts).forEach(function(t) { %>
+            <span class="room-type-chip <%= t %>"><%= typeLabels[t] || t %> <%= room.stats.typeCounts[t] %></span>
+            <% }) %>
+        </div>
+        <% } %>
+    </div>
+    <% } %>
 </div>
 <% } %>
 
@@ -111,7 +141,10 @@
                     <span><%= rack.asset_count || 0 %>대</span>
                 </div>
             </div>
-            <a href="/racks/<%= rack.id %>" class="rack-thumb-link">상세 보기</a>
+            <div class="rack-thumb-actions">
+                <a href="/racks/<%= rack.id %>" class="rack-thumb-link">상세 보기</a>
+                <button class="rack-thumb-btn" title="수정" onclick="event.stopPropagation(); openEditRack(<%= rack.id %>, '<%= (rack.name || '').replace(/'/g, "\\'") %>', '<%= rack.rack_type || "standard" %>', <%= rack.total_units || 42 %>, '<%= (rack.description || '').replace(/'/g, "\\'") %>')">&#x270E;</button>
+            </div>
         </div>
         <% }) %>
 
@@ -243,6 +276,72 @@
         </form>
     </div>
 </div>
+
+<!-- Edit Rack Modal -->
+<div class="modal-overlay" id="editRackModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>랙 수정</h3>
+            <button class="modal-close" onclick="closeModal('editRackModal')">&times;</button>
+        </div>
+        <form method="POST" id="editRackForm" action="">
+            <input type="hidden" name="room_id" value="<%= room.id %>">
+            <div class="form-group">
+                <label>랙 이름 *</label>
+                <input type="text" name="name" id="editRackName" class="form-control" required>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>랙 유형</label>
+                    <select name="rack_type" id="editRackType" class="form-control">
+                        <option value="standard">서버랙</option>
+                        <option value="immersion">액침탱크</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>총 U 수</label>
+                    <input type="number" name="total_units" id="editRackUnits" class="form-control" min="1" max="52">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>설명</label>
+                <textarea name="description" id="editRackDesc" class="form-control"></textarea>
+            </div>
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary">저장</button>
+                <button type="button" class="btn btn-danger" id="deleteRackBtn" onclick="deleteRackFromEdit()">삭제</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('editRackModal')">취소</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+var _editRackId = null;
+function openEditRack(id, name, type, units, desc) {
+    _editRackId = id;
+    document.getElementById('editRackForm').action = '/racks/' + id;
+    document.getElementById('editRackName').value = name;
+    document.getElementById('editRackType').value = type;
+    document.getElementById('editRackUnits').value = units;
+    document.getElementById('editRackDesc').value = desc;
+    openModal('editRackModal');
+}
+function deleteRackFromEdit() {
+    if (!_editRackId) return;
+    if (!confirm('이 랙을 삭제하시겠습니까? 포함된 장비의 위치 정보가 해제됩니다.')) return;
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/racks/' + _editRackId + '/delete';
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'returnTo';
+    input.value = '/rooms/<%= room.id %>';
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
+</script>
 
 <script>
 (function() {
