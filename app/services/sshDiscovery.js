@@ -25,6 +25,20 @@ fi
 echo "===HOSTNAME_START==="
 hostname
 echo "===HOSTNAME_END==="
+echo "===OSINFO_START==="
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  echo "NAME=$NAME"
+  echo "VERSION=$VERSION"
+  echo "ID=$ID"
+fi
+uname -r 2>/dev/null | sed 's/^/KERNEL=/'
+echo "===OSINFO_END==="
+echo "===SERIAL_START==="
+if command -v dmidecode >/dev/null 2>&1; then
+  sudo dmidecode -t 1 2>/dev/null | grep -iE 'Serial Number|Product Name|Manufacturer' || dmidecode -t 1 2>/dev/null | grep -iE 'Serial Number|Product Name|Manufacturer'
+fi
+echo "===SERIAL_END==="
 echo "===CPU_START==="
 lscpu 2>/dev/null
 echo "===CPU_END==="
@@ -298,6 +312,8 @@ function connectAndDiscover(host, options = {}) {
                 status: 'success',
                 hostname: parsed.hostname,
                 totalMemory: parsed.totalMemory,
+                osInfo: parsed.osInfo,
+                serial: parsed.serial,
                 modules: parsed.modules,
                 rawOutput: output
               });

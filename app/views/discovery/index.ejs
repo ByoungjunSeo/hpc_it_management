@@ -4,6 +4,7 @@
     <h1>자산 매칭</h1>
     <div class="btn-group">
         <button class="btn btn-primary" onclick="scanAllAssets()" id="scanAllBtn">전체 스캔</button>
+        <button class="btn btn-success" onclick="scanSelectedAssets()" id="scanSelectedBtn">선택 스캔</button>
         <button class="btn btn-outline" onclick="toggleManualScan()">수동 스캔</button>
     </div>
 </div>
@@ -58,6 +59,7 @@
         <div class="progress-bar" style="height:8px;">
             <div class="progress-fill" id="scanAllProgressFill" style="width:0%; background:var(--primary); transition:width 0.3s;"></div>
         </div>
+        <div id="scanAllSummary" style="display:none; margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;"></div>
     </div>
 
     <div style="overflow-x:auto;">
@@ -507,11 +509,24 @@ function showDetail(assetId, forceRefresh) {
         return;
     }
 
-    if (data.hostname) {
-        html += '<p style="margin-bottom:8px;"><strong>호스트명:</strong> ' + escapeHtml(data.hostname) + '</p>';
+    // System info summary
+    var sysInfoParts = [];
+    if (data.hostname) sysInfoParts.push('<strong>호스트명:</strong> ' + escapeHtml(data.hostname));
+    if (data.totalMemory) sysInfoParts.push('<strong>총 메모리:</strong> ' + escapeHtml(data.totalMemory));
+    if (data.osInfo) {
+        var osStr = data.osInfo.name || '';
+        if (data.osInfo.version) osStr += ' ' + data.osInfo.version;
+        if (data.osInfo.kernel) osStr += ' (kernel: ' + data.osInfo.kernel + ')';
+        if (osStr.trim()) sysInfoParts.push('<strong>OS:</strong> ' + escapeHtml(osStr.trim()));
     }
-    if (data.totalMemory) {
-        html += '<p style="margin-bottom:12px;"><strong>총 메모리:</strong> ' + escapeHtml(data.totalMemory) + '</p>';
+    if (data.serial) {
+        if (data.serial.serial_number) sysInfoParts.push('<strong>S/N:</strong> ' + escapeHtml(data.serial.serial_number));
+        if (data.serial.product_name) sysInfoParts.push('<strong>제품:</strong> ' + escapeHtml(data.serial.product_name));
+    }
+    if (sysInfoParts.length > 0) {
+        html += '<div style="margin-bottom:12px; font-size:13px; line-height:1.8; display:flex; flex-wrap:wrap; gap:4px 16px;">';
+        sysInfoParts.forEach(function(p) { html += '<span>' + p + '</span>'; });
+        html += '</div>';
     }
 
     if (data.discovered_modules && data.discovered_modules.length > 0) {
@@ -520,13 +535,25 @@ function showDetail(assetId, forceRefresh) {
         html += '<p class="text-muted">수집된 모듈이 없습니다.</p>';
     }
 
-    // Apply button + history button
+    // Apply button + history button + raw output button
     html += '<div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center;">';
+    html += '<div class="btn-group">';
     html += '<button class="btn btn-outline" onclick="showTransferLogs(' + assetId + ')">이력 보기</button>';
+    if (data.rawOutput) {
+        html += '<button class="btn btn-outline" onclick="toggleRawOutput(' + assetId + ')">원본 보기</button>';
+    }
+    html += '</div>';
     if (data.discovered_modules && data.discovered_modules.length > 0) {
         html += '<button class="btn btn-success" onclick="applyAsset(' + assetId + ')">실제 모듈로 갱신</button>';
     }
     html += '</div>';
+
+    // Raw output container
+    if (data.rawOutput) {
+        html += '<div id="raw-output-' + assetId + '" style="display:none; margin-top:12px;">';
+        html += '<pre style="background:#1e1e1e; color:#d4d4d4; padding:12px; border-radius:6px; font-size:11px; max-height:400px; overflow:auto; white-space:pre-wrap; word-break:break-all;">' + escapeHtml(data.rawOutput) + '</pre>';
+        html += '</div>';
+    }
 
     // Transfer log container
     html += '<div id="transfer-logs-' + assetId + '" style="display:none; margin-top:12px;"></div>';
@@ -832,6 +859,13 @@ function renderModuleTable(modules) {
     return html;
 }
 
+// ── Toggle Raw Output ──
+function toggleRawOutput(assetId) {
+    var container = document.getElementById('raw-output-' + assetId);
+    if (!container) return;
+    container.style.display = container.style.display === 'none' ? '' : 'none';
+}
+
 // ── Transfer Logs ──
 function showTransferLogs(assetId) {
     var container = document.getElementById('transfer-logs-' + assetId);
@@ -938,20 +972,25 @@ function applyAsset(assetId) {
     .catch(function(err) { alert('오류: ' + err.message); });
 }
 
+// ── Scan Selected Assets ──
+function scanSelectedAssets() {
+    var checks = document.querySelectorAll('.asset-check:checked');
+    if (checks.length === 0) {
+        alert('스캔할 자산을 선택하세요.');
+        return;
+    }
+    var assetIds = [];
+    for (var i = 0; i < checks.length; i++) {
+        assetIds.push(parseInt(checks[i].value));
+    }
+    runBatchScan(assetIds, '선택 스캔');
+}
+
 // ── Scan All Assets (client-side sequential) ──
 var scanAllRunning = false;
 var scanAllCancelled = false;
 
 function scanAllAssets() {
-    var btn = document.getElementById('scanAllBtn');
-
-    // If already running, cancel
-    if (scanAllRunning) {
-        scanAllCancelled = true;
-        btn.textContent = '중지 중...';
-        return;
-    }
-
     var rows = document.querySelectorAll('tr[data-asset-id]');
     var assetIds = [];
     for (var i = 0; i < rows.length; i++) {
@@ -963,6 +1002,18 @@ function scanAllAssets() {
         alert('스캔할 자산이 없습니다.');
         return;
     }
+    runBatchScan(assetIds, '전체 스캔');
+}
+
+function runBatchScan(assetIds, label) {
+    var btn = document.getElementById('scanAllBtn');
+
+    // If already running, cancel
+    if (scanAllRunning) {
+        scanAllCancelled = true;
+        btn.textContent = '중지 중...';
+        return;
+    }
 
     scanAllRunning = true;
     scanAllCancelled = false;
@@ -972,15 +1023,34 @@ function scanAllAssets() {
     var progressText = document.getElementById('scanAllProgressText');
     var progressCount = document.getElementById('scanAllProgressCount');
     var progressFill = document.getElementById('scanAllProgressFill');
+    var summaryDiv = document.getElementById('scanAllSummary');
     progressDiv.style.display = '';
     progressFill.style.width = '0%';
-    progressText.textContent = '스캔 시작...';
+    progressText.textContent = label + ' 시작...';
     progressCount.textContent = '0/' + assetIds.length;
+    if (summaryDiv) { summaryDiv.style.display = 'none'; summaryDiv.innerHTML = ''; }
 
     var total = assetIds.length;
     var completed = 0;
     var successCount = 0;
+    var matchCount = 0;
+    var mismatchCount = 0;
+    var authFailCount = 0;
+    var unreachableCount = 0;
     var errorCount = 0;
+
+    function updateSummary() {
+        if (!summaryDiv) return;
+        var parts = [];
+        if (successCount > 0) parts.push('<span class="badge badge-success">성공 ' + successCount + '</span>');
+        if (matchCount > 0) parts.push('<span class="badge badge-success">일치 ' + matchCount + '</span>');
+        if (mismatchCount > 0) parts.push('<span class="badge badge-warning">불일치 ' + mismatchCount + '</span>');
+        if (authFailCount > 0) parts.push('<span class="badge badge-danger">인증실패 ' + authFailCount + '</span>');
+        if (unreachableCount > 0) parts.push('<span class="badge badge-danger">접속불가 ' + unreachableCount + '</span>');
+        if (errorCount > 0) parts.push('<span class="badge badge-secondary">오류 ' + errorCount + '</span>');
+        summaryDiv.innerHTML = parts.join('');
+        summaryDiv.style.display = parts.length > 0 ? 'flex' : 'none';
+    }
 
     function scanNext(idx) {
         if (idx >= total || scanAllCancelled) {
@@ -990,10 +1060,11 @@ function scanAllAssets() {
             btn.textContent = '전체 스캔';
             progressFill.style.width = '100%';
             if (idx >= total) {
-                progressText.textContent = '스캔 완료! 성공: ' + successCount + ', 오류: ' + errorCount + ' / 총 ' + total + '개';
+                progressText.textContent = label + ' 완료! ' + total + '개 자산';
             } else {
-                progressText.textContent = '스캔 중지됨. 완료: ' + completed + '/' + total;
+                progressText.textContent = label + ' 중지됨. 완료: ' + completed + '/' + total;
             }
+            updateSummary();
             return;
         }
 
@@ -1016,12 +1087,22 @@ function scanAllAssets() {
             scanResults[assetId] = data;
             updateAssetRow(data);
             completed++;
-            if (data.status === 'success') successCount++;
+            if (data.status === 'success') {
+                successCount++;
+                if (data.comparison) {
+                    var comp = data.comparison;
+                    if (comp.mismatched.length === 0 && comp.missing.length === 0 && comp.extra.length === 0) matchCount++;
+                    else mismatchCount++;
+                }
+            }
+            else if (data.status === 'auth_failed') authFailCount++;
+            else if (data.status === 'unreachable') unreachableCount++;
             else errorCount++;
 
             var pct = Math.round((completed / total) * 100);
             progressFill.style.width = pct + '%';
             progressCount.textContent = completed + '/' + total;
+            updateSummary();
 
             // Show detail button
             if (data.status === 'success') {
@@ -1037,6 +1118,7 @@ function scanAllAssets() {
             var pct = Math.round((completed / total) * 100);
             progressFill.style.width = pct + '%';
             progressCount.textContent = completed + '/' + total;
+            updateSummary();
             if (statusCell) statusCell.innerHTML = '<span class="badge badge-danger">&#x274C; 오류</span>';
             scanNext(idx + 1);
         });

@@ -9,6 +9,14 @@ function parseSection(output, sectionName) {
   return output.substring(startIdx + startTag.length, endIdx).trim();
 }
 
+function normalizeCpuVendor(vendorId) {
+  const map = {
+    'GenuineIntel': 'Intel', 'AuthenticAMD': 'AMD', 'HYGON': 'Hygon',
+    'CentaurHauls': 'VIA', 'HygonGenuine': 'Hygon', 'GenuineTMx86': 'Transmeta'
+  };
+  return map[vendorId] || vendorId || '';
+}
+
 function parseCpu(output) {
   const section = parseSection(output, 'CPU');
   if (!section) return [];
@@ -27,16 +35,19 @@ function parseCpu(output) {
   });
 
   if (info['Model name']) {
+    const coresPerSocket = info['Core(s) per socket'] || '';
+    const threadsPerCore = info['Thread(s) per core'] || '';
+    const maxMHz = info['CPU max MHz'] || info['CPU MHz'] || '';
     modules.push({
       module_type: 'cpu',
       model: info['Model name'],
-      manufacturer: info['Vendor ID'] || '',
-      capacity: (info['CPU(s)'] || '1') + ' cores',
+      manufacturer: normalizeCpuVendor(info['Vendor ID']),
+      capacity: coresPerSocket ? coresPerSocket + ' cores/socket' : (info['CPU(s)'] || '1') + ' cores',
       count: parseInt(info['Socket(s)'] || '1', 10),
       specification: [
-        info['Thread(s) per core'] ? info['Thread(s) per core'] + ' threads/core' : '',
-        info['Core(s) per socket'] ? info['Core(s) per socket'] + ' cores/socket' : '',
-        info['CPU MHz'] ? info['CPU MHz'] + ' MHz' : ''
+        threadsPerCore ? threadsPerCore + ' threads/core' : '',
+        coresPerSocket ? coresPerSocket + ' cores/socket' : '',
+        maxMHz ? Math.round(parseFloat(maxMHz)) + ' MHz' : ''
       ].filter(Boolean).join(', ')
     });
   }
@@ -201,6 +212,20 @@ function parseDisk(output, options = {}) {
   return Object.values(consolidated);
 }
 
+function detectNetworkSpeed(model) {
+  // Detect speed from model name patterns
+  if (/200\s*G|CX7|ConnectX-7|E810-2C200/i.test(model)) return '200GbE';
+  if (/100\s*G|CX[56]|ConnectX-[56]|E810-C|BCM57508|NetXtreme-E/i.test(model)) return '100GbE';
+  if (/50\s*G|CX[456].*50|E810.*50/i.test(model)) return '50GbE';
+  if (/40\s*G|XL710|ConnectX-3\s*Pro|BCM57840/i.test(model)) return '40GbE';
+  if (/25\s*G|XXV710|SFP28|ConnectX-[45].*25|BCM57414/i.test(model)) return '25GbE';
+  if (/10\s*G|X5[45]0|X710|82599|BCM57810|NetXtreme.*10|SFP\+/i.test(model)) return '10GbE';
+  if (/5\s*G|i225|i226|2\.5GBase/i.test(model)) return '5GbE';
+  if (/2\.5\s*G|RTL8125|I225-V/i.test(model)) return '2.5GbE';
+  if (/I350|I210|BCM5720|NetXtreme.*BCM57|82574|82576|igb|e1000|I219|I218/i.test(model)) return '1GbE';
+  return '';
+}
+
 function parseNetwork(output) {
   const section = parseSection(output, 'NETWORK');
   if (!section) return [];
@@ -231,6 +256,7 @@ function parseNetwork(output) {
   });
   const consolidated = {};
   Object.values(cards).forEach(card => {
+    const speed = detectNetworkSpeed(card.model);
     const key = card.model + '|' + card.ports;
     if (consolidated[key]) {
       consolidated[key].count++;
@@ -239,7 +265,8 @@ function parseNetwork(output) {
         module_type: 'network',
         model: card.model,
         count: 1,
-        specification: card.ports + '포트'
+        capacity: speed || '',
+        specification: card.ports + '포트' + (speed ? ' ' + speed : '')
       };
     }
   });
@@ -645,6 +672,48 @@ function parseRaidPhysicalDisks(output) {
   return Object.values(consolidated);
 }
 
+function detectGpuMemory(model) {
+  // Known GPU VRAM sizes
+  const gpuMemMap = [
+    [/H100.*80|A100.*80|H200/i, '80 GB'],
+    [/H100.*96|B200|B100/i, '96 GB'],
+    [/A100.*40/i, '40 GB'],
+    [/A800.*80/i, '80 GB'],
+    [/A800.*40/i, '40 GB'],
+    [/V100.*32|V100S/i, '32 GB'],
+    [/V100.*16|V100(?!S)/i, '16 GB'],
+    [/A40\b/i, '48 GB'],
+    [/A30\b/i, '24 GB'],
+    [/A10\b(?!0)/i, '24 GB'],
+    [/A16\b/i, '16 GB'],
+    [/L40S/i, '48 GB'],
+    [/L40\b/i, '48 GB'],
+    [/L4\b/i, '24 GB'],
+    [/T4\b/i, '16 GB'],
+    [/P100.*16/i, '16 GB'],
+    [/P100.*12/i, '12 GB'],
+    [/P40\b/i, '24 GB'],
+    [/P4\b/i, '8 GB'],
+    [/RTX\s*6000\s*Ada|RTX\s*A6000/i, '48 GB'],
+    [/RTX\s*5000\s*Ada|RTX\s*A5000/i, '32 GB'],
+    [/RTX\s*4000\s*Ada|RTX\s*A4000/i, '20 GB'],
+    [/RTX\s*4090/i, '24 GB'],
+    [/RTX\s*4080/i, '16 GB'],
+    [/RTX\s*3090/i, '24 GB'],
+    [/RTX\s*3080/i, '12 GB'],
+    [/MI300X/i, '192 GB'],
+    [/MI300A/i, '128 GB'],
+    [/MI250X/i, '128 GB'],
+    [/MI250\b/i, '128 GB'],
+    [/MI210/i, '64 GB'],
+    [/MI100/i, '32 GB'],
+  ];
+  for (const [pattern, mem] of gpuMemMap) {
+    if (pattern.test(model)) return mem;
+  }
+  return '';
+}
+
 function parseGpu(output) {
   const section = parseSection(output, 'GPU');
   if (!section) return [];
@@ -658,9 +727,13 @@ function parseGpu(output) {
     if (/ASPEED|Matrox|ServerEngines|iBMC|Hi171x|iLO|IPMI|BMC/i.test(line)) return;
     const match = line.match(/(?:VGA|3D|Display).*?:\s*(.*)/i);
     if (match) {
+      const model = match[1].trim();
+      const manufacturer = /NVIDIA/i.test(model) ? 'NVIDIA' : /AMD|ATI|Radeon/i.test(model) ? 'AMD' : '';
       modules.push({
         module_type: 'gpu',
-        model: match[1].trim(),
+        model,
+        manufacturer,
+        capacity: detectGpuMemory(model),
         count: 1
       });
     }
@@ -673,10 +746,12 @@ function parseGpu(output) {
       allLines.forEach(line => {
         const m = line.match(/^GPU\s+\d+:\s+(.+?)(?:\s*\(UUID:.*\))?$/);
         if (m) {
+          const model = m[1].trim();
           modules.push({
             module_type: 'gpu',
-            model: m[1].trim(),
-            manufacturer: m[1].includes('NVIDIA') ? 'NVIDIA' : m[1].includes('AMD') ? 'AMD' : '',
+            model,
+            manufacturer: model.includes('NVIDIA') ? 'NVIDIA' : model.includes('AMD') ? 'AMD' : '',
+            capacity: detectGpuMemory(model),
             count: 1
           });
         }
@@ -700,6 +775,39 @@ function parseGpu(output) {
 function parseHostname(output) {
   const section = parseSection(output, 'HOSTNAME');
   return section.split('\n')[0]?.trim() || '';
+}
+
+function parseOsInfo(output) {
+  const section = parseSection(output, 'OSINFO');
+  if (!section) return null;
+  const info = {};
+  section.split('\n').forEach(line => {
+    const m = line.match(/^(\w+)=(.*)$/);
+    if (m) info[m[1]] = m[2].trim();
+  });
+  if (!info.NAME && !info.KERNEL) return null;
+  return {
+    name: info.NAME || '',
+    version: info.VERSION || '',
+    id: info.ID || '',
+    kernel: info.KERNEL || ''
+  };
+}
+
+function parseSerial(output) {
+  const section = parseSection(output, 'SERIAL');
+  if (!section) return null;
+  const info = {};
+  section.split('\n').forEach(line => {
+    const m = line.match(/^\s*(Serial Number|Product Name|Manufacturer)\s*:\s*(.+)/i);
+    if (m) info[m[1].trim().toLowerCase().replace(/\s+/g, '_')] = m[2].trim();
+  });
+  if (!info.serial_number && !info.product_name) return null;
+  return {
+    serial_number: info.serial_number || '',
+    product_name: info.product_name || '',
+    manufacturer: info.manufacturer || ''
+  };
 }
 
 function parseFreeMemory(output) {
@@ -742,6 +850,8 @@ function parseAll(output) {
   return {
     hostname: parseHostname(output),
     totalMemory: parseFreeMemory(output),
+    osInfo: parseOsInfo(output),
+    serial: parseSerial(output),
     modules: [
       ...parseCpu(output),
       ...memoryModules,
@@ -766,5 +876,7 @@ module.exports = {
   parseRaid,
   parseGpu,
   parseHostname,
-  parseFreeMemory
+  parseFreeMemory,
+  parseOsInfo,
+  parseSerial
 };
