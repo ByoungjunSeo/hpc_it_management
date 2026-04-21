@@ -38,6 +38,7 @@ router.get('/:roomId', (req, res) => {
   const racks = Rack.findByRoom(room.id);
   const allConnections = NetworkConnection.findByRoom(room.id);
   const stats = NetworkConnection.getStats(room.id);
+  const speedStats = NetworkConnection.getSpeedStats(room.id);
   const assets = Asset.findAll({ room_id: room.id }).filter(a => a.status !== 'inactive' && a.status !== 'returned');
   const vendors = Vendor.findAll();
 
@@ -83,6 +84,7 @@ router.get('/:roomId', (req, res) => {
     connections,
     allConnectionCount: allConnections.length,
     stats,
+    speedStats,
     assets,
     switches,
     selectedIds,
@@ -143,6 +145,21 @@ router.post('/connections/batch-move', requireMaintenance, (req, res) => {
     res.json({ success: true, switchMoved, fieldsChanged });
   } catch (err) {
     res.status(500).json({ error: '이동 실패: ' + err.message });
+  }
+});
+
+// Batch delete connections
+router.post('/connections/batch-delete', requireMaintenance, (req, res) => {
+  try {
+    const { conn_ids } = req.body;
+    if (!conn_ids || !Array.isArray(conn_ids) || conn_ids.length === 0) {
+      return res.status(400).json({ error: '삭제할 연결을 선택하세요.' });
+    }
+    const result = NetworkConnection.batchDelete(conn_ids.map(Number));
+    AuditLog.log(req, { action: 'delete', targetType: 'network_connection', details: { count: result.changes, ids: conn_ids } });
+    res.json({ success: true, deleted: result.changes });
+  } catch (err) {
+    res.status(500).json({ error: '일괄 삭제 실패: ' + err.message });
   }
 });
 

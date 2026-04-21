@@ -139,6 +139,33 @@ const NetworkConnection = {
       FROM network_connections
       WHERE room_id = ?
     `).get(roomId, roomId, roomId);
+  },
+
+  getSpeedStats(roomId) {
+    return getDb().prepare(`
+      SELECT speed, COUNT(*) as cnt
+      FROM network_connections
+      WHERE room_id = ? AND speed IS NOT NULL AND speed != ''
+      GROUP BY speed
+      ORDER BY
+        CASE
+          WHEN speed LIKE '400%' THEN 1
+          WHEN speed LIKE '200%' THEN 2
+          WHEN speed LIKE '100%' THEN 3
+          WHEN speed LIKE '56%' THEN 4
+          WHEN speed LIKE '50%' THEN 5
+          WHEN speed LIKE '40%' THEN 6
+          WHEN speed LIKE '25%' THEN 7
+          WHEN speed LIKE '10%' THEN 8
+          WHEN speed LIKE '1G%' THEN 9
+          ELSE 99
+        END
+    `).all(roomId);
+  },
+
+  batchDelete(connIds) {
+    const placeholders = connIds.map(() => '?').join(',');
+    return getDb().prepare(`DELETE FROM network_connections WHERE id IN (${placeholders})`).run(...connIds);
   }
 };
 

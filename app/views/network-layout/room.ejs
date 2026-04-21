@@ -139,6 +139,16 @@
         <div class="stat-value" style="color: var(--switch-color);"><%= stats.switch_count %></div>
         <div class="stat-label">스위치</div>
     </div>
+    <% if (typeof speedStats !== 'undefined' && speedStats.length > 0) { %>
+    <div class="net-stat" style="min-width:auto; padding:8px 14px;">
+        <div style="font-size:11px; font-weight:600; margin-bottom:4px; color:var(--text-light);">속도별</div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <% speedStats.forEach(function(ss) { %>
+            <span class="badge badge-secondary" style="font-size:11px;"><%= ss.speed %>: <strong><%= ss.cnt %></strong></span>
+            <% }) %>
+        </div>
+    </div>
+    <% } %>
 </div>
 
 <!-- Switch selector -->
@@ -230,6 +240,13 @@
             /* Representative cable_type for this row */
             var rowCableType = row.cat === 'IB' ? 'infiniband' : (row.devices.length > 0 && row.devices[0].conns.length > 0 ? (row.devices[0].conns[0].cable_type || '') : '');
         %>
+        <%
+            /* Count ports used by this switch in this row (speed/cat group) */
+            var rowPortCount = 0;
+            row.devices.forEach(function(d) { rowPortCount += d.conns.length; });
+            /* Total ports used by this switch across all connections */
+            var swTotalPorts = connectedPorts[row.sw.id] ? connectedPorts[row.sw.id].size : 0;
+        %>
         <div class="net-h-sw-box" data-sw-id="<%= row.sw.id %>"
              data-speed="<%= row.speed %>"
              data-cable-type="<%= rowCableType %>"
@@ -240,6 +257,7 @@
              ondrop="handleSwDrop(event,this)">
             <div class="sw-name"><%= row.sw.asset_number || row.sw.model_name %></div>
             <div class="sw-model"><%= row.sw.model_name || '' %></div>
+            <div style="font-size:9px; color:var(--text-light); margin-top:2px;"><%= rowPortCount %>포트 (<%= swTotalPorts %>포트 사용중)</div>
         </div>
 
         <!-- Speed badge -->
@@ -360,14 +378,38 @@
 <div class="card net-table-section">
     <div class="card-header">
         <h2>연결 목록 (<%= connections.length %>)</h2>
+        <div class="btn-group">
+            <button class="btn btn-sm btn-danger" onclick="batchDeleteConns()" id="batchDeleteBtn" style="display:none;">선택 삭제</button>
+        </div>
     </div>
+    <% if (connections.length > 0) { %>
+    <!-- Filter bar -->
+    <div style="padding:10px 16px; border-bottom:1px solid var(--border); display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <input type="text" id="connSearchInput" class="form-control" style="width:180px; font-size:12px; padding:4px 8px;" placeholder="검색 (장비/포트)" oninput="filterConnTable()">
+        <select id="connFilterSpeed" class="form-control" style="width:100px; font-size:12px; padding:4px 8px;" onchange="filterConnTable()">
+            <option value="">속도 전체</option>
+            <% var seenSpeeds = {};
+               connections.forEach(function(c) { if (c.speed && !seenSpeeds[c.speed]) seenSpeeds[c.speed] = true; });
+               Object.keys(seenSpeeds).sort().forEach(function(s) { %>
+            <option value="<%= s %>"><%= s %></option>
+            <% }); %>
+        </select>
+        <select id="connFilterOwner" class="form-control" style="width:100px; font-size:12px; padding:4px 8px;" onchange="filterConnTable()">
+            <option value="">소유 전체</option>
+            <option value="company">자사</option>
+            <option value="vendor">업체</option>
+        </select>
+        <span id="connFilterCount" style="font-size:12px; color:var(--text-secondary);"></span>
+    </div>
+    <% } %>
     <% if (connections.length === 0) { %>
     <p class="text-center text-muted" style="padding: 20px;">등록된 연결이 없습니다.</p>
     <% } else { %>
     <div class="table-wrapper">
-        <table>
+        <table id="connListTable">
             <thead>
                 <tr>
+                    <th style="width:30px;"><input type="checkbox" id="connSelectAll" onchange="toggleConnSelectAll(this)"></th>
                     <th>출발장비</th>
                     <th>출발포트</th>
                     <th>도착장비</th>
@@ -382,7 +424,11 @@
             </thead>
             <tbody>
                 <% connections.forEach(function(c) { %>
-                <tr>
+                <tr data-conn-row
+                    data-speed="<%= c.speed || '' %>"
+                    data-ownership="<%= c.ownership || '' %>"
+                    data-search="<%= (c.from_asset_number || c.from_model || '') + ' ' + c.from_port + ' ' + (c.to_asset_number || c.to_model || '') + ' ' + c.to_port + ' ' + (c.cable_label || '') %>">
+                    <td><input type="checkbox" class="conn-check" value="<%= c.id %>" onchange="updateBatchDeleteBtn()"></td>
                     <td><%= c.from_asset_number || c.from_model || c.from_asset_id %></td>
                     <td><%= c.from_port %></td>
                     <td><%= c.to_asset_number || c.to_model || c.to_asset_id %></td>
@@ -841,6 +887,76 @@ document.querySelectorAll('[data-sw-chip]').forEach(function(chip) {
     sync();
     cb.addEventListener('change', sync);
 });
+
+/* === Connection Table Filter === */
+function filterConnTable() {
+    var search = (document.getElementById('connSearchInput').value || '').toLowerCase();
+    var speed = document.getElementById('connFilterSpeed').value;
+    var owner = document.getElementById('connFilterOwner').value;
+    var rows = document.querySelectorAll('#connListTable tbody tr[data-conn-row]');
+    var shown = 0;
+    rows.forEach(function(row) {
+        var matchSearch = !search || (row.getAttribute('data-search') || '').toLowerCase().indexOf(search) !== -1;
+        var matchSpeed = !speed || row.getAttribute('data-speed') === speed;
+        var matchOwner = !owner || row.getAttribute('data-ownership') === owner;
+        if (matchSearch && matchSpeed && matchOwner) {
+            row.style.display = '';
+            shown++;
+        } else {
+            row.style.display = 'none';
+            row.querySelector('.conn-check').checked = false;
+        }
+    });
+    var countEl = document.getElementById('connFilterCount');
+    if (search || speed || owner) {
+        countEl.textContent = shown + '/' + rows.length + '건 표시';
+    } else {
+        countEl.textContent = '';
+    }
+    updateBatchDeleteBtn();
+}
+
+/* === Batch Select === */
+function toggleConnSelectAll(cb) {
+    var rows = document.querySelectorAll('#connListTable tbody tr[data-conn-row]');
+    rows.forEach(function(row) {
+        if (row.style.display !== 'none') {
+            row.querySelector('.conn-check').checked = cb.checked;
+        }
+    });
+    updateBatchDeleteBtn();
+}
+
+function updateBatchDeleteBtn() {
+    var checked = document.querySelectorAll('.conn-check:checked');
+    var btn = document.getElementById('batchDeleteBtn');
+    if (checked.length > 0) {
+        btn.style.display = '';
+        btn.textContent = '선택 삭제 (' + checked.length + ')';
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+/* === Batch Delete === */
+function batchDeleteConns() {
+    var checked = document.querySelectorAll('.conn-check:checked');
+    if (checked.length === 0) return;
+    if (!confirm(checked.length + '개 연결을 삭제하시겠습니까?')) return;
+    var ids = [];
+    checked.forEach(function(cb) { ids.push(Number(cb.value)); });
+    fetch('/network-layout/connections/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conn_ids: ids })
+    }).then(function(res) {
+        if (!res.ok) return res.text().then(function(t) { throw new Error('HTTP ' + res.status + ': ' + t); });
+        return res.json();
+    }).then(function(result) {
+        if (result.success) location.reload();
+        else alert('삭제 실패: ' + (result.error || JSON.stringify(result)));
+    }).catch(function(err) { alert('삭제 실패: ' + err.message); });
+}
 </script>
 
 <%- include('../partials/footer', { extraJs }) %>
