@@ -282,18 +282,21 @@ router.get('/:id', (req, res) => {
     ).all(rack.linked_asset_id);
   }
 
-  // Rack usage stats
+  // Rack usage stats (unique U positions, blade-aware)
   const rackTypeCounts = {};
-  let usedU = 0;
+  const occupiedU = new Set();
   let companyCount = 0, vendorCount = 0;
   assets.forEach(a => {
     if (a.parent_asset_id || !a.rack_unit_start) return;
-    usedU += Math.ceil((a.rack_unit_size || 3) / 3);
+    const startU = Math.floor((a.rack_unit_start - 1) / 3) + 1;
+    const sizeU = Math.ceil((a.rack_unit_size || 3) / 3);
+    for (let u = startU; u < startU + sizeU; u++) occupiedU.add(u);
     const t = a.asset_type || 'other';
     rackTypeCounts[t] = (rackTypeCounts[t] || 0) + 1;
     if (a.ownership === 'vendor') vendorCount++;
     else companyCount++;
   });
+  const usedU = occupiedU.size;
   const rackStats = {
     totalU: totalUnits,
     usedU,

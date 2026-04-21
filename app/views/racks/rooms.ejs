@@ -82,8 +82,10 @@
         <%
             const totalUnits = rack.totalUnits || rack.total_units || 42;
             const uMapData = rack.uMap || {};
-            let usedU = 0;
-            rack.assetList.forEach(a => { if (a.rack_unit_start && !a.parent_asset_id && a.status === 'active') usedU += Math.ceil((a.rack_unit_size||3)/3); });
+            // Blade-aware usedU: count unique U positions occupied
+            var _occU = {};
+            rack.assetList.forEach(a => { if (a.rack_unit_start && !a.parent_asset_id && a.status === 'active') { var su = Math.floor((a.rack_unit_start-1)/3)+1; var sz = Math.ceil((a.rack_unit_size||3)/3); for(var _u=su;_u<su+sz;_u++) _occU[_u]=true; }});
+            let usedU = Object.keys(_occU).length;
             function statusCls(info) {
                 if (!info || !info.status) return '';
                 if (info.status === 'inactive') return ' inactive';
