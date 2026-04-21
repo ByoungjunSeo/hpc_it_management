@@ -5,6 +5,7 @@
     <div class="btn-group">
         <button class="btn btn-primary" onclick="openModal('addRackModal')">+ 랙 추가</button>
         <a href="/rooms/<%= room.id %>/assets" class="btn btn-outline">자산 목록</a>
+        <a href="/rooms/<%= room.id %>/modules" class="btn btn-outline">모듈 현황</a>
         <a href="/rooms" class="btn btn-secondary">서버실 목록</a>
         <form method="POST" action="/rooms/<%= room.id %>/delete" style="display:inline" onsubmit="return confirmDelete('서버실과 포함된 모든 랙/장비가 삭제됩니다.')">
             <button type="submit" class="btn btn-danger">삭제</button>
@@ -19,6 +20,16 @@
 </div>
 <% } %>
 
+<% if (typeof storageModules !== 'undefined' && storageModules.length > 0) { %>
+<div class="card mb-2" style="padding:0; overflow:hidden;">
+    <div class="tab-nav" style="display:flex; border-bottom:1px solid #e2e8f0;">
+        <button class="tab-btn active" data-tab="rackTab" style="flex:1; padding:10px 16px; border:none; background:#fff; cursor:pointer; font-weight:600; border-bottom:2px solid #3b82f6; color:#3b82f6;">랙 배치</button>
+        <button class="tab-btn" data-tab="moduleTab" style="flex:1; padding:10px 16px; border:none; background:#f8fafc; cursor:pointer; font-weight:400; border-bottom:2px solid transparent; color:#64748b;">컴퓨팅 모듈 (<%= storageModules.length %>종)</button>
+    </div>
+</div>
+<% } %>
+
+<div id="rackTab">
 <div class="card mb-2" style="padding:12px 16px;">
     <div class="d-flex align-center justify-between" style="flex-wrap:wrap;gap:8px;">
         <span class="text-muted" style="font-size:13px;">랙을 드래그하여 위치를 변경할 수 있습니다.</span>
@@ -73,7 +84,7 @@
     </div>
     <% } else { %>
     <div class="rack-dnd-grid" id="rackGrid"
-         style="grid-template-columns: repeat(<%= maxCol %>, minmax(140px, 1fr)); grid-template-rows: repeat(<%= maxRow %>, auto);">
+         style="grid-template-columns: repeat(<%= maxCol %>, minmax(120px, 1fr)); grid-template-rows: repeat(<%= maxRow %>, auto);">
         <%
           // Place racks at their positions
           racks.forEach(function(rack) {
@@ -83,12 +94,13 @@
         <div class="rack-thumbnail rack-draggable"
              draggable="true"
              data-rack-id="<%= rack.id %>"
+             data-rack-type="<%= rack.rack_type || 'standard' %>"
              data-row="<%= r %>"
              data-col="<%= c %>"
              style="grid-row: <%= r %>; grid-column: <%= c %>;">
             <div class="rack-thumb-header">
                 <span class="drag-handle">&#x2630;</span>
-                <%= rack.name %>
+                <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } %><%= rack.name %>
             </div>
             <div class="rack-thumb-body">
                 <div class="rack-usage-bar">
@@ -125,6 +137,68 @@
     <% } %>
 </div>
 
+</div><!-- /rackTab -->
+
+<% if (typeof storageModules !== 'undefined' && storageModules.length > 0) { %>
+<div id="moduleTab" style="display:none;">
+<div class="card">
+    <div class="card-header">
+        <h3>보관 컴퓨팅 모듈 현황</h3>
+    </div>
+    <%
+      // Group modules by type
+      const moduleTypeLabels = {};
+      if (typeof appConfig !== 'undefined') {
+        appConfig.moduleTypes.forEach(t => { moduleTypeLabels[t.value] = t.label; });
+      }
+      const groupedModules = {};
+      storageModules.forEach(m => {
+        if (!groupedModules[m.module_type]) groupedModules[m.module_type] = [];
+        groupedModules[m.module_type].push(m);
+      });
+      const typeOrder = ['cpu','memory','disk','network','raid','gpu','cable'];
+      let totalStorageQty = 0;
+      storageModules.forEach(m => { totalStorageQty += m.storage_quantity; });
+    %>
+    <p class="text-muted" style="margin:0 0 12px;">총 <%= storageModules.length %>종 / <%= totalStorageQty %>개</p>
+
+    <% typeOrder.forEach(typeKey => {
+      if (!groupedModules[typeKey]) return;
+      const items = groupedModules[typeKey];
+      const typeLabel = moduleTypeLabels[typeKey] || typeKey;
+      let typeTotal = 0;
+      items.forEach(m => { typeTotal += m.storage_quantity; });
+    %>
+    <h4 style="margin:16px 0 8px; font-size:14px; color:#475569;"><%= typeLabel %> <span class="badge badge-secondary"><%= items.length %>종 / <%= typeTotal %>개</span></h4>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>코드</th>
+                    <th>제조사</th>
+                    <th>모델</th>
+                    <th>용량/사양</th>
+                    <th style="text-align:right;">보관 수량</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% items.forEach(m => { %>
+                <tr>
+                    <td><a href="/module-inventory?type=<%= m.module_type %>" style="font-weight:600;"><%= m.item_code %></a></td>
+                    <td><%= m.manufacturer || m.label || '-' %></td>
+                    <td><%= m.model || '-' %></td>
+                    <td><%= m.capacity || m.specification || '-' %></td>
+                    <td style="text-align:right; font-weight:600; font-size:16px;"><%= m.storage_quantity %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% }) %>
+</div>
+</div>
+<% } %>
+
 <!-- Add Rack Modal -->
 <div class="modal-overlay" id="addRackModal">
     <div class="modal">
@@ -138,6 +212,13 @@
                 <input type="text" name="name" class="form-control" required placeholder="예: A-01">
             </div>
             <div class="form-row">
+                <div class="form-group">
+                    <label>랙 유형</label>
+                    <select name="rack_type" class="form-control">
+                        <option value="standard">서버랙</option>
+                        <option value="immersion">액침탱크</option>
+                    </select>
+                </div>
                 <div class="form-group">
                     <label>총 U 수</label>
                     <input type="number" name="total_units" class="form-control" value="42" min="1" max="52">
@@ -298,7 +379,7 @@
     if (maxRow > 10) maxRow = 10;
 
     // Update grid template
-    grid.style.gridTemplateColumns = 'repeat(' + maxCol + ', minmax(140px, 1fr))';
+    grid.style.gridTemplateColumns = 'repeat(' + maxCol + ', minmax(120px, 1fr))';
     grid.style.gridTemplateRows = 'repeat(' + maxRow + ', auto)';
 
     // Build occupied map
@@ -347,4 +428,28 @@
 })();
 </script>
 
+<script>
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var tabId = this.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+      b.classList.remove('active');
+      b.style.fontWeight = '400';
+      b.style.borderBottom = '2px solid transparent';
+      b.style.color = '#64748b';
+      b.style.background = '#f8fafc';
+    });
+    this.classList.add('active');
+    this.style.fontWeight = '600';
+    this.style.borderBottom = '2px solid #3b82f6';
+    this.style.color = '#3b82f6';
+    this.style.background = '#fff';
+
+    document.getElementById('rackTab').style.display = tabId === 'rackTab' ? '' : 'none';
+    var moduleTab = document.getElementById('moduleTab');
+    if (moduleTab) moduleTab.style.display = tabId === 'moduleTab' ? '' : 'none';
+  });
+});
+</script>
 <%- include('../partials/footer', { extraJs }) %>

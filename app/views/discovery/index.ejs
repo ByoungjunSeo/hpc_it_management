@@ -514,12 +514,10 @@ function showDetail(assetId, forceRefresh) {
         html += '<p style="margin-bottom:12px;"><strong>총 메모리:</strong> ' + escapeHtml(data.totalMemory) + '</p>';
     }
 
-    if (data.comparison) {
+    if (data.discovered_modules && data.discovered_modules.length > 0) {
         html += renderComparison(data, assetId);
     } else {
-        // No comparison available, just show discovered modules
-        html += '<h4 style="margin-bottom:8px;">수집된 모듈</h4>';
-        html += renderDiscoveredModuleTable(data, assetId);
+        html += '<p class="text-muted">수집된 모듈이 없습니다.</p>';
     }
 
     // Apply button + history button
@@ -537,90 +535,193 @@ function showDetail(assetId, forceRefresh) {
     detailRow.style.display = '';
 }
 
-function renderComparison(data, assetId) {
-    var comp = data.comparison;
-    var vendors = data.vendors || [];
-    var html = '<div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">';
-
-    // Left: Registered modules (with owner column)
-    html += '<div>';
-    html += '<h4 style="margin-bottom:8px; color:var(--text-secondary);">등록된 모듈</h4>';
-    var regItems = [];
-    if (comp.matched) comp.matched.forEach(function(m) {
-        var ownerName = 'TTA';
-        if (m.registered_items && m.registered_items.length > 0) {
-            ownerName = ownerDisplayName(m.registered_items[0]);
-        }
-        var ri = m.registered_items && m.registered_items[0] || {};
-        regItems.push({ type: m._type, model: m.model, capacity: ri.capacity || '', specification: ri.specification || '', count: m.registered_count, status: 'matched', ownerName: ownerName });
-    });
-    if (comp.mismatched) comp.mismatched.forEach(function(m) {
-        var ownerName = 'TTA';
-        if (m.registered_items && m.registered_items.length > 0) {
-            ownerName = ownerDisplayName(m.registered_items[0]);
-        }
-        var ri = m.registered_items && m.registered_items[0] || {};
-        regItems.push({ type: m._type, model: m.model, capacity: ri.capacity || '', specification: ri.specification || '', count: m.registered_count, status: 'mismatched', ownerName: ownerName });
-    });
-    if (comp.missing) comp.missing.forEach(function(m) {
-        regItems.push({ type: m._type || m.module_type, model: m.model, capacity: m.capacity || '', specification: m.specification || '', count: m.count || 1, status: 'missing', ownerName: ownerDisplayName(m) });
-    });
-    html += renderComparisonList(regItems, 'registered');
-    html += '</div>';
-
-    // Right: Discovered modules (with owner edit dropdown)
-    html += '<div>';
-    html += '<h4 style="margin-bottom:8px; color:var(--text-secondary);">실제 모듈</h4>';
-    html += renderDiscoveredModuleTable(data, assetId);
-    html += '</div>';
-
-    html += '</div>';
-
-    // Summary
-    var summary = [];
-    if (comp.matched && comp.matched.length > 0) summary.push('<span class="badge badge-success">&#x2705; 일치 ' + comp.matched.length + '</span>');
-    if (comp.mismatched && comp.mismatched.length > 0) summary.push('<span class="badge badge-warning">&#x26A0;&#xFE0F; 불일치 ' + comp.mismatched.length + '</span>');
-    if (comp.extra && comp.extra.length > 0) summary.push('<span class="badge badge-info">&#x1F195; 미등록 ' + comp.extra.length + '</span>');
-    if (comp.missing && comp.missing.length > 0) summary.push('<span class="badge badge-danger">&#x274C; 누락 ' + comp.missing.length + '</span>');
-    if (summary.length > 0) {
-        html += '<div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">' + summary.join('') + '</div>';
-    }
-
-    return html;
+function normalizeModelClient(model) {
+    return (model || '').toLowerCase().trim().replace(/\s*x\d+\s*$/, '').replace(/\s+/g, ' ');
 }
 
-function renderComparisonList(items, side) {
-    if (items.length === 0) return '<p class="text-muted" style="font-size:13px;">없음</p>';
+function modelsMatchClient(a, b) {
+    var na = normalizeModelClient(a);
+    var nb = normalizeModelClient(b);
+    if (!na || !nb) return false;
+    if (na === nb) return true;
+    return na.indexOf(nb) >= 0 || nb.indexOf(na) >= 0;
+}
 
-    var html = '<table style="width:100%; font-size:13px;">';
-    html += '<thead><tr><th>유형</th><th>모델</th><th>용량</th><th>코드</th><th>수량</th><th>소유자</th><th></th></tr></thead><tbody>';
-    items.forEach(function(item) {
-        var statusIcon = '';
-        var rowStyle = '';
-        if (item.status === 'matched') {
-            statusIcon = '&#x2705;';
-        } else if (item.status === 'mismatched') {
-            statusIcon = '&#x26A0;&#xFE0F;';
-            rowStyle = 'background:rgba(255,193,7,0.1);';
-        } else if (item.status === 'missing' && side === 'registered') {
-            statusIcon = '&#x274C;';
-            rowStyle = 'background:rgba(220,53,69,0.1);';
-        } else if (item.status === 'extra' && side === 'discovered') {
-            statusIcon = '&#x1F195;';
-            rowStyle = 'background:rgba(0,123,255,0.1);';
+function buildUnifiedRows(data) {
+    var reg = (data.registered_modules || []).slice();
+    var disc = data.discovered_modules || [];
+    var rows = [];
+    var usedDisc = {};
+    var unmatchedReg = [];
+    var typeOrder = {cpu:0, memory:1, disk:2, network:3, raid:4, gpu:5};
+
+    reg.sort(function(a,b) { return (typeOrder[a.module_type]||99) - (typeOrder[b.module_type]||99); });
+
+    reg.forEach(function(r) {
+        var bestIdx = -1;
+        var bestExact = false;
+        for (var i = 0; i < disc.length; i++) {
+            if (usedDisc[i]) continue;
+            if (disc[i].module_type !== r.module_type) continue;
+            if (modelsMatchClient(r.model, disc[i].model)) {
+                var exact = normalizeModelClient(r.model) === normalizeModelClient(disc[i].model);
+                if (bestIdx < 0 || (exact && !bestExact)) {
+                    bestIdx = i;
+                    bestExact = exact;
+                }
+            }
         }
+        if (bestIdx >= 0) {
+            usedDisc[bestIdx] = true;
+            var countMatch = (r.count || 1) === (disc[bestIdx].count || 1);
+            rows.push({ type: r.module_type, reg: r, disc: disc[bestIdx], discIdx: bestIdx, status: countMatch ? 'matched' : 'mismatched' });
+        } else {
+            unmatchedReg.push(r);
+        }
+    });
+
+    // Collect unmatched discovered per type
+    var unmatchedDiscByType = {};
+    disc.forEach(function(d, i) {
+        if (!usedDisc[i]) {
+            if (!unmatchedDiscByType[d.module_type]) unmatchedDiscByType[d.module_type] = [];
+            unmatchedDiscByType[d.module_type].push({ d: d, idx: i });
+        }
+    });
+
+    // Pair unmatched registered with unmatched discovered of same type → mismatched
+    var usedUnmatchedDisc = {};
+    unmatchedReg.forEach(function(r) {
+        var pool = unmatchedDiscByType[r.module_type] || [];
+        var found = false;
+        for (var j = 0; j < pool.length; j++) {
+            if (usedUnmatchedDisc[pool[j].idx]) continue;
+            usedUnmatchedDisc[pool[j].idx] = true;
+            rows.push({ type: r.module_type, reg: r, disc: pool[j].d, discIdx: pool[j].idx, status: 'mismatched' });
+            found = true;
+            break;
+        }
+        if (!found) {
+            rows.push({ type: r.module_type, reg: r, disc: null, discIdx: -1, status: 'missing' });
+        }
+    });
+
+    // Remaining discovered-only modules
+    disc.forEach(function(d, i) {
+        if (!usedDisc[i] && !usedUnmatchedDisc[i]) {
+            rows.push({ type: d.module_type, reg: null, disc: d, discIdx: i, status: 'extra' });
+        }
+    });
+
+    rows.sort(function(a,b) { return (typeOrder[a.type]||99) - (typeOrder[b.type]||99); });
+    return rows;
+}
+
+function formatModuleInfo(model, capacity, spec, manufacturer, moduleType) {
+    var lines = [];
+    lines.push('<strong style="font-size:12px;">' + escapeHtml(model || '-') + '</strong>');
+    if (manufacturer) {
+        lines.push('<span style="color:#555; font-size:11px;">제조사: <b>' + escapeHtml(manufacturer) + '</b></span>');
+    }
+    if (capacity) {
+        lines.push('<span style="color:#555; font-size:11px;">용량: <b>' + escapeHtml(capacity) + '</b></span>');
+    }
+    if (spec) {
+        lines.push('<code style="font-size:11px;">' + escapeHtml(spec) + '</code>');
+    }
+    return lines.join('<br>');
+}
+
+function renderComparison(data, assetId) {
+    var vendors = data.vendors || [];
+    var defaultOwner = (data.asset_ownership === 'vendor') ? 'vendor' : 'company';
+    var defaultVendorId = (data.asset_ownership === 'vendor') ? data.asset_vendor_id : null;
+
+    // Assign default owner to discovered modules
+    (data.discovered_modules || []).forEach(function(m, idx) {
+        if (!m.owner) { m.owner = defaultOwner; m.owner_vendor_id = defaultVendorId; }
+        m._idx = idx;
+    });
+
+    var rows = buildUnifiedRows(data);
+
+    var html = '<table style="width:100%; font-size:13px; border-collapse:collapse;" id="compare-table-' + assetId + '">';
+    html += '<thead><tr style="border-bottom:2px solid var(--border);">';
+    html += '<th style="width:28px; text-align:center;">#</th>';
+    html += '<th style="width:50px;">유형</th>';
+    html += '<th style="border-right:2px solid var(--border);">등록 모듈</th>';
+    html += '<th style="width:36px; text-align:center;">수량</th>';
+    html += '<th style="width:56px; text-align:center;">설치</th>';
+    html += '<th style="border-right:2px solid var(--border);">실제 모듈</th>';
+    html += '<th style="width:36px; text-align:center;">수량</th>';
+    html += '<th style="width:90px;">소유자</th>';
+    html += '<th style="width:36px; text-align:center;"></th>';
+    html += '</tr></thead><tbody>';
+
+    var matchCount = 0, mismatchCount = 0, missingCount = 0, extraCount = 0;
+
+    rows.forEach(function(row, idx) {
+        var rowStyle = 'border-bottom:1px solid var(--border);';
+        var statusIcon = '';
+        if (row.status === 'matched') { statusIcon = '&#x2705;'; matchCount++; }
+        else if (row.status === 'mismatched') { statusIcon = '&#x26A0;&#xFE0F;'; rowStyle += 'background:rgba(255,193,7,0.08);'; mismatchCount++; }
+        else if (row.status === 'missing') { statusIcon = '&#x274C;'; rowStyle += 'background:rgba(220,53,69,0.08);'; missingCount++; }
+        else if (row.status === 'extra') { statusIcon = '&#x1F195;'; rowStyle += 'background:rgba(0,123,255,0.08);'; extraCount++; }
 
         html += '<tr style="' + rowStyle + '">';
-        html += '<td><span class="badge badge-secondary">' + moduleTypeLabel(item.type) + '</span></td>';
-        html += '<td>' + escapeHtml(item.model || '-') + '</td>';
-        html += '<td>' + escapeHtml(item.capacity || '-') + '</td>';
-        html += '<td>' + escapeHtml(item.specification || '-') + '</td>';
-        html += '<td style="text-align:center;">' + item.count + '</td>';
-        html += '<td>' + escapeHtml(item.ownerName || 'TTA') + '</td>';
+        html += '<td style="text-align:center; color:var(--text-secondary); font-size:11px;">' + (idx + 1) + '</td>';
+        html += '<td><span class="badge badge-secondary">' + moduleTypeLabel(row.type) + '</span></td>';
+
+        // Registered module info
+        if (row.reg) {
+            var regOwnerBadge = '';
+            if (row.reg.owner === 'vendor') {
+                var vName = row.reg.owner_vendor_name || '업체';
+                regOwnerBadge = '<span class="badge badge-warning" style="font-size:10px;">' + escapeHtml(vName) + '</span>';
+            } else {
+                regOwnerBadge = '<span class="badge badge-success" style="font-size:10px;">자사</span>';
+            }
+            html += '<td style="border-right:2px solid var(--border); line-height:1.5;">' + formatModuleInfo(row.reg.model, row.reg.capacity, row.reg.specification, row.reg.manufacturer, row.type) + ' ' + regOwnerBadge + '</td>';
+            html += '<td style="text-align:center;">' + (row.reg.count || 1) + '</td>';
+            var ib = row.reg.is_onboard ? '<span class="badge badge-secondary" style="font-size:10px;">온보드</span>' : '<span class="badge badge-info" style="font-size:10px;">애드온</span>';
+            html += '<td style="text-align:center;">' + ib + '</td>';
+        } else {
+            html += '<td style="border-right:2px solid var(--border); color:var(--text-secondary);">-</td>';
+            html += '<td style="text-align:center; color:var(--text-secondary);">-</td>';
+            html += '<td style="text-align:center;">-</td>';
+        }
+
+        // Discovered module info
+        if (row.disc) {
+            html += '<td style="border-right:2px solid var(--border); line-height:1.5;">' + formatModuleInfo(row.disc.model, row.disc.capacity, row.disc.specification, row.disc.manufacturer, row.type) + '</td>';
+            html += '<td style="text-align:center;" id="disc-count-' + assetId + '-' + row.discIdx + '">' + (row.disc.count || 1) + '</td>';
+            var ownerVal = row.disc.owner === 'vendor' && row.disc.owner_vendor_id ? 'vendor_' + row.disc.owner_vendor_id : 'company';
+            html += '<td><select class="form-control" style="font-size:11px; padding:1px 3px; min-width:70px;" ';
+            html += 'onchange="changeModuleOwner(' + assetId + ',' + row.discIdx + ',this.value)">';
+            html += buildVendorOptions(vendors, row.disc.owner, row.disc.owner_vendor_id);
+            html += '</select></td>';
+        } else {
+            html += '<td style="border-right:2px solid var(--border); color:var(--text-secondary);">-</td>';
+            html += '<td style="text-align:center; color:var(--text-secondary);">-</td>';
+            html += '<td style="color:var(--text-secondary);">-</td>';
+        }
+
         html += '<td style="text-align:center;">' + statusIcon + '</td>';
         html += '</tr>';
     });
+
     html += '</tbody></table>';
+
+    // Summary
+    var summary = [];
+    if (matchCount > 0) summary.push('<span class="badge badge-success">&#x2705; 일치 ' + matchCount + '</span>');
+    if (mismatchCount > 0) summary.push('<span class="badge badge-warning">&#x26A0;&#xFE0F; 불일치 ' + mismatchCount + '</span>');
+    if (missingCount > 0) summary.push('<span class="badge badge-danger">&#x274C; 누락 ' + missingCount + '</span>');
+    if (extraCount > 0) summary.push('<span class="badge badge-info">&#x1F195; 미등록 ' + extraCount + '</span>');
+    if (summary.length > 0) {
+        html += '<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">' + summary.join('') + '</div>';
+    }
+
     return html;
 }
 

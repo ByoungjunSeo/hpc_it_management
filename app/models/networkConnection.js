@@ -98,14 +98,29 @@ const NetworkConnection = {
 
   moveToSwitch(id, oldSwitchId, newSwitchId) {
     const conn = getDb().prepare('SELECT * FROM network_connections WHERE id = ?').get(id);
-    if (!conn) return;
+    if (!conn) return { updated: false, reason: 'not_found', id };
     if (conn.from_asset_id == oldSwitchId) {
-      getDb().prepare('UPDATE network_connections SET from_asset_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+      const r = getDb().prepare('UPDATE network_connections SET from_asset_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
         .run(newSwitchId, id);
+      return { updated: r.changes > 0, side: 'from', id };
     } else if (conn.to_asset_id == oldSwitchId) {
-      getDb().prepare('UPDATE network_connections SET to_asset_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+      const r = getDb().prepare('UPDATE network_connections SET to_asset_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
         .run(newSwitchId, id);
+      return { updated: r.changes > 0, side: 'to', id };
     }
+    return { updated: false, reason: 'no_match', id, from: conn.from_asset_id, to: conn.to_asset_id, oldSw: oldSwitchId };
+  },
+
+  batchUpdateFields(connIds, fields) {
+    const sets = ['updated_at=CURRENT_TIMESTAMP'];
+    const params = [];
+    if (fields.speed !== undefined) { sets.push('speed=?'); params.push(fields.speed || null); }
+    if (fields.cable_type !== undefined) { sets.push('cable_type=?'); params.push(fields.cable_type || null); }
+    if (sets.length <= 1) return 0;
+    const placeholders = connIds.map(() => '?').join(',');
+    const r = getDb().prepare(`UPDATE network_connections SET ${sets.join(',')} WHERE id IN (${placeholders})`)
+      .run(...params, ...connIds);
+    return r.changes;
   },
 
   delete(id) {

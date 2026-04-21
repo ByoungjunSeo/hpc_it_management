@@ -21,9 +21,16 @@ const ComputingModule = {
       params.push(filters.asset_id);
     }
     if (filters.search) {
-      sql += ' AND (cm.model LIKE ? OR cm.manufacturer LIKE ? OR a.model_name LIKE ?)';
+      sql += ` AND (cm.model LIKE ? OR cm.manufacturer LIKE ? OR a.model_name LIKE ?
+        OR cm.specification LIKE ? OR a.management_number LIKE ?
+        OR EXISTS (
+          SELECT 1 FROM module_inventory mi
+          WHERE mi.item_code LIKE ?
+          AND mi.module_type = cm.module_type
+          AND mi.model = cm.model
+        ))`;
       const s = '%' + filters.search + '%';
-      params.push(s, s, s);
+      params.push(s, s, s, s, s, s);
     }
 
     sql += ' ORDER BY cm.asset_id, cm.module_type';

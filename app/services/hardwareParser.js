@@ -137,6 +137,18 @@ function parseDisk(output, options = {}) {
   const section = parseSection(output, 'DISK');
   if (!section) return [];
 
+  // Parse DISK_DETAIL section for full model names from smartctl
+  const detailSection = parseSection(output, 'DISK_DETAIL');
+  const fullModelMap = {};
+  if (detailSection) {
+    detailSection.split('\n').forEach(line => {
+      const m = line.match(/^DISKDETAIL:\s*name=(\S+)\s+model=(.+)$/);
+      if (m) {
+        fullModelMap[m[1].trim()] = m[2].trim();
+      }
+    });
+  }
+
   const modules = [];
   const lines = section.split('\n').filter(l => l.trim());
   const skipVirtualFilter = options.includeVirtual || false;
@@ -149,15 +161,23 @@ function parseDisk(output, options = {}) {
       const name = parts[0];
       const size = parts[3];
       const type = parts[5] || '';
-      const model = parts.slice(6).join(' ') || '';
+      let model = parts.slice(6).join(' ') || '';
 
       if (parts[5] === 'disk') {
+        // Use full model name from smartctl if available
+        if (fullModelMap[name]) {
+          model = fullModelMap[name];
+        }
+
         // Skip RAID/LVM virtual disks (model matches known virtual disk patterns)
         const isVirtualDisk = /^MR\d|^AVAGO|^LSI|^PERC|^Smart\s*Array|^arcconf|^mpt\d|^Logical[_\s]?Volume/i.test(model);
         if (skipVirtualFilter || !isVirtualDisk) {
+          // Extract manufacturer from model string
+          const mfgMatch = (model || '').match(/^(SEAGATE|TOSHIBA|WDC|Western Digital|Samsung|Micron|Intel|HGST|SanDisk|Crucial|Kingston|SK[_ ]?hynix|Lite-?On|ADATA|PNY|Transcend|KIOXIA|Hitachi|DAPUSTOR)(?=[\s_\-]|$)/i);
           modules.push({
             module_type: 'disk',
             model: model || name,
+            manufacturer: mfgMatch ? mfgMatch[1] : '',
             capacity: size,
             count: 1,
             specification: isVirtualDisk ? 'RAID VD' : (type === '0' ? 'SSD' : type === '1' ? 'HDD' : '')
@@ -187,58 +207,41 @@ function parseNetwork(output) {
 
   // Parse PCI address + model from lspci output
   // Format: "0000:01:00.0 Ethernet controller: Intel Corporation X550 (rev 01)"
-  // Onboard devices are tagged: "[ONBOARD] 0000:67:00.0 Ethernet controller: ..."
-  const addonEntries = [];
-  const onboardEntries = [];
+  // [ONBOARD] tag is stripped — discovered modules don't distinguish onboard/add-in
+  const entries = [];
   const lines = section.split('\n').filter(l => l.trim());
 
   lines.forEach(line => {
-    const isOnboard = line.startsWith('[ONBOARD]');
-    const cleanLine = isOnboard ? line.replace(/^\[ONBOARD\]\s*/, '') : line;
+    const cleanLine = line.startsWith('[ONBOARD]') ? line.replace(/^\[ONBOARD\]\s*/, '') : line;
     const match = cleanLine.match(/^(\S+)\s+Ethernet controller:?\s*(.*)/i);
     if (match) {
       const pciAddr = match[1];
       const model = match[2].trim();
       const busDevice = pciAddr.replace(/\.\d+$/, '');
-      const entry = { pciAddr, busDevice, model };
-      if (isOnboard) onboardEntries.push(entry);
-      else addonEntries.push(entry);
+      entries.push({ pciAddr, busDevice, model });
     }
   });
 
-  // Helper: group entries into consolidated modules
-  function groupEntries(entries, specSuffix) {
-    const cards = {};
-    entries.forEach(e => {
-      const key = e.busDevice + '|' + e.model;
-      if (!cards[key]) cards[key] = { model: e.model, ports: 0 };
-      cards[key].ports++;
-    });
-    const consolidated = {};
-    Object.values(cards).forEach(card => {
-      const key = card.model + '|' + card.ports;
-      if (consolidated[key]) {
-        consolidated[key].count++;
-      } else {
-        consolidated[key] = {
-          module_type: 'network',
-          model: card.model,
-          count: 1,
-          specification: card.ports + '포트' + (specSuffix ? ' ' + specSuffix : '')
-        };
-      }
-    });
-    return Object.values(consolidated);
-  }
-
-  // Add-in cards first, then onboard separately tagged
-  const addonModules = groupEntries(addonEntries, '');
-  const onboardModules = groupEntries(onboardEntries, '(온보드)');
+  // Group by physical card (same bus:device) and model
+  const cards = {};
+  entries.forEach(e => {
+    const key = e.busDevice + '|' + e.model;
+    if (!cards[key]) cards[key] = { model: e.model, ports: 0 };
+    cards[key].ports++;
+  });
   const consolidated = {};
-  [...addonModules, ...onboardModules].forEach(m => {
-    const key = m.model + '|' + m.specification;
-    if (consolidated[key]) consolidated[key].count += m.count;
-    else consolidated[key] = { ...m };
+  Object.values(cards).forEach(card => {
+    const key = card.model + '|' + card.ports;
+    if (consolidated[key]) {
+      consolidated[key].count++;
+    } else {
+      consolidated[key] = {
+        module_type: 'network',
+        model: card.model,
+        count: 1,
+        specification: card.ports + '포트'
+      };
+    }
   });
 
   return Object.values(consolidated);
@@ -252,14 +255,42 @@ function parseRaid(output) {
   const lines = section.split('\n').filter(l => l.trim());
 
   lines.forEach(line => {
-    const match = line.match(/RAID[^:]*:?\s*(.*)/i);
-    if (match) {
-      modules.push({
-        module_type: 'raid',
-        model: match[1].trim(),
-        count: 1
-      });
+    // New format: "RAID: 0000:a8:00.0 RAID bus controller: Broadcom ... [SUBSYS:MegaRAID 9560-8i]"
+    // Use Subsystem model if available (more specific product name)
+    let model = '';
+    const subsysMatch = line.match(/\[SUBSYS:(.+)\]\s*$/);
+    const baseLine = subsysMatch ? line.replace(/\s*\[SUBSYS:.+\]\s*$/, '') : line;
+
+    // Extract base model from controller description
+    const colonMatch = baseLine.match(/controller:\s*(.+)/i);
+    if (colonMatch) {
+      model = colonMatch[1].trim();
+    } else {
+      const raidMatch = baseLine.match(/RAID[^:]*:?\s*(.*)/i);
+      if (raidMatch) {
+        model = raidMatch[1].trim();
+      }
     }
+
+    // Prefer Subsystem name if it contains a meaningful product model
+    if (subsysMatch) {
+      const subsys = subsysMatch[1].trim();
+      if (subsys) {
+        // Extract vendor from base model for prefix (e.g. "Broadcom / LSI")
+        const vendorMatch = model.match(/^(.+?)\s+(?:MegaRAID|PERC|SmartRAID|SmartArray)/i);
+        const vendor = vendorMatch ? vendorMatch[1] : '';
+        model = vendor ? vendor + ' ' + subsys : subsys;
+      }
+    }
+
+    if (!model) return; // Skip RAID entries with empty model names
+    // Skip Intel VMD — chipset-integrated NVMe manager, not a real RAID card
+    if (/Volume Management Device/i.test(model)) return;
+    modules.push({
+      module_type: 'raid',
+      model: model,
+      count: 1
+    });
   });
 
   return modules;
@@ -280,6 +311,7 @@ function parseSysfsDisks(section) {
     modules.push({
       module_type: 'disk',
       model: fullModel,
+      manufacturer: vendor || '',
       capacity: size,
       count: 1,
       specification: ''
@@ -299,6 +331,7 @@ function parseSmartctlDisks(section) {
   const smartSection = section.match(/===SMARTCTL_START===([\s\S]*?)===SMARTCTL_END===/);
   if (!smartSection) return [];
   const modules = [];
+  const seenSerials = new Set();
   const devices = smartSection[1].split(/===DEV:[^=]+===/);
   devices.forEach(dev => {
     if (!dev.trim()) return;
@@ -310,8 +343,15 @@ function parseSmartctlDisks(section) {
       }
     });
     const model = info['Device Model'] || info['Product'] || info['Model Number'] || '';
-    const vendor = info['Vendor'] || '';
-    const capacity = info['User Capacity'] || '';
+    let vendor = info['Vendor'] || '';
+    // NVMe drives don't have Vendor field — extract from model name
+    if (!vendor && model) {
+      const mfgMatch = model.match(/^(SEAGATE|TOSHIBA|WDC|Western Digital|Samsung|Micron|Intel|HGST|SanDisk|Crucial|Kingston|SK[_ ]?hynix|Lite-?On|ADATA|PNY|Transcend|KIOXIA|Hitachi|DAPUSTOR)(?=[\s_\-]|$)/i);
+      if (mfgMatch) vendor = mfgMatch[1];
+    }
+    const serial = (info['Serial number'] || info['Serial Number'] || '').trim();
+    // NVMe uses 'Total NME Capacity' or 'Namespace 1 Size/Capacity' instead of 'User Capacity'
+    const capacity = info['User Capacity'] || info['Total NME Capacity'] || info['Namespace 1 Size/Capacity'] || '';
     const sizeMatch = capacity.match(/([\d,]+)\s*bytes\s*\[([\d.]+\s*\w+)\]/);
     const size = sizeMatch ? sizeMatch[2] : capacity;
     const rpm = info['Rotation Rate'] || '';
@@ -319,10 +359,16 @@ function parseSmartctlDisks(section) {
     // Skip RAID virtual devices
     if (/^MR\d|^PERC|^Logical|^AVAGO/i.test(model)) return;
     if (!model) return;
+    // Deduplicate by serial number (brute-force may re-discover same disk)
+    if (serial) {
+      if (seenSerials.has(serial)) return;
+      seenSerials.add(serial);
+    }
     const fullModel = vendor && !model.startsWith(vendor) ? vendor + ' ' + model : model;
     modules.push({
       module_type: 'disk',
       model: fullModel,
+      manufacturer: vendor || '',
       capacity: size,
       count: 1,
       specification: isSSD ? 'SSD' : rpm ? 'HDD' : ''
@@ -346,12 +392,12 @@ function parseRaidPhysicalDisks(output) {
   const toolMatch = section.match(/===TOOL:(\w+)===/);
   const tool = toolMatch ? toolMatch[1] : 'none';
   if (tool === 'sysfs' || tool === 'none') {
+    // Prefer smartctl (full model names) over sysfs (truncated names)
+    const smartModules = parseSmartctlDisks(section);
+    if (smartModules.length > 0) return smartModules;
     // sysfs fallback
     const sysfsModules = parseSysfsDisks(section);
     if (sysfsModules.length > 0) return sysfsModules;
-    // smartctl fallback
-    const smartModules = parseSmartctlDisks(section);
-    if (smartModules.length > 0) return smartModules;
     return [];
   }
 
@@ -382,9 +428,12 @@ function parseRaidPhysicalDisks(output) {
           // Model: from token 11 to (length-2), join with space
           const modelTokens = tokens.slice(11, tokens.length - 2);
           const model = modelTokens.join(' ').trim() || tokens[11] || '';
+          // Extract manufacturer from model
+          const storcliMfg = (model || '').match(/^(SEAGATE|TOSHIBA|WDC|Western Digital|Samsung|Micron|Intel|HGST|SanDisk|Crucial|Kingston|SK[_ ]?hynix|Lite-?On|ADATA|PNY|Transcend|KIOXIA|Hitachi|DAPUSTOR)(?=[\s_\-]|$)/i);
           modules.push({
             module_type: 'disk',
             model: model,
+            manufacturer: storcliMfg ? storcliMfg[1] : '',
             capacity: size,
             count: 1,
             specification: [med, intf].filter(Boolean).join(' ')
@@ -438,7 +487,7 @@ function parseRaidPhysicalDisks(output) {
           // SATA: serial often prepended to vendor_model
           // e.g. "18471F937FDFMicron_5200_MTFDDAK3T8TDC    D1MU404"
           // Try to find known vendor name in the string
-          const vendorMatch = rawInquiry.match(/(Micron|Samsung|Intel|WDC|Western Digital|Crucial|Kingston|SK[_ ]?hynix|Seagate|TOSHIBA|HGST|SanDisk|Lite-?On|ADATA|PNY|Transcend)[_\s\-]?[\w\-_]+/i);
+          const vendorMatch = rawInquiry.match(/(Micron|Samsung|Intel|WDC|Western Digital|Crucial|Kingston|SK[_ ]?hynix|Seagate|TOSHIBA|HGST|SanDisk|Lite-?On|ADATA|PNY|Transcend|KIOXIA|Hitachi|DAPUSTOR)[_\s\-]?[\w\-_]+/i);
           if (vendorMatch) {
             model = vendorMatch[0].trim();
           } else if (fields.length >= 2) {
@@ -455,9 +504,12 @@ function parseRaidPhysicalDisks(output) {
       const isHDD = /hard\s*disk/i.test(mediaType) || /HDD/i.test(mediaType);
 
       if (size || model) {
+        // Extract manufacturer from model or raw inquiry
+        const megaMfgMatch = (model || '').match(/^(SEAGATE|TOSHIBA|WDC|Western Digital|Samsung|Micron|Intel|HGST|SanDisk|Crucial|Kingston|SK[_ ]?hynix|Lite-?On|ADATA|PNY|Transcend|KIOXIA|Hitachi|DAPUSTOR)(?=[\s_\-]|$)/i);
         modules.push({
           module_type: 'disk',
           model: model || 'Unknown',
+          manufacturer: megaMfgMatch ? megaMfgMatch[1] : '',
           capacity: size || '',
           count: 1,
           specification: [isSSD ? 'SSD' : isHDD ? 'HDD' : '', pdType].filter(Boolean).join(' ')
@@ -495,9 +547,11 @@ function parseRaidPhysicalDisks(output) {
       const isSSD = rpm === '0' || /SSD|Solid/i.test(info['Drive Type'] || '');
 
       if (size || model) {
+        const ssaMfg = (model || '').match(/^(SEAGATE|TOSHIBA|WDC|Western Digital|Samsung|Micron|Intel|HGST|SanDisk|Crucial|Kingston|SK[_ ]?hynix|Lite-?On|ADATA|PNY|Transcend|KIOXIA|Hitachi|DAPUSTOR)(?=[\s_\-]|$)/i);
         modules.push({
           module_type: 'disk',
           model: model || 'Unknown',
+          manufacturer: ssaMfg ? ssaMfg[1] : '',
           capacity: size,
           count: 1,
           specification: [isSSD ? 'SSD' : rpm ? 'HDD' : '', intf].filter(Boolean).join(' ')
@@ -540,15 +594,41 @@ function parseRaidPhysicalDisks(output) {
       const isSSD = /Solid/i.test(dev) || /SSD/i.test(dev);
 
       if (size || model) {
+        const arcMfg = (model || '').match(/^(SEAGATE|TOSHIBA|WDC|Western Digital|Samsung|Micron|Intel|HGST|SanDisk|Crucial|Kingston|SK[_ ]?hynix|Lite-?On|ADATA|PNY|Transcend|KIOXIA|Hitachi|DAPUSTOR)(?=[\s_\-]|$)/i);
         modules.push({
           module_type: 'disk',
           model: model.trim() || 'Unknown',
+          manufacturer: arcMfg ? arcMfg[1] : '',
           capacity: size,
           count: 1,
           specification: [isSSD ? 'SSD' : isHardDrive ? 'HDD' : '', speed].filter(Boolean).join(' ')
         });
       }
     });
+  }
+
+  // Enrich with smartctl data if available (provides full vendor+model names)
+  if (modules.length > 0) {
+    const smartModules = parseSmartctlDisks(section);
+    if (smartModules.length > 0) {
+      modules.forEach(m => {
+        if (m.manufacturer) return; // Already has manufacturer
+        // Try to find matching smartctl module by model substring
+        const match = smartModules.find(sm =>
+          sm.model && m.model && (
+            sm.model.toLowerCase().includes(m.model.toLowerCase()) ||
+            m.model.toLowerCase().includes((sm.model || '').split(' ').pop().toLowerCase())
+          )
+        );
+        if (match) {
+          if (match.manufacturer && !m.manufacturer) m.manufacturer = match.manufacturer;
+          // If smartctl has a fuller model name, use it
+          if (match.model && match.model.length > (m.model || '').length) {
+            m.model = match.model;
+          }
+        }
+      });
+    }
   }
 
   // Consolidate by model + capacity
@@ -569,72 +649,39 @@ function parseGpu(output) {
   const section = parseSection(output, 'GPU');
   if (!section) return [];
 
-  // Detect nvidia-smi error messages (driver not loaded, not found, etc.)
-  const isNvidiaSmiError = /NVIDIA-SMI has failed|driver.*not.*install|driver.*not.*running|Make sure that|Failed to initialize|No devices were found/i.test(section);
-
   const modules = [];
 
-  // Try nvidia-smi -L format first: "GPU 0: NVIDIA A100-SXM4-40GB (UUID: ...)"
-  if (!isNvidiaSmiError) {
-    const nvsmiLines = section.split('\n');
-    nvsmiLines.forEach(line => {
-      const m = line.match(/^GPU\s+\d+:\s+(.+?)(?:\s*\(UUID:.*\))?$/);
-      if (m) {
-        modules.push({
-          module_type: 'gpu',
-          model: m[1].trim(),
-          manufacturer: m[1].includes('NVIDIA') ? 'NVIDIA' : m[1].includes('AMD') ? 'AMD' : '',
-          count: 1
-        });
-      }
-    });
+  // Try lspci format first — more accurate chipset model names
+  // (filter out BMC/management VGA like ASPEED, Matrox)
+  const allLines = section.split('\n').filter(l => l.trim());
+  allLines.forEach(line => {
+    if (/ASPEED|Matrox|ServerEngines|iBMC|Hi171x|iLO|IPMI|BMC/i.test(line)) return;
+    const match = line.match(/(?:VGA|3D|Display).*?:\s*(.*)/i);
+    if (match) {
+      modules.push({
+        module_type: 'gpu',
+        model: match[1].trim(),
+        count: 1
+      });
+    }
+  });
 
-    // Try nvidia-smi dashboard table format: "| 0  NVIDIA A100 ..."
-    if (modules.length === 0 && section.includes('NVIDIA')) {
-      nvsmiLines.forEach(line => {
-        const match = line.match(/\|\s+\d+\s+(\S+\s+\S+[\s\S]*?)\s+\w+\s+\|/);
-        if (match) {
+  // Fallback to nvidia-smi if lspci found nothing
+  if (modules.length === 0) {
+    const isNvidiaSmiError = /NVIDIA-SMI has failed|driver.*not.*install|driver.*not.*running|Make sure that|Failed to initialize|No devices were found/i.test(section);
+    if (!isNvidiaSmiError) {
+      allLines.forEach(line => {
+        const m = line.match(/^GPU\s+\d+:\s+(.+?)(?:\s*\(UUID:.*\))?$/);
+        if (m) {
           modules.push({
             module_type: 'gpu',
-            model: match[1].trim(),
-            manufacturer: 'NVIDIA',
+            model: m[1].trim(),
+            manufacturer: m[1].includes('NVIDIA') ? 'NVIDIA' : m[1].includes('AMD') ? 'AMD' : '',
             count: 1
           });
         }
       });
-
-      // Fallback: match any "NVIDIA ..." model string
-      if (modules.length === 0) {
-        const gpuNames = section.match(/NVIDIA\s+[\w\s\-\.]+/g);
-        if (gpuNames) {
-          gpuNames.forEach(name => {
-            modules.push({
-              module_type: 'gpu',
-              model: name.trim(),
-              manufacturer: 'NVIDIA',
-              count: 1
-            });
-          });
-        }
-      }
     }
-  }
-
-  // Try lspci format (filter out BMC/management VGA like ASPEED, Matrox)
-  if (modules.length === 0) {
-    const lines = section.split('\n').filter(l => l.trim());
-    lines.forEach(line => {
-      // Skip BMC/management VGA controllers (not real GPUs)
-      if (/ASPEED|Matrox|ServerEngines|iBMC|Hi171x|iLO|IPMI|BMC/i.test(line)) return;
-      const match = line.match(/(?:VGA|3D|Display).*?:\s*(.*)/i);
-      if (match) {
-        modules.push({
-          module_type: 'gpu',
-          model: match[1].trim(),
-          count: 1
-        });
-      }
-    });
   }
 
   // Consolidate
@@ -664,6 +711,8 @@ function parseFreeMemory(output) {
 
 function parseAll(output) {
   const raidModules = parseRaid(output);
+  // Only consider RAID present if lspci actually detected a RAID controller
+  // (RAID_PD section always has content from sysfs/smartctl fallback even without RAID)
   const hasRaid = raidModules.length > 0;
 
   // If RAID controller detected, try RAID tool physical disks first

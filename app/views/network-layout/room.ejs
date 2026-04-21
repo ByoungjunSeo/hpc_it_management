@@ -196,6 +196,16 @@
         <div class="net-seg-sample cat-ib"></div>
         <span>InfiniBand</span>
     </div>
+    <span class="net-legend-sep"></span>
+    <span class="net-legend-label">소유</span>
+    <div class="net-legend-item">
+        <span class="net-own-sample own-company"></span>
+        <span>자사</span>
+    </div>
+    <div class="net-legend-item">
+        <span class="net-own-sample own-vendor"></span>
+        <span>업체</span>
+    </div>
 </div>
 
 <!-- Topology Visualization: Horizontal Rows -->
@@ -216,7 +226,18 @@
     <% prevSwId = row.sw.id; %>
     <div class="net-h-row">
         <!-- Switch box -->
-        <div class="net-h-sw-box" data-sw-id="<%= row.sw.id %>">
+        <%
+            /* Representative cable_type for this row */
+            var rowCableType = row.cat === 'IB' ? 'infiniband' : (row.devices.length > 0 && row.devices[0].conns.length > 0 ? (row.devices[0].conns[0].cable_type || '') : '');
+        %>
+        <div class="net-h-sw-box" data-sw-id="<%= row.sw.id %>"
+             data-speed="<%= row.speed %>"
+             data-cable-type="<%= rowCableType %>"
+             onclick="if(!_justDropped)openSwDetailModal(<%= row.sw.id %>)"
+             ondragover="event.preventDefault();event.dataTransfer.dropEffect='move';this.classList.add('drop-target')"
+             ondragenter="event.preventDefault();this.classList.add('drop-target')"
+             ondragleave="if(!this.contains(event.relatedTarget))this.classList.remove('drop-target')"
+             ondrop="handleSwDrop(event,this)">
             <div class="sw-name"><%= row.sw.asset_number || row.sw.model_name %></div>
             <div class="sw-model"><%= row.sw.model_name || '' %></div>
         </div>
@@ -232,7 +253,9 @@
         <div class="net-h-dev-box <%= d.device.asset_type === 'switch' ? 'is-switch' : '' %>"
              draggable="true"
              data-conn-ids="<%= JSON.stringify(d.conns.map(function(c){return c.id})) %>"
-             data-sw-id="<%= row.sw.id %>">
+             data-sw-id="<%= row.sw.id %>"
+             ondragstart="handleDevDragStart(event,this)"
+             ondragend="handleDevDragEnd(event,this)">
             <div class="dev-name"><%= d.device.asset_number || d.device.model_name %></div>
             <div class="dev-info">
                 <% if (d.conns.length > 1) { %><strong><%= d.conns.length %>×</strong> <% } %>
@@ -256,10 +279,11 @@
                     var shortType = c.cable_type ? (c.cable_type === 'infiniband' ? 'IB' : c.cable_type.replace('fiber_', 'F/').replace('cat6a','C6a').replace('cat6','C6')) : '';
                     var badgeExtra = [shortType, c.cable_label].filter(Boolean).join(' ');
                 %>
-                <span class="dev-port" data-conn-id="<%= c.id %>" title="<%= tip %>"><%= devPort %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
+                <span class="dev-port <%= c.ownership === 'vendor' ? 'own-vendor' : 'own-company' %>" data-conn-id="<%= c.id %>" title="<%= tip %>"><%= devPort %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
                 <% }) %>
             </div>
             <% } %>
+            <button class="move-btn" title="이동 (스위치/케이블 변경)" onclick="event.stopPropagation();openMoveModal(<%= JSON.stringify(d.conns.map(function(c){return c.id})) %>,<%= row.sw.id %>,<%= JSON.stringify(row.speed) %>,<%= JSON.stringify(d.conns[0].cable_type || '') %>)">&#8596;</button>
         </div>
         <% }) %>
     </div>
@@ -272,7 +296,7 @@
             var w = segWidth(dl.speed, dl.conns.length);
         %>
         <div class="net-h-row">
-            <div class="net-h-dev-box">
+            <div class="net-h-dev-box" data-conn-ids="<%= JSON.stringify(dl.conns.map(function(c){return c.id})) %>">
                 <div class="dev-name"><%= dl.a.asset_number || dl.a.model_name %></div>
                 <div class="dev-info"><%= typeLabels[dl.a.asset_type] || dl.a.asset_type %></div>
                 <div class="dev-ports">
@@ -287,7 +311,7 @@
                         var shortType = c.cable_type ? (c.cable_type === 'infiniband' ? 'IB' : c.cable_type.replace('fiber_', 'F/').replace('cat6a','C6a').replace('cat6','C6')) : '';
                         var badgeExtra = [shortType, c.cable_label].filter(Boolean).join(' ');
                     %>
-                    <span class="dev-port" title="<%= tipParts.join(' | ') %>"><%= p %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
+                    <span class="dev-port <%= c.ownership === 'vendor' ? 'own-vendor' : 'own-company' %>" data-conn-id="<%= c.id %>" title="<%= tipParts.join(' | ') %>"><%= p %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
                     <% }) %>
                 </div>
             </div>
@@ -295,7 +319,7 @@
                 <% if (dl.conns.length > 1) { %><%= dl.conns.length %>× <% } %><%= dl.speed %> <span class="cat-label cat-<%= dl.cat === 'IB' ? 'ib' : 'eth' %>"><%= dl.cat %></span>
             </div>
             <div class="net-h-seg <%= speedClass(dl.speed) %> cat-<%= dl.cat === 'IB' ? 'ib' : 'eth' %>" style="border-top-width: <%= w %>px;"></div>
-            <div class="net-h-dev-box">
+            <div class="net-h-dev-box" data-conn-ids="<%= JSON.stringify(dl.conns.map(function(c){return c.id})) %>">
                 <div class="dev-name"><%= dl.b.asset_number || dl.b.model_name %></div>
                 <div class="dev-info"><%= typeLabels[dl.b.asset_type] || dl.b.asset_type %></div>
                 <div class="dev-ports">
@@ -310,7 +334,7 @@
                         var shortType = c.cable_type ? (c.cable_type === 'infiniband' ? 'IB' : c.cable_type.replace('fiber_', 'F/').replace('cat6a','C6a').replace('cat6','C6')) : '';
                         var badgeExtra = [shortType, c.cable_label].filter(Boolean).join(' ');
                     %>
-                    <span class="dev-port" title="<%= tipParts.join(' | ') %>"><%= p %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
+                    <span class="dev-port <%= c.ownership === 'vendor' ? 'own-vendor' : 'own-company' %>" data-conn-id="<%= c.id %>" title="<%= tipParts.join(' | ') %>"><%= p %><% if (badgeExtra) { %> <small class="port-detail">· <%= badgeExtra %></small><% } %></span>
                     <% }) %>
                 </div>
             </div>
@@ -493,8 +517,71 @@
 <!-- Delete form -->
 <form id="deleteConnForm" method="POST" style="display:none;"></form>
 
+<!-- Switch Detail Modal -->
+<div class="modal-overlay" id="swDetailModal">
+    <div class="modal" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3 id="swDetailTitle">스위치 상세</h3>
+            <button class="modal-close" onclick="closeSwDetailModal()">&times;</button>
+        </div>
+        <div id="swDetailBody" style="padding: 16px;"></div>
+        <div class="btn-group" style="justify-content: flex-end; padding: 0 16px 16px;">
+            <button type="button" class="btn btn-secondary" onclick="closeSwDetailModal()">닫기</button>
+            <a id="swDetailLink" href="#" class="btn btn-primary">자산 상세 페이지</a>
+        </div>
+    </div>
+</div>
+
+<!-- Move Modal -->
+<div class="modal-overlay" id="moveModal">
+    <div class="modal" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3>연결 이동</h3>
+            <button class="modal-close" onclick="closeMoveModal()">&times;</button>
+        </div>
+        <div style="padding: 16px;">
+            <div id="moveConnList" style="margin-bottom: 12px;"></div>
+            <div class="form-group">
+                <label>대상 스위치</label>
+                <select id="moveTargetSw" class="form-control">
+                    <% switches.forEach(function(sw) { %>
+                    <option value="<%= sw.id %>"><%= sw.asset_number || sw.model_name %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>속도</label>
+                    <input type="text" id="moveSpeed" class="form-control" placeholder="예: 100G">
+                </div>
+                <div class="form-group">
+                    <label>케이블 유형</label>
+                    <select id="moveCableType" class="form-control">
+                        <option value="">-- 변경 없음 --</option>
+                        <% appConfig.cableTypes.forEach(function(t) { %>
+                        <option value="<%= t.value %>"><%= t.label %></option>
+                        <% }) %>
+                    </select>
+                </div>
+            </div>
+            <p id="moveInfo" style="font-size:12px;color:var(--text-light);margin-top:8px;"></p>
+        </div>
+        <div class="btn-group" style="justify-content: flex-end; padding: 0 16px 16px;">
+            <button type="button" class="btn btn-secondary" onclick="closeMoveModal()">취소</button>
+            <button type="button" class="btn btn-primary" onclick="executeMoveModal()">선택 이동</button>
+        </div>
+    </div>
+</div>
+
 <script>
 var connectionsData = <%- JSON.stringify(connections) %>;
+var assetsData = {};
+<% assets.forEach(function(a) { %>
+assetsData[<%= a.id %>] = { id: <%= a.id %>, asset_number: <%- JSON.stringify(a.asset_number || '') %>, model_name: <%- JSON.stringify(a.model_name || '') %>, manufacturer: <%- JSON.stringify(a.manufacturer || '') %>, serial_number: <%- JSON.stringify(a.serial_number || '') %>, ip_address: <%- JSON.stringify(a.ip_address || '') %>, asset_type: <%- JSON.stringify(a.asset_type || '') %>, status: <%- JSON.stringify(a.status || '') %>, ownership: <%- JSON.stringify(a.ownership || '') %>, rack_name: <%- JSON.stringify(a.rack_name || '') %>, room_name: <%- JSON.stringify(a.room_name || '') %>, purpose: <%- JSON.stringify(a.purpose || '') %>, assigned_user: <%- JSON.stringify(a.assigned_user || '') %> };
+<% }) %>
+var typeLabelsJS = <%- JSON.stringify(typeLabels) %>;
+var statusLabelsJS = <%- JSON.stringify(statusLabels) %>;
+var ownerLabelsJS = <%- JSON.stringify(ownerLabels) %>;
 
 /* === Modal functions === */
 function openAddConnModal() {
@@ -544,6 +631,45 @@ document.getElementById('connModal').addEventListener('click', function(e) {
     if (e.target === this) closeConnModal();
 });
 
+/* === Switch Detail Modal === */
+function openSwDetailModal(swId) {
+    var a = assetsData[swId];
+    if (!a) return;
+    document.getElementById('swDetailTitle').textContent = a.asset_number || a.model_name || '스위치 상세';
+    var rows = [
+        ['자산번호', a.asset_number],
+        ['모델', a.model_name],
+        ['제조사', a.manufacturer],
+        ['시리얼', a.serial_number],
+        ['IP 주소', a.ip_address],
+        ['유형', typeLabelsJS[a.asset_type] || a.asset_type],
+        ['소유', ownerLabelsJS[a.ownership] || a.ownership],
+        ['상태', statusLabelsJS[a.status] || a.status],
+        ['위치', [a.room_name, a.rack_name].filter(Boolean).join(' > ')],
+        ['용도', a.purpose],
+        ['담당자', a.assigned_user]
+    ];
+    var html = '<table style="width:100%;font-size:13px;border-collapse:collapse;">';
+    rows.forEach(function(r) {
+        if (!r[1]) return;
+        html += '<tr><td style="padding:6px 10px;font-weight:600;color:var(--text-light);white-space:nowrap;width:80px;border-bottom:1px solid var(--border);">' + r[0] + '</td>';
+        html += '<td style="padding:6px 10px;border-bottom:1px solid var(--border);">' + r[1] + '</td></tr>';
+    });
+    html += '</table>';
+    document.getElementById('swDetailBody').innerHTML = html;
+    document.getElementById('swDetailLink').href = '/assets/' + swId;
+    document.getElementById('swDetailModal').classList.add('active');
+}
+
+function closeSwDetailModal() { document.getElementById('swDetailModal').classList.remove('active'); }
+
+document.getElementById('swDetailModal').addEventListener('click', function(e) {
+    if (e.target === this) closeSwDetailModal();
+});
+
+/* _justDropped flag prevents click from firing right after a drop */
+var _justDropped = false;
+
 /* === Click on port badge → open edit modal === */
 document.querySelectorAll('.dev-port[data-conn-id]').forEach(function(port) {
     port.addEventListener('click', function(e) {
@@ -556,69 +682,154 @@ document.querySelectorAll('.dev-port[data-conn-id]').forEach(function(port) {
 /* === Click on device box (single connection) → open edit modal === */
 document.querySelectorAll('.net-h-dev-box[data-conn-ids]').forEach(function(box) {
     box.addEventListener('click', function(e) {
-        if (e.target.closest('.dev-port[data-conn-id]')) return; // handled by port click
+        if (e.target.closest('.dev-port[data-conn-id]')) return;
         var connIds;
         try { connIds = JSON.parse(this.getAttribute('data-conn-ids')); } catch(err) { return; }
         if (connIds.length === 1) openEditConnModal(connIds[0]);
     });
 });
 
-/* === Drag & Drop: move device to another switch === */
-document.querySelectorAll('.net-h-dev-box[draggable="true"]').forEach(function(box) {
-    box.addEventListener('dragstart', function(e) {
-        this.classList.add('dragging');
-        var connIds = this.getAttribute('data-conn-ids');
-        var oldSwId = this.getAttribute('data-sw-id');
-        e.dataTransfer.setData('application/json', JSON.stringify({
-            connIds: JSON.parse(connIds),
-            oldSwId: Number(oldSwId)
-        }));
-        e.dataTransfer.effectAllowed = 'move';
-    });
-    box.addEventListener('dragend', function() {
-        this.classList.remove('dragging');
-        document.querySelectorAll('.net-h-sw-box.drop-target').forEach(function(el) {
-            el.classList.remove('drop-target');
+/* === Drag & Drop (inline handlers) === */
+var _dragData = null;
+
+function handleDevDragStart(e, el) {
+    el.classList.add('dragging');
+    try {
+        _dragData = {
+            connIds: JSON.parse(el.getAttribute('data-conn-ids')),
+            oldSwId: Number(el.getAttribute('data-sw-id'))
+        };
+    } catch(err) { _dragData = null; }
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+}
+function handleDevDragEnd(e, el) {
+    el.classList.remove('dragging');
+    setTimeout(function() { _dragData = null; }, 200);
+    document.querySelectorAll('.drop-target').forEach(function(x) { x.classList.remove('drop-target'); });
+}
+function handleSwDrop(e, el) {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove('drop-target');
+    _justDropped = true;
+    setTimeout(function() { _justDropped = false; }, 300);
+    if (!_dragData || !_dragData.connIds) return;
+    var newSwId = Number(el.getAttribute('data-sw-id'));
+    var targetSpeed = el.getAttribute('data-speed') || '';
+    var targetCableType = el.getAttribute('data-cable-type') || '';
+    var body = { conn_ids: _dragData.connIds, old_switch_id: _dragData.oldSwId };
+    if (newSwId !== _dragData.oldSwId) body.new_switch_id = newSwId;
+    if (targetSpeed) body.speed = targetSpeed;
+    if (targetCableType) body.cable_type = targetCableType;
+    if (!body.new_switch_id && !body.speed && !body.cable_type) return;
+    /* Build description for confirmation */
+    var swName = assetsData[newSwId] ? (assetsData[newSwId].asset_number || assetsData[newSwId].model_name) : newSwId;
+    var desc = swName + ' / ' + (targetSpeed || '-') + ' / ' + (targetCableType || '-');
+    if (!confirm(_dragData.connIds.length + '개 연결을 [' + desc + '] 로 이동하시겠습니까?')) return;
+    doBatchMove(body);
+}
+
+/* === Move Modal === */
+var _moveData = null;
+var cableLabelsJS = <%- JSON.stringify(cableLabels) %>;
+
+function openMoveModal(connIds, oldSwId, currentSpeed, currentCableType) {
+    _moveData = { allConnIds: connIds, oldSwId: oldSwId };
+    document.getElementById('moveTargetSw').value = oldSwId;
+    document.getElementById('moveSpeed').value = currentSpeed || '';
+    document.getElementById('moveCableType').value = currentCableType || '';
+    var swName = assetsData[oldSwId] ? (assetsData[oldSwId].asset_number || assetsData[oldSwId].model_name) : oldSwId;
+    document.getElementById('moveInfo').textContent = '현재: ' + swName + ' / ' + (currentSpeed||'-') + ' / ' + (currentCableType||'-');
+
+    /* Build connection checklist */
+    var listEl = document.getElementById('moveConnList');
+    if (connIds.length > 1) {
+        var html = '<label style="font-weight:600;font-size:13px;display:block;margin-bottom:6px;">이동할 연결 선택</label>';
+        html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">';
+        html += '<label style="font-size:12px;cursor:pointer;color:var(--primary);"><input type="checkbox" id="moveSelectAll" onchange="toggleMoveAll(this.checked)" checked> 전체 선택</label>';
+        html += '</div>';
+        html += '<div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px;">';
+        connIds.forEach(function(cid) {
+            var c = connectionsData.find(function(x) { return x.id === cid; });
+            if (!c) return;
+            var fromName = c.from_asset_number || c.from_model || c.from_asset_id;
+            var toName = c.to_asset_number || c.to_model || c.to_asset_id;
+            var label = fromName + ':' + c.from_port + ' → ' + toName + ':' + c.to_port;
+            var detail = [c.speed || '', cableLabelsJS[c.cable_type] || c.cable_type || '', c.cable_label || ''].filter(Boolean).join(' / ');
+            html += '<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--border);">';
+            html += '<input type="checkbox" class="move-conn-cb" value="' + cid + '" checked>';
+            html += '<span>' + label + ' <span style="color:var(--text-light);">(' + detail + ')</span></span>';
+            html += '</label>';
         });
-    });
+        html += '</div>';
+        listEl.innerHTML = html;
+        listEl.style.display = 'block';
+    } else {
+        listEl.innerHTML = '';
+        listEl.style.display = 'none';
+    }
+
+    document.getElementById('moveModal').classList.add('active');
+}
+
+function toggleMoveAll(checked) {
+    document.querySelectorAll('.move-conn-cb').forEach(function(cb) { cb.checked = checked; });
+}
+
+function closeMoveModal() {
+    _moveData = null;
+    document.getElementById('moveModal').classList.remove('active');
+}
+
+function getSelectedMoveConnIds() {
+    var cbs = document.querySelectorAll('.move-conn-cb');
+    if (cbs.length === 0) return _moveData.allConnIds; /* single connection */
+    var selected = [];
+    cbs.forEach(function(cb) { if (cb.checked) selected.push(Number(cb.value)); });
+    return selected;
+}
+
+function executeMoveModal() {
+    if (!_moveData) return;
+    var selectedIds = getSelectedMoveConnIds();
+    if (selectedIds.length === 0) { alert('이동할 연결을 선택해주세요.'); return; }
+    var newSwId = Number(document.getElementById('moveTargetSw').value);
+    var newSpeed = document.getElementById('moveSpeed').value.trim();
+    var newCableType = document.getElementById('moveCableType').value;
+    var body = { conn_ids: selectedIds, old_switch_id: _moveData.oldSwId };
+    if (newSwId !== _moveData.oldSwId) body.new_switch_id = newSwId;
+    /* Find current values from first selected connection */
+    var firstConn = connectionsData.find(function(c) { return selectedIds.indexOf(c.id) !== -1; });
+    if (newSpeed !== (firstConn && firstConn.speed || '')) body.speed = newSpeed;
+    if (newCableType !== '' && newCableType !== (firstConn && firstConn.cable_type || '')) body.cable_type = newCableType;
+    if (!body.new_switch_id && body.speed === undefined && body.cable_type === undefined) {
+        closeMoveModal();
+        return;
+    }
+    doBatchMove(body);
+}
+
+document.getElementById('moveModal').addEventListener('click', function(e) {
+    if (e.target === this) closeMoveModal();
 });
 
-document.querySelectorAll('.net-h-sw-box[data-sw-id]').forEach(function(swBox) {
-    swBox.addEventListener('dragover', function(e) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        this.classList.add('drop-target');
-    });
-    swBox.addEventListener('dragenter', function(e) {
-        e.preventDefault();
-        this.classList.add('drop-target');
-    });
-    swBox.addEventListener('dragleave', function() {
-        this.classList.remove('drop-target');
-    });
-    swBox.addEventListener('drop', function(e) {
-        e.preventDefault();
-        this.classList.remove('drop-target');
-        var data;
-        try { data = JSON.parse(e.dataTransfer.getData('application/json')); } catch(err) { return; }
-        var newSwId = Number(this.getAttribute('data-sw-id'));
-        if (!data || !data.connIds || !data.oldSwId || data.oldSwId === newSwId) return;
-        fetch('/network-layout/connections/batch-move', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                conn_ids: data.connIds,
-                old_switch_id: data.oldSwId,
-                new_switch_id: newSwId,
-                room_id: <%= room.id %>
-            })
-        }).then(function(res) { return res.json(); })
-          .then(function(result) {
-            if (result.success) location.reload();
-            else alert('이동 실패: ' + (result.error || ''));
-          }).catch(function(err) { alert('이동 실패: ' + err.message); });
-    });
-});
+/* === Shared fetch === */
+function doBatchMove(body) {
+    fetch('/network-layout/connections/batch-move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    }).then(function(res) {
+        if (!res.ok) return res.text().then(function(t) { throw new Error('HTTP ' + res.status + ': ' + t); });
+        return res.json();
+    }).then(function(result) {
+        if (result.success && (result.switchMoved > 0 || result.fieldsChanged > 0)) location.reload();
+        else if (result.success) alert('변경사항이 없습니다.');
+        else alert('이동 실패: ' + (result.error || JSON.stringify(result)));
+    }).catch(function(err) { alert('이동 실패: ' + err.message); });
+}
+
 
 /* Switch chip toggle - sync class with checkbox state */
 document.querySelectorAll('[data-sw-chip]').forEach(function(chip) {

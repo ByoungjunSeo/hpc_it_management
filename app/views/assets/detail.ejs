@@ -47,7 +47,7 @@
         </div>
         <div class="form-group">
             <label>상태</label>
-            <p><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label %></span></p>
+            <p><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'returned' ? 'info' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label %></span></p>
         </div>
     </div>
 </div>
@@ -79,6 +79,74 @@
         </div>
     </div>
 </div>
+
+<% if (asset.asset_type === 'immersion_tank' && typeof linkedRack !== 'undefined' && linkedRack) { %>
+<div class="card">
+    <div class="card-header"><h2>탱크 용량</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>서버 수용 U수</label>
+            <p><%= linkedRack.total_units %>U</p>
+        </div>
+        <div class="form-group">
+            <label>스위치 슬롯</label>
+            <p><%= linkedRack.switch_slots || 0 %>개</p>
+        </div>
+        <div class="form-group">
+            <label>배치된 장비</label>
+            <p><%= typeof linkedRackAssetCount !== 'undefined' ? linkedRackAssetCount : 0 %>대</p>
+        </div>
+        <div class="form-group" style="align-self:flex-end;">
+            <a href="/racks/<%= linkedRack.id %>" class="btn btn-sm btn-outline">랙 상세 보기</a>
+        </div>
+    </div>
+</div>
+<% } %>
+
+<% if (asset.parent_asset_id && ['cdu','chiller'].includes(asset.asset_type)) { %>
+<div class="card">
+    <div class="card-header"><h2>연결 설비</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>연결 대상</label>
+            <p><% if (typeof parentAsset !== 'undefined' && parentAsset) { %>
+                <a href="/assets/<%= parentAsset.id %>">
+                    <span class="badge badge-<%= parentAsset.asset_type %>"><%= appConfig.assetTypes.find(t => t.value === parentAsset.asset_type)?.label %></span>
+                    <%= parentAsset.management_number || parentAsset.model_name || parentAsset.id %>
+                </a>
+            <% } else { %>-<% } %></p>
+        </div>
+    </div>
+</div>
+<% } %>
+
+<% if (typeof childInfraAssets !== 'undefined' && childInfraAssets && childInfraAssets.length > 0) { %>
+<div class="card">
+    <div class="card-header"><h2>연결된 하위 설비</h2></div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>관리번호</th>
+                    <th>모델명</th>
+                    <th>상태</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% childInfraAssets.forEach(child => { %>
+                <tr>
+                    <td><span class="badge badge-<%= child.asset_type %>"><%= appConfig.assetTypes.find(t => t.value === child.asset_type)?.label %></span></td>
+                    <td><a href="/assets/<%= child.id %>"><%= child.management_number || '-' %></a></td>
+                    <td><%= child.model_name || '-' %></td>
+                    <td><span class="badge badge-<%= child.status === 'active' ? 'success' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === child.status)?.label %></span></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% } %>
 
 <div class="card">
     <div class="card-header"><h2>IP 주소</h2></div>
@@ -192,37 +260,50 @@
     <% } %>
 </div>
 
-<% if (modules && modules.length > 0) { %>
 <div class="card">
     <div class="card-header">
         <h2>컴퓨팅 모듈</h2>
         <a href="/module-inventory/modules/new?asset_id=<%= asset.id %>" class="btn btn-sm btn-primary">+ 모듈 추가</a>
     </div>
+<% if (modules && modules.length > 0) { %>
     <div class="table-wrapper">
         <table>
             <thead>
                 <tr>
                     <th>유형</th>
+                    <th>소유</th>
+                    <th>코드</th>
                     <th>모델</th>
                     <th>제조사</th>
-                    <th>용량/사양</th>
+                    <th>용량</th>
                     <th>수량</th>
-                    <th>슬롯</th>
+                    <th>설치유형</th>
                     <th>관리</th>
                 </tr>
             </thead>
             <tbody>
                 <% modules.forEach(m => { %>
                 <tr>
+                    <td><span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span></td>
                     <td>
-                        <span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span>
-                        <% if (m.is_onboard) { %><span class="badge badge-secondary">온보드</span><% } %>
+                        <% if (m.owner === 'vendor') { %>
+                            <span class="badge badge-warning" title="<%= m.owner_vendor_name || '업체' %>"><%= m.owner_vendor_name || '업체' %></span>
+                        <% } else { %>
+                            <span class="badge badge-success">자사</span>
+                        <% } %>
                     </td>
+                    <td><% if (m.item_code) { %><code><%= m.item_code %></code><% } else { %>-<% } %></td>
                     <td><%= m.model || '-' %></td>
                     <td><%= m.manufacturer || '-' %></td>
-                    <td><%= m.capacity || '' %> <%= m.specification || '' %></td>
+                    <td><%= m.capacity || '-' %></td>
                     <td><%= m.count %></td>
-                    <td><%= m.slot_info || '-' %></td>
+                    <td>
+                        <% if (m.is_onboard) { %>
+                            <span class="badge badge-secondary">온보드</span>
+                        <% } else { %>
+                            <span class="badge badge-info">애드온</span>
+                        <% } %>
+                    </td>
                     <td>
                         <a href="/module-inventory/modules/<%= m.id %>/edit" class="btn btn-sm btn-outline">수정</a>
                         <form method="POST" action="/module-inventory/modules/<%= m.id %>/delete" style="display:inline" onsubmit="return confirm('이 모듈을 삭제하시겠습니까?')">
@@ -235,16 +316,10 @@
             </tbody>
         </table>
     </div>
-</div>
 <% } else { %>
-<div class="card">
-    <div class="card-header">
-        <h2>컴퓨팅 모듈</h2>
-        <a href="/module-inventory/modules/new?asset_id=<%= asset.id %>" class="btn btn-sm btn-primary">+ 모듈 추가</a>
-    </div>
     <p class="text-muted">등록된 컴퓨팅 모듈이 없습니다.</p>
-</div>
 <% } %>
+</div>
 
 <% if (typeof equipmentLogs !== 'undefined' && equipmentLogs && equipmentLogs.length > 0) { %>
 <div class="card">
@@ -281,6 +356,44 @@
                     <td><%= log.user_name || '-' %></td>
                     <td><%= log.test_name || '-' %></td>
                     <td><%= [log.room, log.rack, log.unit].filter(Boolean).join('/') || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% } %>
+
+<% if (typeof moduleChangeLogs !== 'undefined' && moduleChangeLogs && moduleChangeLogs.length > 0) { %>
+<div class="card">
+    <div class="card-header">
+        <h2>부품 변경 이력</h2>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>일시</th>
+                    <th>유형</th>
+                    <th>부품코드</th>
+                    <th>수량변동</th>
+                    <th>사용자</th>
+                    <th>비고</th>
+                </tr>
+            </thead>
+            <tbody>
+                <%
+                  const modEventLabels = { incoming: '입고', outgoing: '출고', installed: '설치', removed: '제거', transfer: '이동', adjust: '조정', transferred: '변경' };
+                  const modEventColors = { incoming: 'success', outgoing: 'warning', installed: 'info', removed: 'danger', transfer: 'secondary', adjust: 'warning', transferred: 'secondary' };
+                %>
+                <% moduleChangeLogs.forEach(log => { %>
+                <tr>
+                    <td style="white-space:nowrap; font-size:12px;"><%= log.created_at ? log.created_at.replace('T', ' ').substring(0, 16) : '-' %></td>
+                    <td><span class="badge badge-<%= modEventColors[log.event_type] || 'secondary' %>"><%= modEventLabels[log.event_type] || log.event_type %></span></td>
+                    <td><code><%= log.item_code || '-' %></code></td>
+                    <td style="font-weight:bold;"><%= log.quantity_change > 0 ? '+' + log.quantity_change : (log.quantity_change || '-') %></td>
+                    <td><%= log.username || '-' %></td>
+                    <td style="font-size:12px;"><%= log.notes || '-' %></td>
                 </tr>
                 <% }) %>
             </tbody>

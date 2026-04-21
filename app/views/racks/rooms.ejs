@@ -16,7 +16,15 @@
     <div class="legend-item"><span class="legend-color storage"></span> 스토리지</div>
     <div class="legend-item"><span class="legend-color other"></span> 기타</div>
     <div class="legend-item"><span class="legend-color empty"></span> 빈 공간</div>
-    <span class="text-muted" style="font-size:12px;margin-left:auto;">랙을 드래그하여 위치를 변경할 수 있습니다.</span>
+    <div class="legend-item"><span class="legend-color inactive-legend"></span> 비활성</div>
+    <div class="legend-item"><span class="legend-color maintenance-legend"></span> 정비중</div>
+    <div class="legend-item"><span class="legend-color immersion-legend"></span> &#x1F4A7; 액침탱크</div>
+    <span style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:11px;color:var(--text-light);">
+        <span style="display:flex;align-items:center;gap:3px;"><span style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;"></span>ON</span>
+        <span style="display:flex;align-items:center;gap:3px;"><span style="width:6px;height:6px;border-radius:50%;background:#ef4444;display:inline-block;"></span>OFF</span>
+        <span style="display:flex;align-items:center;gap:3px;"><span style="width:6px;height:6px;border-radius:50%;background:#1e293b;display:inline-block;"></span>BMC 미등록</span>
+        <span style="display:flex;align-items:center;gap:3px;"><span style="width:6px;height:6px;border-radius:50%;background:#eab308;display:inline-block;"></span>연결실패</span>
+    </span>
 </div>
 
 <% if (rooms.length === 0) { %>
@@ -30,7 +38,9 @@
     <div class="room-section-header">
         <h2><a href="/rooms/<%= room.id %>"><%= room.name %></a></h2>
         <span class="text-muted"><%= room.location || '' %> &middot; 랙 <%= room.racks.length %>개</span>
-        <a href="/rooms/<%= room.id %>/assets" class="btn btn-sm btn-outline" style="margin-left: 8px;">자산 목록</a>
+        <button class="btn btn-sm btn-warning power-check-btn" data-room-id="<%= room.id %>" data-rack-ids="<%= room.racks.map(r=>r.id).join(',') %>" onclick="checkRoomPower(this)" style="margin-left:8px;">&#x26A1; 전원 확인</button>
+        <a href="/rooms/<%= room.id %>/assets" class="btn btn-sm btn-outline">자산 목록</a>
+        <a href="/rooms/<%= room.id %>/modules" class="btn btn-sm btn-outline">모듈 현황</a>
         <button class="btn btn-sm btn-outline" onclick="openEditRoom(<%= room.id %>, '<%= (room.name || '').replace(/'/g, "\\'") %>', '<%= (room.location || '').replace(/'/g, "\\'") %>', '<%= (room.description || '').replace(/'/g, "\\'") %>', '<%= room.location_type || 'server_room' %>')">수정</button>
         <form method="POST" action="/rooms/<%= room.id %>/delete" style="display:inline" onsubmit="return confirmDelete('서버실과 포함된 모든 랙/장비가 삭제됩니다.')">
             <button type="submit" class="btn btn-sm btn-danger">삭제</button>
@@ -43,12 +53,17 @@
     <div class="wide-rack-row">
         <% room.racks.forEach(function(rack, rackIdx) { %>
         <%
-            const totalUnits = rack.total_units || 42;
-            const sMap = rack.slotMap || {};
-            let usedAssetIds = new Set();
-            rack.assetList.forEach(a => { if (a.rack_unit_start) usedAssetIds.add(a.id); });
+            const totalUnits = rack.totalUnits || rack.total_units || 42;
+            const uMapData = rack.uMap || {};
             let usedU = 0;
-            rack.assetList.forEach(a => { if (a.rack_unit_start) usedU += Math.ceil((a.rack_unit_size||3)/3); });
+            rack.assetList.forEach(a => { if (a.rack_unit_start && !a.parent_asset_id && a.status === 'active') usedU += Math.ceil((a.rack_unit_size||3)/3); });
+            function statusCls(info) {
+                if (!info || !info.status) return '';
+                if (info.status === 'inactive') return ' inactive';
+                if (info.status === 'maintenance') return ' maintenance';
+                if (info.status === 'decommissioned') return ' inactive';
+                return '';
+            }
             function wCls(info) {
                 if (!info) return 'server';
                 if (info.asset_type === 'switch') return 'switch';
@@ -62,87 +77,84 @@
             }
         %>
         <div class="wide-rack wide-rack-draggable" draggable="true"
-             data-rack-id="<%= rack.id %>" data-order="<%= rackIdx %>">
+             data-rack-id="<%= rack.id %>" data-rack-type="<%= rack.rack_type || 'standard' %>" data-order="<%= rackIdx %>">
             <div class="wide-rack-header">
                 <span class="drag-handle">&#x2630;</span>
-                <%= rack.name %>
+                <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } %><%= rack.name %>
+                <% if (rack.rack_type === 'immersion') { %><span class="rack-type-badge immersion">액침</span><% } %>
                 <span class="wide-rack-summary"><%= usedU %>/<%= totalUnits %>U</span>
             </div>
-            <div class="wide-rack-units">
+            <%
+                let mSkipL = 0, mSkipR = 0;
+            %>
+            <table class="mini-rack-table">
                 <% for (let u = totalUnits; u >= 1; u--) { %>
-                    <%
-                        const baseSlot = (u - 1) * 3 + 1;
-                        // Check all 3 holes in this U for a start entry
-                        let startEntry = null;
-                        let hasOccupied = false;
-                        for (let h = 0; h < 3; h++) {
-                            const e = sMap[baseSlot + h];
-                            if (e && (e.full || e.left || e.right)) {
-                                hasOccupied = true;
-                                const isStart = (e.full && e.full.is_start) || (e.left && e.left.is_start) || (e.right && e.right.is_start);
-                                if (isStart && !startEntry) startEntry = e;
-                            }
-                        }
-                    %>
-                    <% if (startEntry && startEntry.full && startEntry.full.is_start) { %>
-                        <% const f = startEntry.full; %>
-                        <%
-                            const endSlot = f.rack_unit_start + f.slot_size - 1;
-                            const endU = Math.floor((endSlot - 1) / 3) + 1;
-                            const uSize = endU - u + 1;
-                        %>
-                        <% const cls = wCls(f); const hasDetail = f.assigned_user || f.purpose; %>
-                        <% const uH = uSize > 1 ? 'height:' + (uSize * 16 + (uSize - 1) * 2) + 'px;' : ''; %>
-                        <% const detailTitle = (f.assigned_user || '') + (f.assigned_user && f.purpose ? ' | ' : '') + (f.purpose || ''); %>
-                        <div class="wide-unit <%= cls %> <%= uSize > 1 ? 'multi-u' : '' %> clickable-unit" style="<%= uH %>" data-asset-id="<%= f.asset_id %>" title="<%= (f.name || f.asset_type) + (f.management_number ? ' (' + f.management_number + ')' : '') + (detailTitle ? ' - ' + detailTitle : '') %>">
-                            <span class="wide-unit-num">U<%= u %><% if (uSize > 1) { %>-<%= u + uSize - 1 %><% } %></span>
-                            <span class="wide-unit-name"><%= f.name || f.asset_type %><% if (f.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:8px;">(<%= f.management_number %>)</span><% } %></span>
-                            <% if (hasDetail && uSize > 1) { %>
-                            <span class="wide-unit-detail"><%= f.assigned_user %><% if (f.assigned_user && f.purpose) { %> | <% } %><%= f.purpose %></span>
-                            <% } %>
-                        </div>
-                    <% } else if (startEntry && (startEntry.left || startEntry.right)) { %>
-                        <% const blade = startEntry.left || startEntry.right; %>
-                        <%
-                            const endSlot = blade.rack_unit_start + blade.slot_size - 1;
-                            const endU = Math.floor((endSlot - 1) / 3) + 1;
-                            const uSize = endU - u + 1;
-                            const uH = uSize > 1 ? (uSize * 16 + (uSize - 1) * 2) : 16;
-                        %>
-                        <div class="wide-blade-unit" style="height:<%= uH %>px;">
-                            <span class="wide-unit-num" style="flex-shrink:0;min-width:24px;font-size:9px;opacity:0.8;font-weight:600;">U<%= u %></span>
-                            <div class="wide-blade-pair">
-                                <% if (startEntry.left) { %>
-                                <% const lDetail = (startEntry.left.assigned_user || '') + (startEntry.left.assigned_user && startEntry.left.purpose ? ' | ' : '') + (startEntry.left.purpose || ''); %>
-                                <div class="wide-blade-half <%= wCls(startEntry.left) %> clickable-unit" data-asset-id="<%= startEntry.left.asset_id %>" title="<%= (startEntry.left.name || '') + (startEntry.left.management_number ? ' (' + startEntry.left.management_number + ')' : '') + (lDetail ? ' - ' + lDetail : '') %>">
-                                    <span><%= startEntry.left.name || '' %><% if (startEntry.left.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:7px;">(<%= startEntry.left.management_number %>)</span><% } %></span>
-                                    <% if (uSize > 1 && (startEntry.left.assigned_user || startEntry.left.purpose)) { %>
-                                    <span class="wide-unit-detail" style="font-size:8px;"><%= startEntry.left.assigned_user %><% if (startEntry.left.assigned_user && startEntry.left.purpose) { %> | <% } %><%= startEntry.left.purpose %></span>
-                                    <% } %>
-                                </div>
-                                <% } else { %>
-                                <div class="wide-blade-half blade-empty-mini"></div>
-                                <% } %>
-                                <% if (startEntry.right) { %>
-                                <% const rDetail = (startEntry.right.assigned_user || '') + (startEntry.right.assigned_user && startEntry.right.purpose ? ' | ' : '') + (startEntry.right.purpose || ''); %>
-                                <div class="wide-blade-half <%= wCls(startEntry.right) %> clickable-unit" data-asset-id="<%= startEntry.right.asset_id %>" title="<%= (startEntry.right.name || '') + (startEntry.right.management_number ? ' (' + startEntry.right.management_number + ')' : '') + (rDetail ? ' - ' + rDetail : '') %>">
-                                    <span><%= startEntry.right.name || '' %><% if (startEntry.right.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:7px;">(<%= startEntry.right.management_number %>)</span><% } %></span>
-                                    <% if (uSize > 1 && (startEntry.right.assigned_user || startEntry.right.purpose)) { %>
-                                    <span class="wide-unit-detail" style="font-size:8px;"><%= startEntry.right.assigned_user %><% if (startEntry.right.assigned_user && startEntry.right.purpose) { %> | <% } %><%= startEntry.right.purpose %></span>
-                                    <% } %>
-                                </div>
-                                <% } else { %>
-                                <div class="wide-blade-half blade-empty-mini"></div>
-                                <% } %>
-                            </div>
-                        </div>
-                    <% } else if (!hasOccupied) { %>
-                        <div class="wide-unit empty-unit"><span class="empty-unit-num">U<%= u %></span></div>
-                    <% } else { %>
-                        <%/* skip: continuation of previous asset */%>
-                    <% } %>
+                <%
+                    const entry = uMapData[u];
+                    const hasFull = entry && entry.full;
+                    const hasBlade = !hasFull && entry && (entry.left || entry.right);
+                    const isEmpty = !hasFull && !hasBlade;
+                    let mEmitL = true, mEmitR = true;
+                    if (mSkipL > 0) { mEmitL = false; mSkipL--; }
+                    if (mSkipR > 0) { mEmitR = false; mSkipR--; }
+                %>
+                <tr data-u="<%= u %>">
+                    <td class="mini-u-num">U<%= u %></td>
+<% if (hasFull && mEmitL) {
+    const f = entry.full;
+    mSkipL = f.sizeU - 1;
+    mSkipR = f.sizeU - 1;
+%>
+                    <td class="mini-u-asset <%= wCls(f) %><%= statusCls(f) %> clickable-unit" colspan="2" rowspan="<%= f.sizeU %>"
+                        data-asset-id="<%= f.asset_id %>" data-asset-type="<%= f.asset_type %>"
+                        title="<%= (f.name || f.asset_type) + (f.management_number ? ' (' + f.management_number + ')' : '') + (f.status === 'inactive' ? ' [비활성]' : f.status === 'maintenance' ? ' [정비중]' : '') %>">
+                        <span class="mini-asset-name"><%= f.name || f.asset_type %><% if (f.management_number) { %> (<%= f.management_number %>)<% } %></span>
+                        <span class="power-dot-mini" data-asset-id="<%= f.asset_id %>"></span>
+                    </td>
+<% } else if (hasBlade) {
+    if (mEmitL) {
+        if (entry.left) {
+            mSkipL = entry.left.sizeU - 1;
+%>
+                    <td class="mini-u-asset mini-blade <%= wCls(entry.left) %><%= statusCls(entry.left) %> clickable-unit" rowspan="<%= entry.left.sizeU %>"
+                        data-asset-id="<%= entry.left.asset_id %>" data-asset-type="<%= entry.left.asset_type %>"
+                        title="<%= (entry.left.name || '') + (entry.left.management_number ? ' (' + entry.left.management_number + ')' : '') + (entry.left.status === 'inactive' ? ' [비활성]' : entry.left.status === 'maintenance' ? ' [정비중]' : '') %>">
+                        <span class="mini-asset-name"><%= entry.left.name || '' %><% if (entry.left.management_number) { %> (<%= entry.left.management_number %>)<% } %></span>
+                        <span class="power-dot-mini" data-asset-id="<%= entry.left.asset_id %>"></span>
+                    </td>
+<%      } else { %>
+                    <td class="mini-u-asset mini-blade mini-empty"></td>
+<%      }
+    }
+    if (mEmitR) {
+        if (entry.right) {
+            mSkipR = entry.right.sizeU - 1;
+%>
+                    <td class="mini-u-asset mini-blade <%= wCls(entry.right) %><%= statusCls(entry.right) %> clickable-unit" rowspan="<%= entry.right.sizeU %>"
+                        data-asset-id="<%= entry.right.asset_id %>" data-asset-type="<%= entry.right.asset_type %>"
+                        title="<%= (entry.right.name || '') + (entry.right.management_number ? ' (' + entry.right.management_number + ')' : '') + (entry.right.status === 'inactive' ? ' [비활성]' : entry.right.status === 'maintenance' ? ' [정비중]' : '') %>">
+                        <span class="mini-asset-name"><%= entry.right.name || '' %><% if (entry.right.management_number) { %> (<%= entry.right.management_number %>)<% } %></span>
+                        <span class="power-dot-mini" data-asset-id="<%= entry.right.asset_id %>"></span>
+                    </td>
+<%      } else { %>
+                    <td class="mini-u-asset mini-blade mini-empty"></td>
+<%      }
+    }
+} else if (isEmpty) {
+    if (mEmitL && mEmitR) { %>
+                    <td class="mini-u-asset mini-empty" colspan="2"></td>
+<%  } else {
+        if (mEmitL) { %>
+                    <td class="mini-u-asset mini-blade mini-empty"></td>
+<%      }
+        if (mEmitR) { %>
+                    <td class="mini-u-asset mini-blade mini-empty"></td>
+<%      }
+    }
+} %>
+                </tr>
                 <% } %>
-            </div>
+            </table>
             <a href="/racks/<%= rack.id %>" class="wide-rack-link">상세 보기</a>
         </div>
         <% }) %>
@@ -229,6 +241,7 @@
             <button class="adp-tab" data-tab="access" onclick="switchAdpTab('access')">접속정보</button>
             <button class="adp-tab" data-tab="ops" onclick="switchAdpTab('ops')">운영정보</button>
             <button class="adp-tab" data-tab="modules" onclick="switchAdpTab('modules')">컴퓨팅 모듈</button>
+            <button class="adp-tab" data-tab="power" onclick="switchAdpTab('power')" id="adpPowerTab" style="display:none;">전원</button>
         </div>
         <div id="adpContent" style="padding:16px;overflow-y:auto;flex:1;">
             <p class="text-muted">로딩중...</p>
@@ -337,6 +350,13 @@ function openAssetPopup(assetId) {
 function renderAdp(data) {
     var a = data.asset;
     document.getElementById('adpTitle').textContent = a.model_name || a.asset_type || '장비 정보';
+    // Show/hide power tab based on asset type and BMC availability
+    var powerTab = document.getElementById('adpPowerTab');
+    var powerTypes = ['server', 'storage', 'switch', 'kvm', 'other'];
+    var hasBmc = data.assetIps && data.assetIps.some(function(ip) { return ip.ip_type === 'bmc'; });
+    if (powerTab) {
+        powerTab.style.display = (powerTypes.indexOf(a.asset_type) !== -1 && hasBmc) ? '' : 'none';
+    }
     renderAdpTab(data, adpCurrentTab);
 }
 
@@ -412,6 +432,22 @@ function renderAdpTab(data, tab) {
         } else {
             html = '<p class="text-muted">등록된 컴퓨팅 모듈이 없습니다.</p>';
         }
+    } else if (tab === 'power') {
+        var assetId = a.id;
+        html = '<div id="adpPowerContent">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">' +
+            '<label style="font-weight:600;font-size:13px;margin:0;">현재 전원 상태</label>' +
+            '<span id="adpPowerBadge" style="font-size:11px;padding:2px 10px;border-radius:10px;background:#94a3b8;color:white;">확인 중...</span>' +
+            '</div>' +
+            '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
+            '<button class="btn btn-sm" style="background:#22c55e;color:white;flex:1;padding:8px;" onclick="adpDoPowerControl(' + assetId + ',\'on\')">&#x23FB; 켜기</button>' +
+            '<button class="btn btn-sm" style="background:#ef4444;color:white;flex:1;padding:8px;" onclick="adpDoPowerControl(' + assetId + ',\'off\')">&#x23FB; 끄기</button>' +
+            '<button class="btn btn-sm" style="background:#f59e0b;color:white;flex:1;padding:8px;" onclick="adpDoPowerControl(' + assetId + ',\'reset\')">&#x21BB; 재시작</button>' +
+            '</div>' +
+            '<div id="adpPowerMsg" style="font-size:12px;color:#64748b;min-height:20px;"></div>' +
+            '</div>';
+        // Auto-check power status
+        setTimeout(function() { adpCheckPower(assetId); }, 100);
     }
 
     document.getElementById('adpContent').innerHTML = html;
@@ -421,7 +457,7 @@ function tr(label, val) {
     return '<tr><td><strong>' + label + '</strong></td><td>' + esc(val || '-') + '</td></tr>';
 }
 function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
-function typeLabel(t) { var m = { server:'서버', switch:'스위치', kvm:'KVM', pdu:'PDU', ups:'UPS', storage:'스토리지', other:'기타' }; return m[t] || t || '-'; }
+function typeLabel(t) { var m = { server:'서버', switch:'스위치', kvm:'KVM', pdu:'PDU', ups:'UPS', storage:'스토리지', immersion_tank:'액침탱크', cdu:'CDU', chiller:'칠러', other:'기타' }; return m[t] || t || '-'; }
 function statusLabel(s) { var m = { active:'운영중', inactive:'비활성', maintenance:'점검중', decommissioned:'폐기' }; return m[s] || s || '-'; }
 function ipTypeLabel(ip) { var m = { management:'Management', bmc:'BMC', ib:'InfiniBand', data:'Data', os:'OS', other:'기타' }; return (ip.ip_type === 'other' && ip.description) ? ip.description : (m[ip.ip_type] || ip.ip_type || '-'); }
 function credTypeLabel(t) { var m = { root:'Root', user:'User', admin:'Admin', bmc:'BMC', etc:'기타' }; return m[t] || t || '-'; }
@@ -433,6 +469,140 @@ function openEditRoom(id, name, location, desc, type) {
     document.getElementById('editRoomDesc').value = desc;
     document.getElementById('editRoomType').value = type;
     openModal('editRoomModal');
+}
+
+// --- Power status check per room ---
+function checkRoomPower(btn) {
+    var rackIds = (btn.dataset.rackIds || '').split(',').filter(Boolean);
+    if (rackIds.length === 0) return;
+    btn.disabled = true;
+    btn.innerHTML = '&#x26A1; 확인 중...';
+
+    // Show loading on all power dots in this room section
+    var section = btn.closest('.room-section');
+    section.querySelectorAll('.power-dot-mini').forEach(function(d) {
+        d.className = 'power-dot-mini loading';
+    });
+
+    var allResults = {};
+    var done = 0;
+    rackIds.forEach(function(rackId) {
+        fetch('/racks/' + rackId + '/power-status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                Object.assign(allResults, data);
+            })
+            .catch(function() {})
+            .finally(function() {
+                done++;
+                if (done >= rackIds.length) {
+                    applyPowerResults(section, allResults);
+                    btn.innerHTML = '&#x26A1; 확인 완료';
+                }
+            });
+    });
+}
+
+function applyPowerResults(section, results) {
+    section.querySelectorAll('.power-dot-mini').forEach(function(dot) {
+        var id = dot.dataset.assetId;
+        if (!id) { dot.className = 'power-dot-mini'; return; }
+        var info = results[id];
+        if (!info) { dot.className = 'power-dot-mini'; return; }
+        dot.className = 'power-dot-mini pwr-' + info.status;
+        dot.title = info.message + (info.bmc_ip ? ' (' + info.bmc_ip + ')' : '');
+    });
+}
+
+// --- Power control in asset popup ---
+function adpCheckPower(assetId) {
+    // Find the rack ID for this asset from the DOM
+    var rackId = adpFindRackId(assetId);
+    if (!rackId) return;
+    fetch('/racks/' + rackId + '/power-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var info = data[assetId];
+            var badge = document.getElementById('adpPowerBadge');
+            if (!badge) return;
+            if (!info) {
+                badge.textContent = 'BMC 미등록';
+                badge.style.background = '#1e293b';
+                return;
+            }
+            adpUpdatePowerBadge(badge, info.status);
+        })
+        .catch(function() {
+            var badge = document.getElementById('adpPowerBadge');
+            if (badge) { badge.textContent = '확인 실패'; badge.style.background = '#eab308'; }
+        });
+}
+
+function adpFindRackId(assetId) {
+    // Find the clickable-unit with this assetId and trace up to .wide-rack
+    var el = document.querySelector('.clickable-unit[data-asset-id="' + assetId + '"]');
+    if (el) {
+        var rack = el.closest('.wide-rack');
+        if (rack) return rack.dataset.rackId;
+    }
+    // Fallback: check cached data for rack_id
+    if (adpCache[assetId] && adpCache[assetId].asset) return adpCache[assetId].asset.rack_id;
+    return null;
+}
+
+function adpUpdatePowerBadge(badge, status) {
+    var labels = { on: '전원 켜짐', off: '전원 꺼짐', error: '연결 실패', no_bmc: 'BMC 미등록', unknown: '알 수 없음' };
+    var colors = { on: '#22c55e', off: '#ef4444', error: '#eab308', no_bmc: '#1e293b', unknown: '#94a3b8' };
+    badge.textContent = labels[status] || status;
+    badge.style.background = colors[status] || '#94a3b8';
+}
+
+function adpDoPowerControl(assetId, action) {
+    var data = adpCache[assetId];
+    var assetName = data ? (data.asset.management_number || data.asset.model_name || '') : '';
+    var actionLabels = { on: '켜기', off: '끄기', reset: '재시작', cycle: '전원 순환' };
+
+    if (action === 'off' || action === 'reset' || action === 'cycle') {
+        if (!confirm((assetName || 'Asset') + ' 전원을 ' + (actionLabels[action] || action) + ' 하시겠습니까?')) return;
+    }
+
+    var msgEl = document.getElementById('adpPowerMsg');
+    if (msgEl) { msgEl.textContent = '처리 중...'; msgEl.style.color = '#3b82f6'; }
+
+    var rackId = adpFindRackId(assetId);
+    if (!rackId) {
+        if (msgEl) { msgEl.textContent = '랙 정보를 찾을 수 없습니다.'; msgEl.style.color = '#ef4444'; }
+        return;
+    }
+
+    fetch('/racks/' + rackId + '/power-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetId: assetId, action: action })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        if (msgEl) {
+            msgEl.textContent = result.message || (result.success ? '완료' : '실패');
+            msgEl.style.color = result.success ? '#22c55e' : '#ef4444';
+        }
+        // Update badge in popup
+        if (result.status) {
+            var badge = document.getElementById('adpPowerBadge');
+            if (badge) adpUpdatePowerBadge(badge, result.status);
+        }
+        // Update mini rack power dots
+        if (result.status) {
+            document.querySelectorAll('.power-dot-mini[data-asset-id="' + assetId + '"]').forEach(function(dot) {
+                dot.className = 'power-dot-mini pwr-' + result.status;
+                var labels = { on: '전원 켜짐', off: '전원 꺼짐' };
+                dot.title = labels[result.status] || result.status;
+            });
+        }
+    })
+    .catch(function() {
+        if (msgEl) { msgEl.textContent = '서버 통신 오류'; msgEl.style.color = '#ef4444'; }
+    });
 }
 </script>
 

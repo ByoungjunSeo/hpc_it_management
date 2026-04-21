@@ -3,6 +3,25 @@ const appConfig = require('../config/app');
 const hardwareParser = require('./hardwareParser');
 
 const DISCOVERY_SCRIPT = `
+# Auto-install essential tools if missing
+if ! command -v lspci >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y pciutils >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y pciutils >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y pciutils >/dev/null 2>&1
+  fi
+fi
+if ! command -v lsblk >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y util-linux >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y util-linux >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y util-linux >/dev/null 2>&1
+  fi
+fi
 echo "===HOSTNAME_START==="
 hostname
 echo "===HOSTNAME_END==="
@@ -32,6 +51,23 @@ echo "===MEMORY_FALLBACK_END==="
 echo "===DISK_START==="
 lsblk -d -o NAME,MAJ:MIN,RM,SIZE,RO,TYPE,MODEL 2>/dev/null
 echo "===DISK_END==="
+echo "===DISK_DETAIL_START==="
+SMARTCTL_D=$(command -v smartctl 2>/dev/null)
+if [ -n "$SMARTCTL_D" ]; then
+  for dev in $(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk"{print $1}'); do
+    INFO=$(sudo $SMARTCTL_D -i "/dev/$dev" 2>/dev/null || $SMARTCTL_D -i "/dev/$dev" 2>/dev/null)
+    MODEL=$(echo "$INFO" | grep -E '^(Device Model|Product):' | head -1 | sed 's/^[^:]*:\s*//')
+    VENDOR=$(echo "$INFO" | grep -E '^Vendor:' | head -1 | sed 's/^[^:]*:\s*//')
+    if [ -n "$MODEL" ]; then
+      if [ -n "$VENDOR" ] && echo "$MODEL" | grep -qiv "^$VENDOR"; then
+        echo "DISKDETAIL: name=$dev model=$VENDOR $MODEL"
+      else
+        echo "DISKDETAIL: name=$dev model=$MODEL"
+      fi
+    fi
+  done
+fi
+echo "===DISK_DETAIL_END==="
 echo "===NETWORK_START==="
 lspci -D 2>/dev/null | grep -i ethernet | while IFS= read -r line; do
   PCI=$(echo "$line" | awk '{print $1}')
@@ -44,7 +80,15 @@ lspci -D 2>/dev/null | grep -i ethernet | while IFS= read -r line; do
 done
 echo "===NETWORK_END==="
 echo "===RAID_START==="
-lspci 2>/dev/null | grep -i raid
+lspci -D 2>/dev/null | grep -i raid | while IFS= read -r line; do
+  PCI=$(echo "$line" | awk '{print $1}')
+  SUBSYS=$(lspci -vmms "$PCI" 2>/dev/null | awk -F':\t' '/^SDevice:/{print $2}')
+  if [ -n "$SUBSYS" ] && echo "$SUBSYS" | grep -qivE '^Device [0-9a-fA-F]{4}$'; then
+    echo "RAID: $line [SUBSYS:$SUBSYS]"
+  else
+    echo "RAID: $line"
+  fi
+done
 echo "===RAID_END==="
 echo "===RAID_PD_START==="
 STORCLI=$(command -v storcli64 2>/dev/null || command -v storcli 2>/dev/null || command -v /opt/MegaRAID/storcli/storcli64 2>/dev/null)
@@ -104,33 +148,56 @@ else
       fi
     fi
   done
-  # smartctl fallback (including MegaRAID physical disks via --scan-open)
+fi
+# smartctl fallback — always try if RAID detected and physical disks not yet found
+SMARTCTL=$(command -v smartctl 2>/dev/null)
+if [ -z "$SMARTCTL" ] && lspci 2>/dev/null | grep -qi raid; then
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y smartmontools >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y smartmontools >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y smartmontools >/dev/null 2>&1
+  fi
   SMARTCTL=$(command -v smartctl 2>/dev/null)
-  if [ -n "$SMARTCTL" ]; then
-    echo "===SMARTCTL_START==="
-    # Use --scan-open to detect RAID-behind disks (megaraid,N etc.)
-    SCAN_RESULT=$(sudo $SMARTCTL --scan-open 2>/dev/null || $SMARTCTL --scan-open 2>/dev/null)
-    if [ -n "$SCAN_RESULT" ]; then
-      echo "$SCAN_RESULT" | while IFS= read -r line; do
-        DEV_SPEC=$(echo "$line" | sed 's/#.*//' | xargs)
-        if [ -n "$DEV_SPEC" ]; then
-          echo "===DEV:$DEV_SPEC==="
-          sudo $SMARTCTL -i $DEV_SPEC 2>/dev/null || $SMARTCTL -i $DEV_SPEC 2>/dev/null
+fi
+if [ -n "$SMARTCTL" ]; then
+  echo "===SMARTCTL_START==="
+  SCAN_RESULT=$(sudo $SMARTCTL --scan-open 2>/dev/null || $SMARTCTL --scan-open 2>/dev/null)
+  if [ -n "$SCAN_RESULT" ]; then
+    echo "$SCAN_RESULT" | while IFS= read -r line; do
+      DEV_SPEC=$(echo "$line" | sed 's/#.*//' | xargs)
+      if [ -n "$DEV_SPEC" ]; then
+        echo "===DEV:$DEV_SPEC==="
+        sudo $SMARTCTL -i $DEV_SPEC 2>/dev/null || $SMARTCTL -i $DEV_SPEC 2>/dev/null
+      fi
+    done
+    # Brute-force scan for additional RAID disks that --scan-open missed
+    HAS_MEGARAID=$(echo "$SCAN_RESULT" | grep -c megaraid)
+    if [ "$HAS_MEGARAID" -gt 0 ]; then
+      RAID_DEV=$(echo "$SCAN_RESULT" | grep megaraid | head -1 | awk '{print $1}')
+      FOUND_SLOTS=$(echo "$SCAN_RESULT" | grep -oP 'megaraid,\K[0-9]+')
+      for slot in $(seq 0 63); do
+        if echo "$FOUND_SLOTS" | grep -qx "$slot"; then continue; fi
+        RES=$(sudo $SMARTCTL -i "$RAID_DEV" -d megaraid,"$slot" 2>&1 || $SMARTCTL -i "$RAID_DEV" -d megaraid,"$slot" 2>&1)
+        if echo "$RES" | grep -qE '^(Vendor|Product|Model Family|Device Model):'; then
+          echo "===DEV:$RAID_DEV -d megaraid,$slot==="
+          echo "$RES"
         fi
       done
-    else
-      # Fallback: scan block devices directly
-      for dev in $(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}'); do
-        echo "===DEV:$dev==="
-        sudo $SMARTCTL -i "$dev" 2>/dev/null || $SMARTCTL -i "$dev" 2>/dev/null
-      done
     fi
-    echo "===SMARTCTL_END==="
+  else
+    for dev in $(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}'); do
+      echo "===DEV:$dev==="
+      sudo $SMARTCTL -i "$dev" 2>/dev/null || $SMARTCTL -i "$dev" 2>/dev/null
+    done
   fi
+  echo "===SMARTCTL_END==="
 fi
 echo "===RAID_PD_END==="
 echo "===GPU_START==="
-nvidia-smi -L 2>/dev/null || lspci 2>/dev/null | grep -iE 'VGA compatible|3D controller|Display controller'
+lspci 2>/dev/null | grep -iE 'VGA compatible|3D controller|Display controller'
+nvidia-smi -L 2>/dev/null
 echo "===GPU_END==="
 echo "===FREE_START==="
 free -h 2>/dev/null

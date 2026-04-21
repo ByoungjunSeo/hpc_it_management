@@ -26,7 +26,7 @@
         </div>
         <div class="form-group">
             <label>자산유형 *</label>
-            <select name="asset_type" class="form-control" required>
+            <select name="asset_type" class="form-control" id="assetTypeSelect" required onchange="onAssetTypeChange()">
                 <% appConfig.assetTypes.forEach(t => { %>
                 <option value="<%= t.value %>" <%= asset?.asset_type === t.value ? 'selected' : '' %>><%= t.label %></option>
                 <% }) %>
@@ -123,10 +123,10 @@
         <div class="form-row">
             <div class="form-group">
                 <label>랙</label>
-                <select name="rack_id" class="form-control" id="rackSelect" onchange="toggleNewRack()">
+                <select name="rack_id" class="form-control" id="rackSelect" onchange="toggleNewRack(); loadRackPreview(); onRackChangeCheckSW();">
                     <option value="">선택</option>
                     <% racks.forEach(r => { %>
-                    <option value="<%= r.id %>" data-room="<%= r.room_id %>" <%= asset?.rack_id == r.id ? 'selected' : '' %>><%= r.room_name %> - <%= r.name %></option>
+                    <option value="<%= r.id %>" data-room="<%= r.room_id %>" data-rack-type="<%= r.rack_type || 'standard' %>" data-switch-slots="<%= r.switch_slots || 0 %>" <%= asset?.rack_id == r.id ? 'selected' : '' %>><%= r.room_name %> - <%= r.name %><%= r.rack_type === 'immersion' ? ' 💧' : '' %></option>
                     <% }) %>
                     <option value="__new__">+ 직접 입력</option>
                 </select>
@@ -163,18 +163,82 @@
             </div>
         </div>
         <div class="form-row">
-            <div class="form-group">
+            <div class="form-group" id="bladeSlotGroup">
                 <label>블레이드</label>
                 <select name="blade_slot" id="bladeSlot" class="form-control">
-                    <option value="" <%= !asset?.blade_slot ? 'selected' : '' %>>없음 (풀사이즈)</option>
+                    <option value="" <%= !asset?.blade_slot || /^SW\d+$/i.test(asset?.blade_slot || '') ? 'selected' : '' %>>없음 (풀사이즈)</option>
                     <option value="left" <%= asset?.blade_slot === 'left' ? 'selected' : '' %>>좌 (Left)</option>
                     <option value="right" <%= asset?.blade_slot === 'right' ? 'selected' : '' %>>우 (Right)</option>
                 </select>
+                <small class="text-muted" style="font-size:11px;">다중 노드 섀시는 입고 등록에서 자동 생성됩니다</small>
+            </div>
+            <div class="form-group" id="switchSlotGroup" style="display:none;">
+                <label>스위치 슬롯</label>
+                <select name="switch_slot" id="switchSlotSelect" class="form-control">
+                    <option value="">사용 안 함</option>
+                </select>
+                <small class="text-muted" style="font-size:11px;">액침탱크 상단 스위치 전용 슬롯</small>
+            </div>
+            <div class="form-group" style="flex:0 0 auto; align-self:flex-end;">
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap;">
+                    <input type="checkbox" id="shelfCheck" onchange="onShelfToggle()">
+                    <span>선반 포함</span>
+                </label>
+                <span id="shelfUSizeWrap" style="display:none; margin-left:2px;">
+                    <input type="number" id="shelfUSize" min="1" max="10" value="1" style="width:42px; padding:2px 4px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="calcSlots()">
+                    <span style="font-size:12px; color:#64748b;">U</span>
+                </span>
             </div>
             <div class="form-group">
                 <label>총 슬롯 크기</label>
                 <input type="number" name="rack_unit_size" id="totalSlots" class="form-control" value="<%= curSlots %>" readonly style="background:#f1f5f9;font-weight:600;">
                 <small style="color:#64748b;font-size:11px;">1U=3칸, 2U=6칸, 선반+2U=7칸</small>
+            </div>
+        </div>
+        <!-- 랙 미리보기 (슬롯 레벨) -->
+        <div id="rackPreview" style="display:none; margin-top:12px; padding:0 8px 8px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+                <strong style="font-size:13px;">랙 미리보기</strong>
+                <small style="color:#64748b;" id="rackPreviewInfo"></small>
+                <small style="color:#94a3b8; margin-left:auto;">빈 칸 클릭 → U 시작위치 + 구멍 자동 설정</small>
+            </div>
+            <div id="rackPreviewContainer" style="max-height:500px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:4px; background:#f8fafc;"></div>
+        </div>
+    </div>
+
+    <%
+      const lr = (typeof linkedRack !== 'undefined' && linkedRack) ? linkedRack : null;
+    %>
+    <div id="tankSection" style="display:none;">
+        <div class="card-header mt-2"><h2>탱크 용량</h2></div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>서버 수용 U수</label>
+                <input type="number" name="tank_capacity_u" class="form-control" min="1" max="100" value="<%= lr ? lr.total_units : 10 %>" placeholder="10">
+                <small class="text-muted" style="font-size:11px;">탱크에 배치할 수 있는 총 U 수</small>
+            </div>
+            <div class="form-group">
+                <label>스위치 슬롯</label>
+                <input type="number" name="switch_slots" class="form-control" min="0" max="20" value="<%= lr ? lr.switch_slots : 0 %>" placeholder="0">
+                <small class="text-muted" style="font-size:11px;">탱크 상단 스위치 수용 슬롯</small>
+            </div>
+        </div>
+    </div>
+
+    <div id="infraLinkSection" style="display:none;">
+        <div class="card-header mt-2"><h2>연결 액침탱크</h2></div>
+        <div class="form-row">
+            <div class="form-group" style="flex:2">
+                <label>연결 대상</label>
+                <select name="parent_asset_id" id="infraLinkSelect" class="form-control">
+                    <option value="">미지정</option>
+                    <%
+                      const tankAssets = (typeof assets !== 'undefined' ? assets : []).filter(a => a.asset_type === 'immersion_tank' && a.status === 'active');
+                      tankAssets.forEach(function(a) {
+                    %>
+                    <option value="<%= a.id %>" <%= asset?.parent_asset_id == a.id ? 'selected' : '' %>><%= a.management_number || a.model_name %><%= a.model_name && a.management_number ? ' (' + a.model_name + ')' : '' %><%= a.room_name ? ' - ' + a.room_name : '' %></option>
+                    <% }) %>
+                </select>
             </div>
         </div>
     </div>
@@ -245,8 +309,9 @@
         </div>
         <% }) %>
     </div>
-    <div style="margin-bottom: 16px;">
+    <div style="margin-bottom: 16px; display:flex; gap:8px;">
         <button type="button" class="btn btn-sm btn-outline" onclick="addIpRow()">+ IP 추가</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="openIpModal()" style="color:var(--primary);">가용 IP 조회</button>
     </div>
 
     <div class="card-header mt-2"><h2>접속 정보</h2></div>
@@ -326,6 +391,27 @@
     </div>
 </form>
 
+<!-- 가용 IP 조회 모달 -->
+<div id="ipModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999;">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; border-radius:8px; padding:20px; width:520px; max-height:80vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h3 style="margin:0; font-size:16px;">가용 IP 조회</h3>
+            <button type="button" onclick="closeIpModal()" style="border:none; background:none; font-size:22px; cursor:pointer; color:#64748b;">&times;</button>
+        </div>
+        <div style="margin-bottom:12px;">
+            <select id="ipSubnetSelect" class="form-control" onchange="loadAvailableIps()">
+                <option value="">서브넷 선택</option>
+                <% appConfig.subnets.forEach(function(s) { %>
+                <option value="<%= s.subnet %>"><%= s.label %> (<%= s.subnet %>)</option>
+                <% }) %>
+            </select>
+        </div>
+        <div id="ipModalResults" style="max-height:400px; overflow-y:auto;">
+            <div style="color:#94a3b8; text-align:center; padding:20px;">서브넷을 선택하세요</div>
+        </div>
+    </div>
+</div>
+
 <script>
 function toggleVendor() {
     var sel = document.getElementById('ownershipSelect');
@@ -377,6 +463,29 @@ function filterByLocType() {
     }
     filterRacks();
 }
+function onAssetTypeChange() {
+    var assetType = document.getElementById('assetTypeSelect').value;
+    var rackSection = document.getElementById('rackSection');
+    var tankSection = document.getElementById('tankSection');
+    var infraLinkSection = document.getElementById('infraLinkSection');
+    if (assetType === 'immersion_tank') {
+        rackSection.style.display = 'none';
+        tankSection.style.display = '';
+        infraLinkSection.style.display = 'none';
+        document.getElementById('rackSelect').value = '';
+        document.getElementById('rackUnitStart').value = '';
+    } else if (assetType === 'cdu' || assetType === 'chiller') {
+        rackSection.style.display = 'none';
+        tankSection.style.display = 'none';
+        infraLinkSection.style.display = '';
+        document.getElementById('rackSelect').value = '';
+        document.getElementById('rackUnitStart').value = '';
+    } else {
+        tankSection.style.display = 'none';
+        infraLinkSection.style.display = 'none';
+        filterByLocType();
+    }
+}
 function filterRacks() {
     var roomId = document.getElementById('roomSelect').value;
     var sel = document.getElementById('rackSelect');
@@ -394,12 +503,23 @@ function filterRacks() {
     } else if (!currentVisible) {
         sel.value = '';
     }
+    if (typeof loadRackPreview === 'function') loadRackPreview();
 }
 
 function calcSlots() {
     var u = parseInt(document.getElementById('uSize').value) || 1;
     var extra = parseInt(document.getElementById('extraSlots').value) || 0;
-    document.getElementById('totalSlots').value = u * 3 + extra;
+    var shelfU = 0;
+    if (document.getElementById('shelfCheck').checked) {
+        shelfU = parseInt(document.getElementById('shelfUSize').value) || 1;
+    }
+    document.getElementById('totalSlots').value = u * 3 + extra + shelfU * 3;
+}
+
+function onShelfToggle() {
+    var checked = document.getElementById('shelfCheck').checked;
+    document.getElementById('shelfUSizeWrap').style.display = checked ? '' : 'none';
+    calcSlots();
 }
 
 function calcSlotStart() {
@@ -407,6 +527,71 @@ function calcSlotStart() {
     var hole = parseInt(document.getElementById('holeStart').value) || 1;
     document.getElementById('rackUnitStart').value = u > 0 ? (u - 1) * 3 + hole : '';
 }
+
+// Switch slot handling for immersion racks
+function onRackChangeCheckSW() {
+    var rackSel = document.getElementById('rackSelect');
+    var swGroup = document.getElementById('switchSlotGroup');
+    var bladeGroup = document.getElementById('bladeSlotGroup');
+    var swSelect = document.getElementById('switchSlotSelect');
+    if (!rackSel || !swGroup) return;
+
+    var opt = rackSel.options[rackSel.selectedIndex];
+    var rackType = opt ? opt.getAttribute('data-rack-type') : '';
+    var switchSlots = parseInt(opt ? opt.getAttribute('data-switch-slots') : 0) || 0;
+
+    if (rackType === 'immersion' && switchSlots > 0) {
+        swGroup.style.display = '';
+        bladeGroup.style.display = 'none';
+        // Populate SW options
+        swSelect.innerHTML = '<option value="">사용 안 함 (U 위치 사용)</option>';
+        for (var i = 1; i <= switchSlots; i++) {
+            var o = document.createElement('option');
+            o.value = 'SW' + i;
+            o.textContent = 'SW' + i;
+            swSelect.appendChild(o);
+        }
+        // Fetch occupied and pre-select current
+        var rackId = rackSel.value;
+        var excludeId = _currentEditAssetId || '';
+        fetch('/racks/' + rackId + '/switch-slots?exclude=' + excludeId)
+            .then(function(r) { return r.ok ? r.json() : { occupied: [] }; })
+            .then(function(data) {
+                for (var j = 1; j < swSelect.options.length; j++) {
+                    var slotVal = swSelect.options[j].value;
+                    var occ = data.occupied.find(function(o) { return o.slot === slotVal; });
+                    if (occ) {
+                        swSelect.options[j].textContent = slotVal + ' (사용중: ' + (occ.name || '') + ')';
+                        swSelect.options[j].disabled = true;
+                    }
+                }
+                // Pre-select if current asset has SW blade_slot
+                var currentBlade = '<%= asset?.blade_slot || "" %>';
+                if (currentBlade && /^SW\d+$/i.test(currentBlade)) {
+                    for (var j = 0; j < swSelect.options.length; j++) {
+                        if (swSelect.options[j].value === currentBlade) {
+                            swSelect.options[j].disabled = false;
+                            swSelect.options[j].textContent = currentBlade + ' (현재)';
+                            swSelect.selectedIndex = j;
+                            break;
+                        }
+                    }
+                }
+            });
+    } else {
+        swGroup.style.display = 'none';
+        bladeGroup.style.display = '';
+        swSelect.value = '';
+    }
+}
+
+// Call on page load if rack is already selected
+(function() {
+    var rackSel = document.getElementById('rackSelect');
+    if (rackSel && rackSel.value && rackSel.value !== '' && rackSel.value !== '__new__') {
+        onRackChangeCheckSW();
+    }
+})();
 
 var ipTypeOptions = '<% appConfig.ipTypes.filter(t => t.value !== "other").forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %><option value="__custom__">기타(직접입력)</option>';
 var ipIfaceOptions = '<option value="">-</option><option value="Ethernet">Ethernet</option><option value="InfiniBand">InfiniBand</option>';
@@ -483,6 +668,293 @@ function addCredRow() {
         '</div>';
     document.getElementById('credRows').insertAdjacentHTML('beforeend', html);
 }
+
+// === 랙 미리보기 (슬롯 레벨) ===
+var _rackOccupancy = {};
+var _rackTotalU = 42;
+var _currentEditAssetId = <%= asset ? asset.id : 'null' %>;
+
+function escapeHtml(str) {
+    var d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+}
+
+function slotToU(slot) { return Math.floor((slot - 1) / 3) + 1; }
+function slotToH(slot) { return ((slot - 1) % 3) + 1; }
+
+function loadRackPreview() {
+    var rackId = document.getElementById('rackSelect').value;
+    var preview = document.getElementById('rackPreview');
+    if (!rackId || rackId === '__new__') {
+        preview.style.display = 'none';
+        return;
+    }
+    fetch('/racks/' + rackId + '/slots')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+            if (!data) { preview.style.display = 'none'; return; }
+            renderRackPreview(data);
+            preview.style.display = '';
+        })
+        .catch(function() { preview.style.display = 'none'; });
+}
+
+function renderRackPreview(data) {
+    _rackTotalU = data.totalU || 42;
+    var container = document.getElementById('rackPreviewContainer');
+    var info = document.getElementById('rackPreviewInfo');
+    info.textContent = data.rack.name + ' (' + _rackTotalU + 'U)';
+
+    // Build slot-level occupancy map (현재 편집 중인 자산은 제외)
+    _rackOccupancy = {};
+    data.assets.forEach(function(a) {
+        if (_currentEditAssetId && a.id === _currentEditAssetId) return;
+        var slotStart = a.rack_unit_start;
+        var slotSize = a.rack_unit_size || 3;
+        var side = a.blade_slot || 'full';
+        var uStart = Math.floor((slotStart - 1) / 3) + 1;
+        var uSize = Math.max(1, Math.ceil(slotSize / 3));
+        var assetInfo = { name: a.name, mgmt: a.management_number, slotStart: slotStart, slotSize: slotSize, uStart: uStart, uSize: uSize, side: side, id: a.id };
+        for (var s = slotStart; s < slotStart + slotSize; s++) {
+            if (!_rackOccupancy[s]) _rackOccupancy[s] = { full: null, left: null, right: null };
+            if (side === 'full') _rackOccupancy[s].full = assetInfo;
+            else _rackOccupancy[s][side] = assetInfo;
+        }
+    });
+
+    var occColors = { full: '#e2e8f0', left: '#dbeafe', right: '#fce7f3' };
+    var occTextColors = { full: '#475569', left: '#1e40af', right: '#9d174d' };
+    var holeLabels = ['하', '중', '상'];
+
+    var html = '<table style="width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed;">';
+    html += '<colgroup><col style="width:40px"><col style="width:20px"><col style="width:50%"><col style="width:50%"></colgroup>';
+
+    for (var u = _rackTotalU; u >= 1; u--) {
+        for (var h = 3; h >= 1; h--) {
+            var slot = (u - 1) * 3 + h;
+            var m = _rackOccupancy[slot] || { full: null, left: null, right: null };
+            var hasFull = !!m.full;
+            var hasLeft = !!m.left;
+            var hasRight = !!m.right;
+
+            var cellH = 'height:18px; padding:1px 4px; border:1px solid #e2e8f0; font-size:10px; vertical-align:middle;';
+            var emptyCell = cellH + ' background:#fff; cursor:pointer;';
+
+            html += '<tr data-slot="' + slot + '" data-u="' + u + '" data-h="' + h + '">';
+
+            if (h === 3) {
+                html += '<td rowspan="3" style="padding:1px 4px; text-align:right; font-weight:600; color:#64748b; border:1px solid #e2e8f0; background:#f8fafc; font-size:11px; white-space:nowrap; vertical-align:middle;">U' + u + '</td>';
+            }
+
+            html += '<td style="padding:0 3px; text-align:center; color:#94a3b8; border:1px solid #f1f5f9; background:#f8fafc; font-size:9px;">' + holeLabels[h - 1] + '</td>';
+
+            if (hasFull) {
+                var a = m.full;
+                var isStart = a.slotStart === slot;
+                html += '<td colspan="2" style="' + cellH + ' background:' + occColors.full + ';">';
+                if (isStart) {
+                    html += '<span style="color:' + occTextColors.full + '; font-weight:500;">' + escapeHtml(a.name) + '</span>';
+                    if (a.mgmt) html += ' <span style="color:#94a3b8; font-size:9px;">' + escapeHtml(a.mgmt) + '</span>';
+                    if (a.uSize > 1) html += ' <span style="color:#94a3b8; font-size:9px;">(' + a.uSize + 'U)</span>';
+                }
+                html += '</td>';
+            } else if (hasLeft || hasRight) {
+                if (hasLeft) {
+                    var a = m.left;
+                    var isStart = a.slotStart === slot;
+                    html += '<td style="' + cellH + ' background:' + occColors.left + ';">';
+                    if (isStart) html += '<span style="color:' + occTextColors.left + '; font-weight:500; font-size:10px;">' + escapeHtml(a.name) + '</span>';
+                    html += '</td>';
+                } else {
+                    html += '<td style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                }
+                if (hasRight) {
+                    var a = m.right;
+                    var isStart = a.slotStart === slot;
+                    html += '<td style="' + cellH + ' background:' + occColors.right + ';">';
+                    if (isStart) html += '<span style="color:' + occTextColors.right + '; font-weight:500; font-size:10px;">' + escapeHtml(a.name) + '</span>';
+                    html += '</td>';
+                } else {
+                    html += '<td style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                }
+            } else {
+                html += '<td colspan="2" style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+            }
+            html += '</tr>';
+        }
+    }
+    html += '</table>';
+    container.innerHTML = html;
+
+    // Highlight current position if set
+    var curSlotStart = parseInt(document.getElementById('rackUnitStart').value);
+    var curSlotSize = parseInt(document.getElementById('totalSlots').value) || 3;
+    if (curSlotStart) {
+        highlightAssetSlots(curSlotStart, curSlotSize);
+    }
+}
+
+function isSlotOccupied(slot) {
+    var m = _rackOccupancy[slot];
+    return m && (m.full || m.left || m.right);
+}
+
+function onAssetSlotClick(slot) {
+    var totalSlots = parseInt(document.getElementById('totalSlots').value) || 3;
+    var slotEnd = slot + totalSlots - 1;
+    var maxSlot = _rackTotalU * 3;
+
+    if (slotEnd > maxSlot) {
+        alert('슬롯 범위 초과 (최대 U' + _rackTotalU + ')');
+        return;
+    }
+
+    // Overlap check
+    var conflicts = [];
+    for (var s = slot; s <= slotEnd; s++) {
+        if (isSlotOccupied(s)) {
+            var m = _rackOccupancy[s];
+            var name = (m.full || m.left || m.right).name;
+            if (conflicts.indexOf(name) === -1) conflicts.push(name);
+        }
+    }
+    if (conflicts.length > 0) {
+        alert('해당 범위에 이미 장비가 있습니다:\n' + conflicts.join(', '));
+        return;
+    }
+
+    // Calculate U and hole from slot
+    var u = slotToU(slot);
+    var h = slotToH(slot);
+
+    document.getElementById('uStart').value = u;
+    document.getElementById('holeStart').value = h;
+    calcSlotStart();
+
+    clearAssetSlotHighlight();
+    highlightAssetSlots(slot, totalSlots);
+}
+
+function highlightAssetSlots(slotStart, count) {
+    clearAssetSlotHighlight();
+    for (var s = slotStart; s < slotStart + count; s++) {
+        var row = document.querySelector('#rackPreviewContainer tr[data-slot="' + s + '"]');
+        if (!row) continue;
+        var cells = row.querySelectorAll('td');
+        var startIdx = (slotToH(s) === 3) ? 2 : 1;
+        for (var c = startIdx; c < cells.length; c++) {
+            if (!isSlotOccupied(s)) {
+                cells[c].style.background = '#dbeafe';
+                cells[c].style.outline = '1px solid #3b82f6';
+                cells[c].style.outlineOffset = '-1px';
+                if (s === slotStart) cells[c].innerHTML = '<span style="color:#1e40af; font-size:9px; font-weight:600;">시작</span>';
+            }
+        }
+    }
+}
+
+function clearAssetSlotHighlight() {
+    var rows = document.querySelectorAll('#rackPreviewContainer tr[data-slot]');
+    rows.forEach(function(row) {
+        var s = parseInt(row.getAttribute('data-slot'));
+        if (!isSlotOccupied(s)) {
+            var cells = row.querySelectorAll('td');
+            var startIdx = (slotToH(s) === 3) ? 2 : 1;
+            for (var c = startIdx; c < cells.length; c++) {
+                cells[c].style.background = '#fff';
+                cells[c].style.outline = 'none';
+                cells[c].innerHTML = '';
+            }
+        }
+    });
+}
+
+// Update preview when uSize or extraSlots changes
+document.getElementById('uSize').addEventListener('input', function() {
+    calcSlots();
+    var curSlotStart = parseInt(document.getElementById('rackUnitStart').value);
+    if (curSlotStart) {
+        highlightAssetSlots(curSlotStart, parseInt(document.getElementById('totalSlots').value) || 3);
+    }
+});
+document.getElementById('extraSlots').addEventListener('input', function() {
+    calcSlots();
+    var curSlotStart = parseInt(document.getElementById('rackUnitStart').value);
+    if (curSlotStart) {
+        highlightAssetSlots(curSlotStart, parseInt(document.getElementById('totalSlots').value) || 3);
+    }
+});
+
+// Load rack preview on page load if rack is pre-selected
+(function() {
+    onAssetTypeChange();
+    var rackId = document.getElementById('rackSelect').value;
+    if (rackId && rackId !== '__new__') {
+        loadRackPreview();
+    }
+})();
+
+// === 가용 IP 조회 ===
+function openIpModal() {
+    document.getElementById('ipModal').style.display = '';
+    document.getElementById('ipSubnetSelect').value = '';
+    document.getElementById('ipModalResults').innerHTML = '<div style="color:#94a3b8;text-align:center;padding:20px;">서브넷을 선택하세요</div>';
+}
+
+function closeIpModal() {
+    document.getElementById('ipModal').style.display = 'none';
+}
+
+function loadAvailableIps() {
+    var subnet = document.getElementById('ipSubnetSelect').value;
+    var results = document.getElementById('ipModalResults');
+    if (!subnet) {
+        results.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:20px;">서브넷을 선택하세요</div>';
+        return;
+    }
+    results.innerHTML = '<div style="text-align:center;padding:20px;color:#64748b;">로딩 중...</div>';
+    fetch('/assets/api/available-ips?subnet=' + encodeURIComponent(subnet))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data.ips || data.ips.length === 0) {
+                results.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:20px;">가용 IP가 없습니다</div>';
+                return;
+            }
+            var html = '<div style="margin-bottom:8px;font-size:12px;color:#64748b;">' + data.ips.length + '개 가용 IP</div>';
+            html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;">';
+            data.ips.forEach(function(ip) {
+                html += '<button type="button" style="padding:4px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;background:white;cursor:pointer;text-align:left;transition:background 0.15s;" onmouseover="this.style.background=\'#eff6ff\'" onmouseout="this.style.background=\'white\'" onclick="selectAvailableIp(\'' + ip + '\')">' + ip + '</button>';
+            });
+            html += '</div>';
+            results.innerHTML = html;
+        })
+        .catch(function() {
+            results.innerHTML = '<div style="color:#ef4444;text-align:center;padding:20px;">조회 실패</div>';
+        });
+}
+
+function selectAvailableIp(ip) {
+    // Find empty IP row or create new one
+    var rows = document.querySelectorAll('#ipRows .ip-row');
+    var target = null;
+    for (var i = 0; i < rows.length; i++) {
+        var input = rows[i].querySelector('input[name="ip_addresses[]"]');
+        if (input && !input.value.trim()) { target = rows[i]; break; }
+    }
+    if (!target) {
+        addIpRow();
+        rows = document.querySelectorAll('#ipRows .ip-row');
+        target = rows[rows.length - 1];
+    }
+    target.querySelector('input[name="ip_addresses[]"]').value = ip;
+    closeIpModal();
+}
+
+// Close IP modal on background click
+document.getElementById('ipModal').addEventListener('click', function(e) {
+    if (e.target === this) closeIpModal();
+});
 </script>
 
 <%- include('../partials/footer', { extraJs }) %>

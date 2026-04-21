@@ -1,8 +1,9 @@
 <%- include('../partials/header', { title, currentPath, extraCss }) %>
 
 <div class="page-header">
-    <h1><%= rack.room_name %> &gt; <%= rack.name %> (<%= rack.total_units %>U / <%= totalSlots %>칸)</h1>
+    <h1><%= rack.room_name %> &gt; <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } %><%= rack.name %> (<%= totalUnits %>U)<% if (rack.rack_type === 'immersion') { %> <span class="rack-type-badge immersion">액침탱크</span><% } %></h1>
     <div class="btn-group">
+        <button class="btn btn-warning" id="btnPowerCheck" onclick="checkPowerStatus()">&#x26A1; 전원 상태 확인</button>
         <a href="/assets/new?rack_id=<%= rack.id %>" class="btn btn-primary">+ 장비 추가</a>
         <a href="/rooms/<%= rack.room_id %>" class="btn btn-secondary">서버실</a>
     </div>
@@ -10,7 +11,7 @@
 
 <div class="rack-detail-layout">
     <div class="rack-visual">
-        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">장비를 드래그하여 구멍 단위로 위치를 변경할 수 있습니다. (1U = 3구멍)</p>
+        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">장비를 드래그하여 위치를 변경할 수 있습니다. (1U = 상/중/하 3구멍)</p>
 <%
 function getAssetClass(info) {
     if (info.asset_type === 'switch') return 'switch';
@@ -22,126 +23,206 @@ function getAssetClass(info) {
     if (info.ownership === 'vendor') return 'vendor';
     return 'server';
 }
-function slotPos(slot) {
-    var u = Math.floor((slot - 1) / 3) + 1;
-    var h = ((slot - 1) % 3) + 1;
-    return 'U' + u + '(' + h + ')';
-}
 %>
-        <div class="slot-container" id="rackSlotContainer">
-            <% for (let s = totalSlots; s >= 1; s--) { %>
-            <%
-                const entry = slotMap[s] || { full: null, left: null, right: null };
-                const uNum = Math.floor((s - 1) / 3) + 1;
-                const isUTop = (s % 3 === 0);
+        <table class="rack-slot-table" id="rackSlotTable">
+            <colgroup>
+                <col class="col-u-label">
+                <col class="col-hole">
+                <col class="col-asset-l">
+                <col class="col-asset-r">
+            </colgroup>
+<%
+  // Build slot-level occupancy map with equipment/shelf split
+  var slotMap = {};
+  assets.forEach(function(a) {
+    if (a.parent_asset_id || !a.rack_unit_start) return;
+    var slotStart = a.rack_unit_start;
+    var slotSize = a.rack_unit_size || 3;
+    var shelfSlots = a.shelf_size || 0;
+    var equipSlots = slotSize - shelfSlots;
+    if (equipSlots < 1) equipSlots = slotSize; // safety: if bad data, treat all as equipment
+    var hasChildren = childrenMap[a.id] && childrenMap[a.id].length > 0;
+    var side = hasChildren ? 'full' : (a.blade_slot || 'full');
+    var startU = Math.floor((slotStart - 1) / 3) + 1;
+    var sizeU = Math.ceil(slotSize / 3);
+    var baseInfo = {
+      id: a.id, asset_type: a.asset_type, ownership: a.ownership,
+      model_name: a.model_name || a.asset_type,
+      management_number: a.management_number || '',
+      slotStart: slotStart, slotSize: slotSize,
+      startU: startU, sizeU: sizeU,
+      children: hasChildren ? childrenMap[a.id] : null
+    };
 
-                if (entry.full) {
-                    const f = entry.full;
-                    const cls = getAssetClass(f);
-                    const endSlot = f.rack_unit_start + f.slot_size - 1;
-                    const isTop = (s === endSlot);
-                    const isBot = (s === f.rack_unit_start);
-                    const isSingle = (f.slot_size === 1);
-                    const extra = f.slot_size % 3;
-                    const isShelf = extra > 0 && s < f.rack_unit_start + extra;
-                    const isShelfTop = extra > 0 && s === f.rack_unit_start + extra - 1;
-                    let posClass = 'slot-asset-mid';
-                    if (isSingle) posClass = 'slot-asset-single';
-                    else if (isTop) posClass = 'slot-asset-top';
-                    else if (isBot) posClass = 'slot-asset-bot';
+    if (shelfSlots > 0 && shelfSlots < slotSize) {
+      // Equipment portion (top - higher slot numbers)
+      var equipInfo = {};
+      for (var k in baseInfo) equipInfo[k] = baseInfo[k];
+      equipInfo.cellSlots = equipSlots;
+      equipInfo.cellType = 'equipment';
+      for (var s = slotStart + shelfSlots; s < slotStart + slotSize; s++) {
+        if (!slotMap[s]) slotMap[s] = { full: null, left: null, right: null };
+        if (side === 'full') slotMap[s].full = equipInfo;
+        else slotMap[s][side] = equipInfo;
+      }
+      // Shelf portion (bottom - lower slot numbers)
+      var shelfInfo = {};
+      for (var k in baseInfo) shelfInfo[k] = baseInfo[k];
+      shelfInfo.cellSlots = shelfSlots;
+      shelfInfo.cellType = 'shelf';
+      for (var s = slotStart; s < slotStart + shelfSlots; s++) {
+        if (!slotMap[s]) slotMap[s] = { full: null, left: null, right: null };
+        if (side === 'full') slotMap[s].full = shelfInfo;
+        else slotMap[s][side] = shelfInfo;
+      }
+    } else {
+      // No shelf - single equipment cell
+      var info = {};
+      for (var k in baseInfo) info[k] = baseInfo[k];
+      info.cellSlots = slotSize;
+      info.cellType = 'equipment';
+      for (var s = slotStart; s < slotStart + slotSize; s++) {
+        if (!slotMap[s]) slotMap[s] = { full: null, left: null, right: null };
+        if (side === 'full') slotMap[s].full = info;
+        else slotMap[s][side] = info;
+      }
+    }
+  });
+
+  var holeLabels = ['하', '중', '상'];
+  var skipCols = 0, skipL = 0, skipR = 0;
+%>
+            <% for (var u = totalUnits; u >= 1; u--) { %>
+            <% for (var h = 3; h >= 1; h--) { %>
+            <%
+              var slot = (u - 1) * 3 + h;
+              var m = slotMap[slot] || { full: null, left: null, right: null };
             %>
-            <div class="slot-row <%= cls %> <%= posClass %><%= isShelf ? ' slot-shelf' : '' %><%= isShelfTop ? ' slot-shelf-top' : '' %><%= isUTop && !isTop && s < totalSlots ? ' u-boundary-asset' : '' %>"
-                 data-slot="<%= s %>" data-u="<%= uNum %>"
-                 draggable="true" data-asset-id="<%= f.id %>" data-asset-slots="<%= f.slot_size %>">
-                <span class="slot-u-label<%= isShelfTop ? ' shelf-label' : '' %>"><%= isShelfTop ? '선반' : '' %></span>
-                <span class="hole-marker"></span>
-                <% if (isTop) { %>
-                <div class="slot-info-wrap">
-                    <span class="slot-name"><%= f.model_name %><% if (f.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:10px;">(<%= f.management_number %>)</span><% } %></span>
-                    <% if (f.assigned_user || f.purpose) { %>
-                    <span class="slot-meta"><% if (f.assigned_user) { %><%= f.assigned_user %><% } %><% if (f.assigned_user && f.purpose) { %> | <% } %><% if (f.purpose) { %><%= f.purpose %><% } %></span>
-                    <% } %>
-                </div>
+            <tr data-slot="<%= slot %>" data-u="<%= u %>" data-h="<%= h %>">
+                <% if (h === 3) { %>
+                <td class="slot-u-label" rowspan="3">U<%= u %></td>
                 <% } %>
-            </div>
-            <%
-                } else if (entry.left || entry.right) {
-                    const anyInfo = entry.left || entry.right;
-                    const endSlot = anyInfo.rack_unit_start + anyInfo.slot_size - 1;
-                    const isTop = (s === endSlot);
-                    const isBot = (s === anyInfo.rack_unit_start);
-                    const isSingle = (anyInfo.slot_size === 1);
-                    const extra = anyInfo.slot_size % 3;
-                    const isShelf = extra > 0 && s < anyInfo.rack_unit_start + extra;
-                    const isShelfTop = extra > 0 && s === anyInfo.rack_unit_start + extra - 1;
-
-                    if (isShelf) {
-                        // Shelf: full-width (not split into blade halves)
-                        let posClass = isBot ? 'slot-asset-bot' : 'slot-asset-mid';
-            %>
-            <div class="slot-row slot-shelf <%= posClass %><%= isShelfTop ? ' slot-shelf-top' : '' %><%= isUTop && s < totalSlots ? ' u-boundary-asset' : '' %>"
-                 data-slot="<%= s %>" data-u="<%= uNum %>"
-                 draggable="true" data-asset-id="<%= anyInfo.id %>" data-asset-slots="<%= anyInfo.slot_size %>">
-                <span class="slot-u-label<%= isShelfTop ? ' shelf-label' : '' %>"><%= isShelfTop ? '선반' : '' %></span>
-                <span class="hole-marker"></span>
-            </div>
-            <%
-                    } else {
-                        // Blade pair (non-shelf slots)
-                        let posClass = 'slot-blade-mid';
-                        if (isSingle) posClass = 'slot-blade-single';
-                        else if (isTop) posClass = 'slot-blade-top';
-                        else if (isBot) posClass = 'slot-blade-bot';
-            %>
-            <div class="slot-row blade-row <%= posClass %><%= isUTop && !isTop && s < totalSlots ? ' u-boundary-asset' : '' %>"
-                 data-slot="<%= s %>" data-u="<%= uNum %>">
-                <span class="slot-u-label"></span>
-                <span class="hole-marker"></span>
-                <div class="blade-pair">
-                    <% if (entry.left) { %>
-                    <div class="blade-half <%= getAssetClass(entry.left) %>"
-                         data-asset-id="<%= entry.left.id %>" data-asset-slots="<%= anyInfo.slot_size %>" draggable="true">
-                        <% if (isTop) { %>
-                        <span class="blade-label"><%= entry.left.model_name %><% if (entry.left.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:9px;">(<%= entry.left.management_number %>)</span><% } %></span>
-                        <span class="slot-meta">
-                            <% if (entry.left.assigned_user) { %><%= entry.left.assigned_user %><% } %>
-                            <% if (entry.left.assigned_user && entry.left.purpose) { %> | <% } %>
-                            <% if (entry.left.purpose) { %><%= entry.left.purpose %><% } %>
-                        </span>
+                <td class="slot-hole-label"><%= holeLabels[h - 1] %></td>
+<% if (skipCols > 0) { skipCols--; } else if (m.full) {
+  var af = m.full; var cls = getAssetClass(af); skipCols = af.cellSlots - 1;
+  if (af.cellType === 'shelf') {
+%>
+                <td colspan="2" rowspan="<%= af.cellSlots %>" class="slot-asset-cell slot-shelf"
+                    data-asset-id="<%= af.id %>" data-slot-size="<%= af.slotSize %>"
+                    data-start-u="<%= af.startU %>" data-size-u="<%= af.sizeU %>"
+                    draggable="true">
+                    <span class="slot-shelf-label">선반</span>
+                </td>
+<%  } else { %>
+                <td colspan="2" rowspan="<%= af.cellSlots %>" class="slot-asset-cell <%= cls %>"
+                    data-asset-id="<%= af.id %>" data-slot-size="<%= af.slotSize %>"
+                    data-start-u="<%= af.startU %>" data-size-u="<%= af.sizeU %>"
+                    draggable="true">
+                    <div class="slot-asset-inner">
+                        <span class="slot-asset-name"><%= af.model_name %><% if (af.management_number) { %> (<%= af.management_number %>)<% } %></span>
+                        <% if (af.sizeU > 1) { %><span class="slot-asset-usize"> <%= af.sizeU %>U</span><% } %>
+                        <% if (af.children && af.children.length > 0) { %>
+                        <div class="chassis-nodes">
+                            <% af.children.forEach(function(child, idx) { %>
+                            <span class="chassis-node-tag" onclick="event.stopPropagation(); showAssetPopup(<%= child.id %>)" data-asset-id="<%= child.id %>">N<%= idx + 1 %></span>
+                            <% }) %>
+                        </div>
                         <% } %>
                     </div>
+                    <span class="power-dot" data-asset-id="<%= af.id %>"></span>
+                </td>
+<%  }
+} else {
+  if (skipL > 0) { skipL--; } else if (m.left) {
+    var al = m.left; skipL = al.cellSlots - 1;
+    if (al.cellType === 'shelf') {
+%>
+                <td rowspan="<%= al.cellSlots %>" class="slot-asset-cell slot-blade slot-shelf"
+                    data-asset-id="<%= al.id %>" data-slot-size="<%= al.slotSize %>"
+                    data-start-u="<%= al.startU %>" data-size-u="<%= al.sizeU %>"
+                    draggable="true">
+                    <span class="slot-shelf-label">선반</span>
+                </td>
+<%    } else {
+        var clsL = getAssetClass(al);
+%>
+                <td rowspan="<%= al.cellSlots %>" class="slot-asset-cell slot-blade <%= clsL %>"
+                    data-asset-id="<%= al.id %>" data-slot-size="<%= al.slotSize %>"
+                    data-start-u="<%= al.startU %>" data-size-u="<%= al.sizeU %>"
+                    draggable="true">
+                    <span class="slot-asset-name"><%= al.model_name %><% if (al.management_number) { %> (<%= al.management_number %>)<% } %></span>
+                    <span class="power-dot" data-asset-id="<%= al.id %>"></span>
+                </td>
+<%    }
+  } else { %>
+                <td class="slot-empty-cell"></td>
+<%  }
+  if (skipR > 0) { skipR--; } else if (m.right) {
+    var ar = m.right; skipR = ar.cellSlots - 1;
+    if (ar.cellType === 'shelf') {
+%>
+                <td rowspan="<%= ar.cellSlots %>" class="slot-asset-cell slot-blade slot-shelf"
+                    data-asset-id="<%= ar.id %>" data-slot-size="<%= ar.slotSize %>"
+                    data-start-u="<%= ar.startU %>" data-size-u="<%= ar.sizeU %>"
+                    draggable="true">
+                    <span class="slot-shelf-label">선반</span>
+                </td>
+<%    } else {
+        var clsR = getAssetClass(ar);
+%>
+                <td rowspan="<%= ar.cellSlots %>" class="slot-asset-cell slot-blade <%= clsR %>"
+                    data-asset-id="<%= ar.id %>" data-slot-size="<%= ar.slotSize %>"
+                    data-start-u="<%= ar.startU %>" data-size-u="<%= ar.sizeU %>"
+                    draggable="true">
+                    <span class="slot-asset-name"><%= ar.model_name %><% if (ar.management_number) { %> (<%= ar.management_number %>)<% } %></span>
+                    <span class="power-dot" data-asset-id="<%= ar.id %>"></span>
+                </td>
+<%    }
+  } else { %>
+                <td class="slot-empty-cell"></td>
+<%  }
+} %>
+            </tr>
+            <% } %>
+            <% } %>
+        </table>
+<% if (rack.rack_type === 'immersion' && rack.switch_slots > 0) { %>
+<%
+  // Build switch slot occupancy from assets assigned to this rack with blade_slot starting with 'SW'
+  var switchAssets = assets.filter(a => a.blade_slot && a.blade_slot.match(/^SW/i));
+  var switchSlotMap = {};
+  switchAssets.forEach(function(a) {
+    var slotMatch = a.blade_slot.match(/^SW(\d+)$/i);
+    if (slotMatch) {
+      switchSlotMap[parseInt(slotMatch[1])] = a;
+    }
+  });
+%>
+        <div style="margin-top:16px;">
+            <h3 style="font-size:14px; font-weight:600; margin-bottom:8px;">스위치 슬롯 (상단)</h3>
+            <p class="text-muted" style="font-size:11px; margin-bottom:6px;">스위치를 드래그하여 슬롯 간 이동 가능</p>
+            <table class="rack-slot-table" id="switchSlotTable" style="margin-bottom:0;">
+                <colgroup>
+                    <col style="width:60px;">
+                    <col>
+                </colgroup>
+                <% for (var sw = 1; sw <= rack.switch_slots; sw++) { %>
+                <tr data-sw-slot="SW<%= sw %>">
+                    <td class="slot-u-label" style="text-align:center; font-weight:600;">SW<%= sw %></td>
+                    <% if (switchSlotMap[sw]) { var swa = switchSlotMap[sw]; %>
+                    <td class="slot-asset-cell switch" draggable="true" data-asset-id="<%= swa.id %>" data-sw-slot="SW<%= sw %>" style="cursor:grab;">
+                        <div class="slot-asset-inner">
+                            <span class="slot-asset-name"><%= swa.model_name || swa.asset_type %><% if (swa.management_number) { %> (<%= swa.management_number %>)<% } %></span>
+                        </div>
+                    </td>
                     <% } else { %>
-                    <div class="blade-half blade-empty"></div>
+                    <td class="slot-empty-cell sw-drop-target" data-sw-slot="SW<%= sw %>" style="text-align:center; color:#94a3b8; font-size:12px;">빈 슬롯</td>
                     <% } %>
-                    <% if (entry.right) { %>
-                    <div class="blade-half <%= getAssetClass(entry.right) %>"
-                         data-asset-id="<%= entry.right.id %>" data-asset-slots="<%= anyInfo.slot_size %>" draggable="true">
-                        <% if (isTop) { %>
-                        <span class="blade-label"><%= entry.right.model_name %><% if (entry.right.management_number) { %> <span style="font-weight:400;opacity:0.7;font-size:9px;">(<%= entry.right.management_number %>)</span><% } %></span>
-                        <span class="slot-meta">
-                            <% if (entry.right.assigned_user) { %><%= entry.right.assigned_user %><% } %>
-                            <% if (entry.right.assigned_user && entry.right.purpose) { %> | <% } %>
-                            <% if (entry.right.purpose) { %><%= entry.right.purpose %><% } %>
-                        </span>
-                        <% } %>
-                    </div>
-                    <% } else { %>
-                    <div class="blade-half blade-empty"></div>
-                    <% } %>
-                </div>
-            </div>
-            <%
-                    }
-                } else {
-            %>
-            <div class="slot-row slot-empty<%= isUTop && s < totalSlots ? ' u-boundary' : '' %>" data-slot="<%= s %>" data-u="<%= uNum %>">
-                <span class="slot-u-label"><%= isUTop ? 'U' + uNum : '' %></span>
-                <span class="hole-marker"></span>
-            </div>
-            <%
-                }
-            } %>
+                </tr>
+                <% } %>
+            </table>
         </div>
+<% } %>
     </div>
 
     <div class="rack-sidebar">
@@ -152,9 +233,32 @@ function slotPos(slot) {
             </div>
             <p><strong>서버실:</strong> <%= rack.room_name %></p>
             <p><strong>이름:</strong> <%= rack.name %></p>
-            <p><strong>총 U:</strong> <%= rack.total_units %> (<%= totalSlots %>칸)</p>
+            <p><strong>유형:</strong> <% if (rack.rack_type === 'immersion') { %><span class="rack-type-badge immersion">&#x1F4A7; 액침탱크</span><% } else { %>서버랙<% } %></p>
+            <p><strong>총 U:</strong> <%= totalUnits %></p>
             <p><strong>장비 수:</strong> <%= assets.length %>대</p>
+            <% if (rack.switch_slots) { %><p><strong>스위치 슬롯:</strong> <%= rack.switch_slots %>개</p><% } %>
+            <% if (rack.linked_asset_id) { %>
+            <div style="margin-top:8px; padding:8px; background:#eff6ff; border-radius:6px; font-size:12px;">
+                <p style="margin:0 0 4px;"><strong>연결 자산:</strong>
+                    <a href="/assets/<%= rack.linked_asset_id %>"><%= rack.linked_model_name || rack.linked_asset_number || '자산 #' + rack.linked_asset_id %></a>
+                </p>
+                <% if (rack.linked_asset_number) { %><p style="margin:0 0 2px;"><strong>자산번호:</strong> <%= rack.linked_asset_number %></p><% } %>
+                <% if (rack.linked_serial_number) { %><p style="margin:0;"><strong>시리얼:</strong> <%= rack.linked_serial_number %></p><% } %>
+            </div>
+            <% } %>
             <% if (rack.description) { %><p><strong>설명:</strong> <%= rack.description %></p><% } %>
+            <% if (typeof connectedInfra !== 'undefined' && connectedInfra.length > 0) { %>
+            <div style="margin-top:8px; padding:8px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; font-size:12px;">
+                <p style="margin:0 0 6px; font-weight:600;">연결 설비</p>
+                <% connectedInfra.forEach(function(ci) { %>
+                <p style="margin:0 0 3px;">
+                    <span class="badge badge-<%= ci.asset_type %>"><%= ci.asset_type === 'cdu' ? 'CDU' : ci.asset_type === 'chiller' ? '칠러' : ci.asset_type %></span>
+                    <a href="/assets/<%= ci.id %>"><%= ci.management_number || ci.model_name || '#' + ci.id %></a>
+                    <% if (ci.model_name && ci.management_number) { %><span style="color:#64748b;">(<%= ci.model_name %>)</span><% } %>
+                </p>
+                <% }) %>
+            </div>
+            <% } %>
             <div class="mt-2">
                 <form method="POST" action="/racks/<%= rack.id %>/delete" onsubmit="return confirmDelete('이 랙을 삭제하시겠습니까?')">
                     <button type="submit" class="btn btn-sm btn-danger">랙 삭제</button>
@@ -174,8 +278,18 @@ function slotPos(slot) {
                 <div class="legend-item"><span class="legend-color storage"></span> 스토리지</div>
                 <div class="legend-item"><span class="legend-color other"></span> 기타</div>
                 <div class="legend-item"><span class="legend-color empty"></span> 빈 공간</div>
+                <div class="legend-item"><span class="legend-color" style="background:#555;"></span> 선반</div>
             </div>
-            <p style="font-size:11px;color:#94a3b8;margin-top:8px;">1U = 3구멍, 선반+2U = 7칸</p>
+        </div>
+
+        <div class="card" id="powerLegend" style="display:none;">
+            <div class="card-header"><h2>전원 상태</h2></div>
+            <div class="rack-legend" style="flex-direction:row; flex-wrap:wrap; gap:12px;">
+                <div class="legend-item"><span class="power-dot power-on" style="position:static;"></span> 전원 켜짐</div>
+                <div class="legend-item"><span class="power-dot power-off" style="position:static;"></span> 전원 꺼짐</div>
+                <div class="legend-item"><span class="power-dot power-no_bmc" style="position:static;"></span> BMC 미등록</div>
+                <div class="legend-item"><span class="power-dot power-error" style="position:static;"></span> 연결 실패</div>
+            </div>
         </div>
 
         <div class="card">
@@ -184,12 +298,30 @@ function slotPos(slot) {
             <p class="text-muted">장비가 없습니다.</p>
             <% } %>
             <% assets.forEach(a => { %>
+            <% if (a.parent_asset_id) return; %>
+            <%
+                const aStartU = a.rack_unit_start ? Math.floor((a.rack_unit_start - 1) / 3) + 1 : 0;
+                const aSizeU = Math.ceil((a.rack_unit_size || 3) / 3);
+                const isSwitchSlot = a.blade_slot && /^SW\d+$/i.test(a.blade_slot);
+                const posLabel = isSwitchSlot ? a.blade_slot : (aStartU ? 'U' + aStartU : 'U?');
+            %>
             <div class="rack-asset-item" onclick="showAssetPopup(<%= a.id %>)">
-                <strong><%= a.rack_unit_start ? slotPos(a.rack_unit_start) : 'U?' %></strong><% if ((a.rack_unit_size||3) > 1) { %>-<strong><%= slotPos(a.rack_unit_start + (a.rack_unit_size||3) - 1) %></strong><% } %>
-                <% if (a.blade_slot) { %><span style="font-size:10px;color:#94a3b8;">(<%= a.blade_slot === 'left' ? '좌' : '우' %>)</span><% } %>
-                - <%= a.model_name || a.asset_type %>
-                <span style="font-size:11px;color:#64748b;">(<%= Math.floor((a.rack_unit_size||3)/3) %>U<% if ((a.rack_unit_size||3)%3) { %>+<%= (a.rack_unit_size||3)%3 %><% } %>)</span>
+                <strong><%= posLabel %></strong>
+                <%= a.model_name || a.asset_type %><% if (!isSwitchSlot && aSizeU > 1) { %> <span style="font-size:11px;color:#64748b;">(<%= aSizeU %>U)</span><% } %>
+                <% if (['server','storage','switch','kvm','other'].includes(a.asset_type)) { %>
+                <span class="asset-power-badge" data-asset-id="<%= a.id %>"></span>
+                <% } %>
             </div>
+            <% if (childrenMap[a.id] && childrenMap[a.id].length > 0) { %>
+            <% childrenMap[a.id].forEach(function(child, idx) { %>
+            <div class="rack-asset-item" style="padding-left:28px; font-size:12px; color:#475569;" onclick="showAssetPopup(<%= child.id %>)">
+                N<%= idx + 1 %> (<%= child.management_number %>)
+                <% if (['server','storage','switch','kvm','other'].includes(child.asset_type)) { %>
+                <span class="asset-power-badge" data-asset-id="<%= child.id %>"></span>
+                <% } %>
+            </div>
+            <% }) %>
+            <% } %>
             <% }) %>
         </div>
     </div>
@@ -221,6 +353,13 @@ function slotPos(slot) {
             </div>
             <div class="form-row">
                 <div class="form-group">
+                    <label>랙 유형</label>
+                    <select name="rack_type" class="form-control">
+                        <option value="standard" <%= (rack.rack_type || 'standard') === 'standard' ? 'selected' : '' %>>서버랙</option>
+                        <option value="immersion" <%= rack.rack_type === 'immersion' ? 'selected' : '' %>>액침탱크</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>총 U수</label>
                     <input type="number" name="total_units" class="form-control" value="<%= rack.total_units %>" min="1">
                 </div>
@@ -248,120 +387,111 @@ function slotPos(slot) {
 <script>
 var assetsData = <%- JSON.stringify(assets) %>;
 var rackId = <%= rack.id %>;
-var totalSlots = <%= totalSlots %>;
-var totalUnits = <%= rack.total_units %>;
+var totalUnits = <%= totalUnits %>;
 
-function slotToU(slot) { return Math.floor((slot - 1) / 3) + 1; }
-function slotHole(slot) { return ((slot - 1) % 3) + 1; }
-function slotPosStr(slot) { return 'U' + slotToU(slot) + '(' + slotHole(slot) + ')'; }
+function uToSlot(u) { return (u - 1) * 3 + 1; }
 
-// --- Hole-based drag-and-drop (individual slot rendering) ---
+// --- Slot-level drag-and-drop (상/중/하 granularity) ---
 (function() {
     var dragAssetId = null;
-    var dragAssetSlots = 0;
-    var container = document.getElementById('rackSlotContainer');
+    var dragSlotSize = 0;
+    var table = document.getElementById('rackSlotTable');
+    var totalSlots = totalUnits * 3;
 
-    function getSlotMap() {
-        var map = {};
-        container.querySelectorAll('.slot-row').forEach(function(el) {
-            map[parseInt(el.dataset.slot)] = el;
-        });
-        return map;
+    // Build JS-side slot occupancy for canPlace checks
+    var jsSlotOcc = {};
+    assetsData.forEach(function(a) {
+        if (a.parent_asset_id || !a.rack_unit_start) return;
+        for (var s = a.rack_unit_start; s < a.rack_unit_start + (a.rack_unit_size || 3); s++) {
+            jsSlotOcc[s] = a.id;
+        }
+    });
+
+    function getSlotFromY(y) {
+        var rows = table.querySelectorAll('tr[data-slot]');
+        for (var i = 0; i < rows.length; i++) {
+            var rect = rows[i].getBoundingClientRect();
+            if (y >= rect.top && y < rect.bottom) {
+                return parseInt(rows[i].dataset.slot);
+            }
+        }
+        return null;
     }
 
-    function canPlace(targetSlot, slotSize, sMap) {
-        var start = targetSlot;
-        var end = start + slotSize - 1;
-        if (start < 1 || end > totalSlots) return false;
-        for (var s = start; s <= end; s++) {
-            var el = sMap[s];
-            if (!el) continue;
-            var elAssetId = el.dataset.assetId ? parseInt(el.dataset.assetId) : null;
-            // Check blade halves too
-            var blades = el.querySelectorAll('.blade-half[data-asset-id]');
-            blades.forEach(function(b) {
-                if (parseInt(b.dataset.assetId) !== dragAssetId) {
-                    elAssetId = parseInt(b.dataset.assetId);
-                }
-            });
-            if (elAssetId && elAssetId !== dragAssetId) return false;
+    function getRowsForSlotRange(startSlot, count) {
+        var rows = [];
+        for (var s = startSlot; s < startSlot + count && s <= totalSlots; s++) {
+            var row = table.querySelector('tr[data-slot="' + s + '"]');
+            if (row) rows.push(row);
+        }
+        return rows;
+    }
+
+    function canPlace(targetSlot, slotSize) {
+        if (targetSlot < 1 || targetSlot + slotSize - 1 > totalSlots) return false;
+        for (var s = targetSlot; s < targetSlot + slotSize; s++) {
+            if (jsSlotOcc[s] && jsSlotOcc[s] !== dragAssetId) return false;
         }
         return true;
     }
 
-    container.addEventListener('dragstart', function(e) {
-        var el = e.target.closest('[data-asset-id]');
-        if (!el) return;
-        dragAssetId = parseInt(el.dataset.assetId);
-        dragAssetSlots = parseInt(el.dataset.assetSlots) || 3;
-        // Mark ALL slots of this asset as dragging
-        container.querySelectorAll('[data-asset-id="' + dragAssetId + '"]').forEach(function(sel) {
-            sel.classList.add('dragging');
-        });
+    table.addEventListener('dragstart', function(e) {
+        var cell = e.target.closest('.slot-asset-cell[data-asset-id]');
+        if (!cell) return;
+        dragAssetId = parseInt(cell.dataset.assetId);
+        dragSlotSize = parseInt(cell.dataset.slotSize) || 3;
+        cell.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', String(dragAssetId));
     });
 
-    container.addEventListener('dragend', function() {
-        container.querySelectorAll('.dragging').forEach(function(el) {
-            el.classList.remove('dragging');
-        });
-        container.querySelectorAll('.slot-row').forEach(function(el) {
-            el.classList.remove('drag-target', 'drag-invalid');
-        });
+    table.addEventListener('dragend', function() {
+        table.querySelectorAll('.dragging').forEach(function(el) { el.classList.remove('dragging'); });
+        table.querySelectorAll('tr').forEach(function(el) { el.classList.remove('drag-target', 'drag-invalid'); });
         dragAssetId = null;
-        dragAssetSlots = 0;
+        dragSlotSize = 0;
     });
 
-    container.addEventListener('dragover', function(e) {
+    table.addEventListener('dragover', function(e) {
         if (!dragAssetId) return;
-        var targetEl = e.target.closest('.slot-row');
-        if (!targetEl) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
 
-        container.querySelectorAll('.slot-row').forEach(function(el) {
-            el.classList.remove('drag-target', 'drag-invalid');
+        var targetSlot = getSlotFromY(e.clientY);
+        if (!targetSlot) return;
+
+        table.querySelectorAll('tr').forEach(function(el) { el.classList.remove('drag-target', 'drag-invalid'); });
+        var ok = canPlace(targetSlot, dragSlotSize);
+        getRowsForSlotRange(targetSlot, dragSlotSize).forEach(function(r) {
+            r.classList.add(ok ? 'drag-target' : 'drag-invalid');
         });
+    });
 
-        var targetSlot = parseInt(targetEl.dataset.slot);
-        var sMap = getSlotMap();
-        var ok = canPlace(targetSlot, dragAssetSlots, sMap);
-
-        var start = targetSlot;
-        var end = start + dragAssetSlots - 1;
-        for (var s = start; s <= end && s <= totalSlots; s++) {
-            var sel = sMap[s];
-            if (sel) sel.classList.add(ok ? 'drag-target' : 'drag-invalid');
+    table.addEventListener('dragleave', function(e) {
+        if (!table.contains(e.relatedTarget)) {
+            table.querySelectorAll('tr').forEach(function(el) { el.classList.remove('drag-target', 'drag-invalid'); });
         }
     });
 
-    container.addEventListener('dragleave', function(e) {
-        if (!container.contains(e.relatedTarget)) {
-            container.querySelectorAll('.slot-row').forEach(function(el) {
-                el.classList.remove('drag-target', 'drag-invalid');
-            });
-        }
-    });
-
-    container.addEventListener('drop', function(e) {
+    table.addEventListener('drop', function(e) {
         e.preventDefault();
         if (!dragAssetId) return;
-        var targetEl = e.target.closest('.slot-row');
-        if (!targetEl) return;
+        var targetSlot = getSlotFromY(e.clientY);
+        if (!targetSlot) return;
 
-        var newSlot = parseInt(targetEl.dataset.slot);
-        var sMap = getSlotMap();
-
-        if (!canPlace(newSlot, dragAssetSlots, sMap)) {
-            showToast('해당 위치에 놓을 수 없습니다 (충돌 또는 범위 초과)', 'error');
+        if (!canPlace(targetSlot, dragSlotSize)) {
+            var targetU = Math.floor((targetSlot - 1) / 3) + 1;
+            var hLabels = ['하', '중', '상'];
+            var targetH = ((targetSlot - 1) % 3);
+            showToast('U' + targetU + ' ' + hLabels[targetH] + ' 위치에 놓을 수 없습니다 (충돌 또는 범위 초과)', 'error');
             return;
         }
 
+        // Send slot number directly to API
         fetch('/racks/' + rackId + '/move-asset', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ asset_id: dragAssetId, new_slot_start: newSlot })
+            body: JSON.stringify({ asset_id: dragAssetId, new_slot_start: targetSlot })
         }).then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.success) location.reload();
@@ -373,14 +503,101 @@ function slotPosStr(slot) { return 'U' + slotToU(slot) + '(' + slotHole(slot) + 
 
     // Click to open popup
     var didDrag = false;
-    container.addEventListener('dragstart', function() { didDrag = true; });
-    container.addEventListener('click', function(e) {
+    table.addEventListener('dragstart', function() { didDrag = true; });
+    table.addEventListener('click', function(e) {
         if (didDrag) { didDrag = false; return; }
-        var el = e.target.closest('[data-asset-id]');
-        if (el) showAssetPopup(parseInt(el.dataset.assetId));
+        var cell = e.target.closest('.slot-asset-cell[data-asset-id]');
+        if (cell) showAssetPopup(parseInt(cell.dataset.assetId));
     });
 
     function showToast(msg, type) {
+        var div = document.createElement('div');
+        div.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;padding:10px 16px;border-radius:6px;color:white;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:opacity .3s;';
+        div.style.background = type === 'error' ? '#ef4444' : '#22c55e';
+        div.textContent = msg;
+        document.body.appendChild(div);
+        setTimeout(function() { div.style.opacity = '0'; setTimeout(function() { div.remove(); }, 300); }, 2500);
+    }
+})();
+
+// --- Switch slot drag-and-drop ---
+(function() {
+    var swTable = document.getElementById('switchSlotTable');
+    if (!swTable) return;
+
+    var dragSwAssetId = null;
+    var dragSwFromSlot = null;
+
+    swTable.addEventListener('dragstart', function(e) {
+        var cell = e.target.closest('[data-asset-id][data-sw-slot]');
+        if (!cell) return;
+        dragSwAssetId = parseInt(cell.dataset.assetId);
+        dragSwFromSlot = cell.dataset.swSlot;
+        cell.style.opacity = '0.5';
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragSwAssetId));
+    });
+
+    swTable.addEventListener('dragend', function(e) {
+        var cell = e.target.closest('[data-asset-id]');
+        if (cell) cell.style.opacity = '1';
+        swTable.querySelectorAll('tr').forEach(function(r) { r.classList.remove('drag-target', 'drag-invalid'); });
+        dragSwAssetId = null;
+        dragSwFromSlot = null;
+    });
+
+    swTable.addEventListener('dragover', function(e) {
+        if (!dragSwAssetId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        var row = e.target.closest('tr[data-sw-slot]');
+        if (!row) return;
+        swTable.querySelectorAll('tr').forEach(function(r) { r.classList.remove('drag-target', 'drag-invalid'); });
+        var targetCell = row.querySelector('td:nth-child(2)');
+        var isOccupied = targetCell && targetCell.dataset.assetId && parseInt(targetCell.dataset.assetId) !== dragSwAssetId;
+        row.classList.add(isOccupied ? 'drag-invalid' : 'drag-target');
+    });
+
+    swTable.addEventListener('dragleave', function(e) {
+        if (!swTable.contains(e.relatedTarget)) {
+            swTable.querySelectorAll('tr').forEach(function(r) { r.classList.remove('drag-target', 'drag-invalid'); });
+        }
+    });
+
+    swTable.addEventListener('drop', function(e) {
+        e.preventDefault();
+        if (!dragSwAssetId) return;
+        var row = e.target.closest('tr[data-sw-slot]');
+        if (!row) return;
+        var targetSlot = row.dataset.swSlot;
+        if (targetSlot === dragSwFromSlot) return;
+
+        var targetCell = row.querySelector('td:nth-child(2)');
+        if (targetCell && targetCell.dataset.assetId && parseInt(targetCell.dataset.assetId) !== dragSwAssetId) {
+            showSwToast(targetSlot + ' 이미 사용중입니다', 'error');
+            return;
+        }
+
+        fetch('/racks/' + rackId + '/move-switch-slot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_id: dragSwAssetId, new_slot: targetSlot })
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) location.reload();
+            else showSwToast(data.error || '이동 실패', 'error');
+        }).catch(function() {
+            showSwToast('서버 통신 오류', 'error');
+        });
+    });
+
+    // Click to popup
+    swTable.addEventListener('click', function(e) {
+        var cell = e.target.closest('[data-asset-id]');
+        if (cell) showAssetPopup(parseInt(cell.dataset.assetId));
+    });
+
+    function showSwToast(msg, type) {
         var div = document.createElement('div');
         div.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;padding:10px 16px;border-radius:6px;color:white;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:opacity .3s;';
         div.style.background = type === 'error' ? '#ef4444' : '#22c55e';
@@ -411,13 +628,11 @@ function showAssetPopup(assetId) {
 
 function renderPopup(assetId, data) {
     var a = data.asset;
-    var uSize = Math.floor((a.rack_unit_size || 3) / 3);
-    var extraSlots = (a.rack_unit_size || 3) % 3;
-    var sizeText = uSize + 'U' + (extraSlots ? '+' + extraSlots + '칸' : '');
-    var startPos = a.rack_unit_start ? slotPosStr(a.rack_unit_start) : 'U?';
-    var endSlot = a.rack_unit_start + (a.rack_unit_size || 3) - 1;
-    var endPos = slotPosStr(endSlot);
-    var posText = startPos + ((a.rack_unit_size || 3) > 1 ? '-' + endPos : '') + ' / ' + sizeText;
+    var startU = Math.floor((a.rack_unit_start - 1) / 3) + 1;
+    var sizeU = Math.ceil((a.rack_unit_size || 3) / 3);
+    var sizeText = sizeU + 'U';
+    var posText = a.rack_unit_start ? 'U' + startU : 'U?';
+    posText += ' (' + sizeText + ')';
     document.getElementById('popupTitle').textContent = a.model_name || a.asset_type;
 
     var html = '<div class="form-row">' +
@@ -426,10 +641,31 @@ function renderPopup(assetId, data) {
         '<div class="form-group"><label>소유</label><p>' + (a.ownership === 'company' ? '자사' : '업체') + '</p></div>' +
         '</div>' +
         '<div class="form-row">' +
-        '<div class="form-group"><label>위치</label><p>' + posText + (a.blade_slot ? ' (' + (a.blade_slot==='left'?'좌':'우') + ')' : '') + '</p></div>' +
+        '<div class="form-group"><label>위치</label><p>' + posText + '</p></div>' +
         '<div class="form-group"><label>담당자</label><p>' + esc(a.assigned_user || '-') + '</p></div>' +
         '<div class="form-group"><label>용도</label><p>' + esc(a.purpose || '-') + '</p></div>' +
         '</div>';
+
+    // Parent chassis info (if this is a node)
+    if (data.parent) {
+        html += '<div style="margin-top:8px; padding:6px 10px; background:#eff6ff; border-radius:4px; font-size:12px; color:#1e40af;">' +
+            '<strong>섀시:</strong> ' + esc(data.parent.management_number) + ' (' + esc(data.parent.model_name || '') + ')' +
+            '</div>';
+    }
+
+    // Child nodes (if this is a chassis)
+    if (data.children && data.children.length > 0) {
+        html += '<div style="margin-top:8px;"><label style="font-weight:600;font-size:12px;">노드 (' + data.children.length + '개)</label>';
+        data.children.forEach(function(child, idx) {
+            html += '<div style="font-size:13px; padding:2px 0; cursor:pointer;" onclick="showAssetPopup(' + child.id + ')">' +
+                '<span class="badge" style="font-size:10px; background:#3b82f6; color:white;">N' + (idx+1) + '</span> ' +
+                esc(child.management_number) +
+                (child.assigned_user ? ' - ' + esc(child.assigned_user) : '') +
+                (child.purpose ? ' | ' + esc(child.purpose) : '') +
+                '</div>';
+        });
+        html += '</div>';
+    }
 
     // IPs
     if (data.assetIps && data.assetIps.length > 0) {
@@ -452,11 +688,164 @@ function renderPopup(assetId, data) {
         html += '</div>';
     }
 
+    // Power control section (only for BMC-capable asset types, not PDU/UPS)
+    var powerTypes = ['server', 'storage', 'switch', 'kvm', 'other'];
+    if (powerTypes.indexOf(a.asset_type) !== -1) {
+        var hasBmc = data.assetIps && data.assetIps.some(function(ip) { return ip.ip_type === 'bmc'; });
+        if (hasBmc) {
+            html += '<div class="power-control-section" id="powerControlSection_' + assetId + '" style="margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+                '<label style="font-weight:600;font-size:12px;margin:0;">전원 제어</label>' +
+                '<span class="power-status-badge" id="popupPowerBadge_' + assetId + '" style="font-size:11px;padding:2px 8px;border-radius:10px;background:#94a3b8;color:white;">확인 중...</span>' +
+                '</div>' +
+                '<div style="display:flex;gap:6px;">' +
+                '<button class="btn btn-sm" style="background:#22c55e;color:white;flex:1;" onclick="doPowerControl(' + assetId + ',\'on\',\'' + esc(a.management_number || a.model_name || '') + '\')">켜기</button>' +
+                '<button class="btn btn-sm" style="background:#ef4444;color:white;flex:1;" onclick="doPowerControl(' + assetId + ',\'off\',\'' + esc(a.management_number || a.model_name || '') + '\')">끄기</button>' +
+                '<button class="btn btn-sm" style="background:#f59e0b;color:white;flex:1;" onclick="doPowerControl(' + assetId + ',\'reset\',\'' + esc(a.management_number || a.model_name || '') + '\')">재시작</button>' +
+                '</div>' +
+                '<div id="powerControlMsg_' + assetId + '" style="margin-top:6px;font-size:11px;color:#64748b;"></div>' +
+                '</div>';
+            // Auto-check power status for this asset
+            setTimeout(function() { checkAssetPowerInPopup(assetId); }, 100);
+        }
+    }
+
     html += '<div class="btn-group mt-2">' +
         '<a href="/assets/' + assetId + '" class="btn btn-primary">상세 보기</a>' +
         '<a href="/assets/' + assetId + '/edit" class="btn btn-outline">수정</a>' +
         '</div>';
     document.getElementById('popupContent').innerHTML = html;
+}
+
+// --- Power Status Check via IPMI ---
+var _powerChecked = false;
+function checkPowerStatus() {
+    if (_powerChecked) return;
+    var btn = document.getElementById('btnPowerCheck');
+    btn.disabled = true;
+    btn.innerHTML = '&#x26A1; 확인 중...';
+
+    // Show loading dots on all power indicators
+    document.querySelectorAll('.power-dot').forEach(function(dot) {
+        dot.className = 'power-dot loading';
+        dot.title = '확인 중...';
+    });
+
+    fetch('/racks/' + rackId + '/power-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            _powerChecked = true;
+            btn.innerHTML = '&#x26A1; 전원 확인 완료';
+
+            // Update sidebar legend
+            var legendCard = document.getElementById('powerLegend');
+            if (legendCard) legendCard.style.display = '';
+
+            // Apply power status to dots
+            document.querySelectorAll('.power-dot').forEach(function(dot) {
+                var assetId = dot.dataset.assetId;
+                if (!assetId) return;
+                var info = data[assetId];
+                if (!info) {
+                    dot.className = 'power-dot hidden';
+                    return;
+                }
+                dot.className = 'power-dot power-' + info.status;
+                dot.title = info.message + (info.bmc_ip ? ' (' + info.bmc_ip + ')' : '');
+            });
+
+            // Update asset list power status
+            document.querySelectorAll('.asset-power-badge').forEach(function(badge) {
+                var assetId = badge.dataset.assetId;
+                if (!assetId) return;
+                var info = data[assetId];
+                if (!info) return;
+                badge.className = 'asset-power-badge power-badge-' + info.status;
+                var labels = { on: 'ON', off: 'OFF', no_bmc: 'BMC 미등록', error: '연결실패', unknown: '알수없음' };
+                badge.textContent = labels[info.status] || info.status;
+            });
+        })
+        .catch(function() {
+            btn.innerHTML = '&#x26A1; 확인 실패';
+            btn.disabled = false;
+            _powerChecked = false;
+            document.querySelectorAll('.power-dot').forEach(function(dot) {
+                dot.className = 'power-dot';
+            });
+        });
+}
+
+// --- Power Control Functions ---
+function checkAssetPowerInPopup(assetId) {
+    fetch('/racks/' + rackId + '/power-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var info = data[assetId];
+            var badge = document.getElementById('popupPowerBadge_' + assetId);
+            if (!badge) return;
+            if (!info) {
+                badge.textContent = 'BMC 미등록';
+                badge.style.background = '#1e293b';
+                return;
+            }
+            updatePowerBadge(badge, info.status);
+        })
+        .catch(function() {
+            var badge = document.getElementById('popupPowerBadge_' + assetId);
+            if (badge) { badge.textContent = '확인 실패'; badge.style.background = '#eab308'; }
+        });
+}
+
+function updatePowerBadge(badge, status) {
+    var labels = { on: '전원 켜짐', off: '전원 꺼짐', error: '연결 실패', no_bmc: 'BMC 미등록', unknown: '알 수 없음' };
+    var colors = { on: '#22c55e', off: '#ef4444', error: '#eab308', no_bmc: '#1e293b', unknown: '#94a3b8' };
+    badge.textContent = labels[status] || status;
+    badge.style.background = colors[status] || '#94a3b8';
+}
+
+function doPowerControl(assetId, action, assetName) {
+    var actionLabels = { on: '켜기', off: '끄기', reset: '재시작', cycle: '전원 순환' };
+    if (action === 'off' || action === 'reset' || action === 'cycle') {
+        if (!confirm((assetName || 'Asset') + ' 전원을 ' + (actionLabels[action] || action) + ' 하시겠습니까?')) return;
+    }
+
+    var msgEl = document.getElementById('powerControlMsg_' + assetId);
+    if (msgEl) { msgEl.textContent = '처리 중...'; msgEl.style.color = '#3b82f6'; }
+
+    fetch('/racks/' + rackId + '/power-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetId: assetId, action: action })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (msgEl) {
+            msgEl.textContent = data.message || (data.success ? '완료' : '실패');
+            msgEl.style.color = data.success ? '#22c55e' : '#ef4444';
+        }
+        // Update badge
+        if (data.status) {
+            var badge = document.getElementById('popupPowerBadge_' + assetId);
+            if (badge) updatePowerBadge(badge, data.status);
+        }
+        // Update rack power-dot
+        if (data.status) {
+            document.querySelectorAll('.power-dot[data-asset-id="' + assetId + '"]').forEach(function(dot) {
+                dot.className = 'power-dot power-' + data.status;
+                var labels = { on: '전원 켜짐', off: '전원 꺼짐' };
+                dot.title = labels[data.status] || data.status;
+            });
+            // Also update sidebar badges
+            document.querySelectorAll('.asset-power-badge[data-asset-id="' + assetId + '"]').forEach(function(badge) {
+                badge.className = 'asset-power-badge power-badge-' + data.status;
+                var badgeLabels = { on: 'ON', off: 'OFF' };
+                badge.textContent = badgeLabels[data.status] || data.status;
+            });
+        }
+    })
+    .catch(function() {
+        if (msgEl) { msgEl.textContent = '서버 통신 오류'; msgEl.style.color = '#ef4444'; }
+    });
 }
 </script>
 

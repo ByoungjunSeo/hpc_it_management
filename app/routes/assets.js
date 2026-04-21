@@ -12,6 +12,8 @@ const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
 const EquipmentUsageLog = require('../models/equipmentUsageLog');
+const ModuleInventory = require('../models/moduleInventory');
+const ModuleInventoryLog = require('../models/moduleInventoryLog');
 // Asset list
 router.get('/', (req, res) => {
   const filters = {
@@ -52,7 +54,8 @@ router.get('/vendor', (req, res) => {
     extraCss: null,
     extraJs: null,
     grouped,
-    vendors
+    vendors,
+    appConfig
   });
 });
 
@@ -85,10 +88,11 @@ router.get('/new', (req, res) => {
     }
   }
 
+  const assets = Asset.findAll();
   res.render('assets/form', {
     title: '자산 등록',
     currentPath: '/assets',
-    extraCss: null,
+    extraCss: 'rack.css',
     extraJs: null,
     asset: null,
     assetIps: prefillIps,
@@ -96,7 +100,9 @@ router.get('/new', (req, res) => {
     rooms,
     racks,
     vendors,
+    assets,
     prefill: prefill || null,
+    linkedRack: null,
     appConfig
   });
 });
@@ -129,11 +135,41 @@ router.post('/', requireMaintenance, (req, res) => {
         name: req.body.new_rack_name.trim()
       });
     }
+    // Infrastructure types (cdu, immersion_tank, chiller) don't go into racks
+    if (['cdu', 'immersion_tank', 'chiller'].includes(req.body.asset_type)) {
+      req.body.rack_id = '';
+      req.body.rack_unit_start = '';
+      req.body.blade_slot = '';
+    }
+
+    // Switch slot placement (for immersion tank switch slots)
+    const switchSlot = (req.body.switch_slot || '').trim();
+    if (switchSlot && switchSlot.match(/^SW\d+$/i)) {
+      req.body.blade_slot = switchSlot;
+      req.body.rack_unit_start = '';
+      req.body.rack_unit_size = '';
+    }
+
     // Validate: rack unit overlap
     const overlap = Asset.checkRackUnitOverlap(req.body.rack_id, req.body.rack_unit_start, req.body.rack_unit_size, req.body.blade_slot);
     if (overlap) throw new Error('랙 위치 충돌: ' + overlap.message);
 
     const id = Asset.create(req.body);
+
+    // Auto-create linked rack for immersion_tank
+    if (req.body.asset_type === 'immersion_tank' && req.body.room_id) {
+      const tankCapU = parseInt(req.body.tank_capacity_u) || 10;
+      const switchSlots = parseInt(req.body.switch_slots) || 0;
+      const tankName = (req.body.model_name || req.body.asset_number || '액침탱크') + ' (탱크)';
+      Rack.create({
+        room_id: req.body.room_id,
+        name: tankName,
+        total_units: tankCapU,
+        rack_type: 'immersion',
+        linked_asset_id: id,
+        switch_slots: switchSlots
+      });
+    }
 
     // Process multi-IP fields
     const ipAddresses = req.body['ip_addresses[]'] || req.body.ip_addresses || [];
@@ -182,6 +218,19 @@ router.post('/', requireMaintenance, (req, res) => {
   }
 });
 
+// API: available IPs by subnet
+router.get('/api/available-ips', (req, res) => {
+  try {
+    const subnet = req.query.subnet;
+    if (!subnet) return res.json({ ips: [] });
+    const all = IpAddress.findBySubnet(subnet);
+    const available = all.filter(ip => ip.allocation_type === 'available');
+    res.json({ ips: available.map(ip => ip.ip_address) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Asset detail JSON API
 router.get('/:id/json', (req, res) => {
   const asset = Asset.findById(req.params.id);
@@ -189,7 +238,9 @@ router.get('/:id/json', (req, res) => {
   const modules = ComputingModule.findByAsset(asset.id);
   const assetIps = AssetIp.findByAsset(asset.id);
   const credentials = AssetCredential.findByAsset(asset.id);
-  res.json({ asset, modules, assetIps, credentials });
+  const parent = asset.parent_asset_id ? Asset.findById(asset.parent_asset_id) : null;
+  const children = Asset.findChildren(asset.id);
+  res.json({ asset, modules, assetIps, credentials, parent, children });
 });
 
 // Asset detail
@@ -199,12 +250,86 @@ router.get('/:id', (req, res) => {
     req.flash('error', '자산을 찾을 수 없습니다.');
     return res.redirect('/assets');
   }
-  const modules = ComputingModule.findByAsset(asset.id);
+  let modules = ComputingModule.findByAsset(asset.id);
   const assetIps = AssetIp.findByAsset(asset.id);
   const assetCredentials = AssetCredential.findByAsset(asset.id);
   // Get equipment usage logs by management number
-  const EquipmentUsageLog = require('../models/equipmentUsageLog');
   const equipmentLogs = asset.management_number ? EquipmentUsageLog.getHistory(asset.management_number) : [];
+  // Get module change logs for this asset
+  const moduleChangeLogs = ModuleInventoryLog.findByAsset(asset.id);
+
+  // Auto-sync: if no computing_modules but latest usage log has hardware_json, create modules
+  if (modules.length === 0 && equipmentLogs.length > 0) {
+    const latest = equipmentLogs[equipmentLogs.length - 1];
+    if (latest.hardware_json) {
+      try {
+        const hwItems = JSON.parse(latest.hardware_json);
+        if (hwItems.length > 0) {
+          hwItems.forEach(hw => {
+            if (!hw.type || !hw.code) return;
+            const ownerVal = hw.ownership || 'company';
+            ComputingModule.create({
+              asset_id: asset.id,
+              module_type: hw.type,
+              model: hw.code,
+              manufacturer: null,
+              capacity: null,
+              count: hw.num || 1,
+              specification: null,
+              slot_info: null,
+              notes: hw.role || null,
+              owner: ownerVal,
+              owner_vendor_id: ownerVal === 'vendor' ? (asset.vendor_id || null) : null
+            });
+          });
+          modules = ComputingModule.findByAsset(asset.id);
+        }
+      } catch(e) { /* ignore parse errors */ }
+    }
+  }
+
+  // Enrich modules with item_code from module_inventory (by model name lookup)
+  const codePattern = /^(CPU|mem|sto|net|raid|GPU|PSU)-/;
+  const allInventory = ModuleInventory.findAll();
+  const inventoryByModel = {};
+  allInventory.forEach(inv => {
+    const key = (inv.model || '').toLowerCase().trim();
+    if (key && inv.item_code) inventoryByModel[key] = inv.item_code;
+  });
+  modules.forEach(m => {
+    const spec = m.specification || '';
+    if (codePattern.test(spec)) {
+      m.item_code = spec;
+    } else {
+      const key = (m.model || '').toLowerCase().trim();
+      m.item_code = inventoryByModel[key] || null;
+    }
+  });
+
+  // Get linked rack for immersion_tank
+  const linkedRack = (asset.asset_type === 'immersion_tank') ? Rack.findByLinkedAsset(asset.id) : null;
+  let linkedRackAssetCount = 0;
+  if (linkedRack) {
+    const { getDb } = require('../config/database');
+    const cnt = getDb().prepare(
+      "SELECT COUNT(*) as cnt FROM assets WHERE rack_id = ? AND status NOT IN ('decommissioned')"
+    ).get(linkedRack.id);
+    linkedRackAssetCount = cnt ? cnt.cnt : 0;
+  }
+
+  // Get parent infrastructure asset (for CDU/chiller linked to tank/CDU)
+  const parentAsset = asset.parent_asset_id ? Asset.findById(asset.parent_asset_id) : null;
+
+  // Get child infrastructure assets (CDUs/chillers linked to this asset)
+  const infraTypes = ['immersion_tank', 'cdu', 'chiller'];
+  let childInfraAssets = [];
+  if (infraTypes.includes(asset.asset_type)) {
+    const { getDb: getDbLocal } = require('../config/database');
+    childInfraAssets = getDbLocal().prepare(
+      "SELECT id, asset_type, management_number, model_name, status FROM assets WHERE parent_asset_id = ? AND asset_type IN ('cdu','chiller') ORDER BY asset_type, management_number"
+    ).all(asset.id);
+  }
+
   res.render('assets/detail', {
     title: asset.model_name || '자산 상세',
     currentPath: '/assets',
@@ -215,6 +340,11 @@ router.get('/:id', (req, res) => {
     assetIps,
     assetCredentials,
     equipmentLogs,
+    moduleChangeLogs,
+    linkedRack,
+    linkedRackAssetCount,
+    parentAsset,
+    childInfraAssets,
     appConfig
   });
 });
@@ -231,10 +361,12 @@ router.get('/:id/edit', (req, res) => {
   const vendors = Vendor.findAll();
   const assetIps = AssetIp.findByAsset(asset.id);
   const assetCredentials = AssetCredential.findByAsset(asset.id);
+  const linkedRack = (asset.asset_type === 'immersion_tank') ? Rack.findByLinkedAsset(asset.id) : null;
+  const allAssets = Asset.findAll();
   res.render('assets/form', {
     title: '자산 수정',
     currentPath: '/assets',
-    extraCss: null,
+    extraCss: 'rack.css',
     extraJs: null,
     asset,
     assetIps,
@@ -242,7 +374,9 @@ router.get('/:id/edit', (req, res) => {
     rooms,
     racks,
     vendors,
+    assets: allAssets,
     prefill: null,
+    linkedRack,
     appConfig,
     returnTo: req.query.returnTo || req.get('Referer') || ''
   });
@@ -277,17 +411,65 @@ router.post('/:id', requireMaintenance, (req, res) => {
         name: req.body.new_rack_name.trim()
       });
     }
+    // Infrastructure types (cdu, immersion_tank, chiller) don't go into racks
+    if (['cdu', 'immersion_tank', 'chiller'].includes(req.body.asset_type)) {
+      req.body.rack_id = '';
+      req.body.rack_unit_start = '';
+      req.body.blade_slot = '';
+    }
     // Clear rack info when location type is not server_room
     if (req.body.loc_type && req.body.loc_type !== 'server_room') {
       req.body.rack_id = '';
       req.body.rack_unit_start = '';
       req.body.blade_slot = '';
     }
+    // Switch slot placement (for immersion tank switch slots)
+    const switchSlotU = (req.body.switch_slot || '').trim();
+    if (switchSlotU && switchSlotU.match(/^SW\d+$/i)) {
+      req.body.blade_slot = switchSlotU;
+      req.body.rack_unit_start = '';
+      req.body.rack_unit_size = '';
+    }
+
+    // Preserve parent_asset_id if not in form
+    if (!req.body.parent_asset_id && beforeAsset.parent_asset_id) {
+      req.body.parent_asset_id = beforeAsset.parent_asset_id;
+    }
+
     // Validate: rack unit overlap
     const overlap = Asset.checkRackUnitOverlap(req.body.rack_id, req.body.rack_unit_start, req.body.rack_unit_size, req.body.blade_slot, req.params.id);
     if (overlap) throw new Error('랙 위치 충돌: ' + overlap.message);
 
     Asset.update(req.params.id, req.body);
+
+    // Sync linked rack for immersion_tank
+    if (req.body.asset_type === 'immersion_tank' && req.body.room_id) {
+      const tankCapU = parseInt(req.body.tank_capacity_u) || 10;
+      const switchSlots = parseInt(req.body.switch_slots) || 0;
+      const tankName = (req.body.model_name || req.body.asset_number || '액침탱크') + ' (탱크)';
+      const existingRack = Rack.findByLinkedAsset(req.params.id);
+      if (existingRack) {
+        Rack.update(existingRack.id, {
+          room_id: req.body.room_id,
+          name: tankName,
+          total_units: tankCapU,
+          row_position: existingRack.row_position,
+          col_position: existingRack.col_position,
+          description: existingRack.description,
+          rack_type: 'immersion',
+          switch_slots: switchSlots
+        });
+      } else {
+        Rack.create({
+          room_id: req.body.room_id,
+          name: tankName,
+          total_units: tankCapU,
+          rack_type: 'immersion',
+          linked_asset_id: req.params.id,
+          switch_slots: switchSlots
+        });
+      }
+    }
 
     // Re-create IPs: delete then bulk create
     AssetIp.deleteByAsset(req.params.id);
@@ -434,6 +616,21 @@ router.post('/:id/delete', requireMaintenance, (req, res) => {
   const asset = Asset.findById(req.params.id);
   const returnTo = req.body.returnTo || req.get('Referer') || '/assets';
   try {
+    // Block deletion of immersion_tank if linked rack has assets inside
+    if (asset && asset.asset_type === 'immersion_tank') {
+      const linkedRack = Rack.findByLinkedAsset(asset.id);
+      if (linkedRack) {
+        const { getDb } = require('../config/database');
+        const rackAssetCount = getDb().prepare(
+          "SELECT COUNT(*) as cnt FROM assets WHERE rack_id = ? AND status NOT IN ('decommissioned')"
+        ).get(linkedRack.id);
+        if (rackAssetCount && rackAssetCount.cnt > 0) {
+          throw new Error('탱크 내부에 장비 ' + rackAssetCount.cnt + '대가 배치되어 있어 삭제할 수 없습니다. 먼저 장비를 제거해주세요.');
+        }
+        // Delete linked rack if empty
+        Rack.delete(linkedRack.id);
+      }
+    }
     Asset.delete(req.params.id);
     AuditLog.log(req, { action: 'delete', targetType: 'asset', targetId: req.params.id, targetLabel: asset ? (asset.asset_number || asset.model_name) : req.params.id });
     req.flash('success', '자산이 삭제되었습니다.');

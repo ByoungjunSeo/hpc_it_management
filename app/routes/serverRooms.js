@@ -6,45 +6,51 @@ const Asset = require('../models/asset');
 const AssetIp = require('../models/assetIp');
 const AssetCredential = require('../models/assetCredential');
 const ComputingModule = require('../models/computingModule');
+const ModuleInventory = require('../models/moduleInventory');
 const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
 
-// List server rooms with mini rack visualization (server_room type only)
+// List server rooms with mini rack visualization (server_room only)
 router.get('/', (req, res) => {
-  const rooms = ServerRoom.findAll('server_room');
+  const rooms = ServerRoom.findAll()
+    .filter(r => r.location_type === 'server_room');
 
   rooms.forEach(room => {
     const racks = Rack.findByRoom(room.id);
     racks.forEach(rack => {
-      const assets = Asset.findByRack(rack.id);
-      const slotMap = {};
+      const assets = Asset.findByRack(rack.id, { includeInactive: true });
+      const uMap = {};
       assets.forEach(asset => {
-        if (!asset.rack_unit_start) return;
+        if (!asset.rack_unit_start || asset.parent_asset_id) return;
         const startSlot = asset.rack_unit_start;
         const slotSize = asset.rack_unit_size || 3;
+        const startU = Math.floor((startSlot - 1) / 3) + 1;
+        const sizeU = Math.ceil(slotSize / 3);
         const side = asset.blade_slot || 'full';
-        for (let s = startSlot; s < startSlot + slotSize; s++) {
-          if (!slotMap[s]) slotMap[s] = { full: null, left: null, right: null };
+        for (let u = startU; u < startU + sizeU; u++) {
+          if (!uMap[u]) uMap[u] = { full: null, left: null, right: null };
           const info = {
             asset_id: asset.id,
             asset_type: asset.asset_type,
             ownership: asset.ownership,
+            status: asset.status,
             name: asset.asset_number || asset.model_name || '',
+            management_number: asset.management_number || '',
             assigned_user: asset.assigned_user || '',
             purpose: asset.purpose || '',
             ip_address: asset.ip_address || '',
             blade_slot: asset.blade_slot,
             rack_unit_start: asset.rack_unit_start,
-            is_start: s === startSlot,
-            slot_size: slotSize
+            startU: startU,
+            sizeU: sizeU
           };
-          if (side === 'full') slotMap[s].full = info;
-          else slotMap[s][side] = info;
+          if (side === 'full') uMap[u].full = info;
+          else uMap[u][side] = info;
         }
       });
-      rack.slotMap = slotMap;
-      rack.totalSlots = (rack.total_units || 42) * 3;
+      rack.uMap = uMap;
+      rack.totalUnits = rack.total_units || 42;
       rack.assetList = assets;
     });
     room.racks = racks;
@@ -85,7 +91,7 @@ router.post('/:id/edit', requireMaintenance, (req, res) => {
   } catch (err) {
     req.flash('error', '수정 실패: ' + err.message);
   }
-  res.redirect('/rooms');
+  res.redirect(req.body.returnTo || '/rooms');
 });
 
 // Server room detail - rack layout
@@ -96,13 +102,17 @@ router.get('/:id', (req, res) => {
     return res.redirect('/rooms');
   }
   const racks = Rack.findByRoom(room.id);
+  // For storage-type rooms, load module inventory with storage quantities
+  const storageModules = room.location_type === 'storage' ? ModuleInventory.findStorageModules() : [];
   res.render('racks/room', {
     title: room.name,
     currentPath: '/rooms',
     extraCss: 'rack.css',
     extraJs: 'rack-view.js',
     room,
-    racks
+    racks,
+    storageModules,
+    appConfig
   });
 });
 
@@ -125,6 +135,30 @@ router.get('/:id/assets', (req, res) => {
     extraCss: null,
     room,
     assets,
+    appConfig
+  });
+});
+
+// Room module overview
+router.get('/:id/modules', (req, res) => {
+  const room = ServerRoom.findById(req.params.id);
+  if (!room) {
+    req.flash('error', '서버실을 찾을 수 없습니다.');
+    return res.redirect('/rooms');
+  }
+  const racks = Rack.findByRoom(room.id);
+  racks.forEach(rack => {
+    rack.assets = Asset.findByRack(rack.id);
+    rack.assets.forEach(a => {
+      a.modules = ComputingModule.findByAsset(a.id);
+    });
+  });
+  res.render('racks/room-modules', {
+    title: room.name + ' 모듈 현황',
+    currentPath: '/rooms',
+    extraCss: null,
+    room,
+    racks,
     appConfig
   });
 });

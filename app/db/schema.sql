@@ -17,9 +17,13 @@ CREATE TABLE IF NOT EXISTS racks (
     row_position INTEGER DEFAULT 1,
     col_position INTEGER DEFAULT 1,
     description TEXT,
+    rack_type TEXT DEFAULT 'standard',
+    linked_asset_id INTEGER,
+    switch_slots INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (room_id) REFERENCES server_rooms(id) ON DELETE CASCADE
+    FOREIGN KEY (room_id) REFERENCES server_rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (linked_asset_id) REFERENCES assets(id) ON DELETE SET NULL
 );
 
 -- Vendor Info
@@ -42,7 +46,7 @@ CREATE TABLE IF NOT EXISTS assets (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     asset_number TEXT UNIQUE,
     management_number TEXT,
-    asset_type TEXT NOT NULL CHECK(asset_type IN ('server', 'switch', 'pdu', 'ups', 'storage', 'other')),
+    asset_type TEXT NOT NULL CHECK(asset_type IN ('server', 'switch', 'pdu', 'ups', 'storage', 'kvm', 'immersion_tank', 'cdu', 'chiller', 'other')),
     ownership TEXT NOT NULL DEFAULT 'company' CHECK(ownership IN ('company', 'vendor')),
     vendor_id INTEGER,
     model_name TEXT,
@@ -51,7 +55,8 @@ CREATE TABLE IF NOT EXISTS assets (
     rack_id INTEGER,
     rack_unit_start INTEGER,
     rack_unit_size INTEGER DEFAULT 3,
-    blade_slot TEXT CHECK(blade_slot IN ('left','right')),
+    parent_asset_id INTEGER,
+    blade_slot TEXT,
     ip_address TEXT,
     ssh_port INTEGER DEFAULT 22,
     ssh_user TEXT DEFAULT 'root',
@@ -65,14 +70,15 @@ CREATE TABLE IF NOT EXISTS assets (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (rack_id) REFERENCES racks(id) ON DELETE SET NULL,
-    FOREIGN KEY (vendor_id) REFERENCES vendor_info(id) ON DELETE SET NULL
+    FOREIGN KEY (vendor_id) REFERENCES vendor_info(id) ON DELETE SET NULL,
+    FOREIGN KEY (parent_asset_id) REFERENCES assets(id) ON DELETE CASCADE
 );
 
 -- Computing Modules
 CREATE TABLE IF NOT EXISTS computing_modules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     asset_id INTEGER NOT NULL,
-    module_type TEXT NOT NULL CHECK(module_type IN ('cpu', 'memory', 'disk', 'network', 'raid', 'gpu')),
+    module_type TEXT NOT NULL CHECK(module_type IN ('cpu', 'memory', 'disk', 'network', 'raid', 'gpu', 'psu')),
     model TEXT,
     manufacturer TEXT,
     capacity TEXT,
@@ -181,7 +187,31 @@ CREATE TABLE IF NOT EXISTS module_inventory (
     total_quantity INTEGER DEFAULT 0,
     in_use_quantity INTEGER DEFAULT 0,
     spare_quantity INTEGER DEFAULT 0,
+    asset_number TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Module Inventory Logs (부품 이력)
+CREATE TABLE IF NOT EXISTS module_inventory_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_code TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    quantity_change INTEGER DEFAULT 0,
+    before_total INTEGER,
+    after_total INTEGER,
+    before_spare INTEGER,
+    after_spare INTEGER,
+    asset_id INTEGER,
+    asset_label TEXT,
+    from_asset_id INTEGER,
+    from_asset_label TEXT,
+    to_asset_id INTEGER,
+    to_asset_label TEXT,
+    asset_number TEXT,
+    user_id INTEGER,
+    username TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- 업체 서버 입고 신청
@@ -221,8 +251,10 @@ CREATE INDEX IF NOT EXISTS idx_vendor_intake_token ON vendor_intake_requests(tok
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_assets_rack ON assets(rack_id);
+-- idx_racks_linked_asset is created by migration (linked_asset_id may not exist on older DBs)
 CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(asset_type);
 CREATE INDEX IF NOT EXISTS idx_assets_ownership ON assets(ownership);
+-- idx_assets_parent is created by migration (parent_asset_id may not exist on older DBs)
 CREATE INDEX IF NOT EXISTS idx_computing_modules_asset ON computing_modules(asset_id);
 CREATE INDEX IF NOT EXISTS idx_computing_modules_type ON computing_modules(module_type);
 CREATE INDEX IF NOT EXISTS idx_ip_addresses_subnet ON ip_addresses(subnet);
@@ -235,6 +267,8 @@ CREATE INDEX IF NOT EXISTS idx_asset_credentials_asset ON asset_credentials(asse
 CREATE INDEX IF NOT EXISTS idx_lendings_status ON lendings(status);
 CREATE INDEX IF NOT EXISTS idx_lending_items_lending ON lending_items(lending_id);
 CREATE INDEX IF NOT EXISTS idx_module_inventory_type ON module_inventory(module_type);
+CREATE INDEX IF NOT EXISTS idx_mil_item_code ON module_inventory_logs(item_code);
+CREATE INDEX IF NOT EXISTS idx_mil_created_at ON module_inventory_logs(created_at);
 
 -- Power Nodes (전력 분배 계통)
 CREATE TABLE IF NOT EXISTS power_nodes (

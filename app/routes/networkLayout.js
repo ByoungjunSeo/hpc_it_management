@@ -6,6 +6,8 @@ const Rack = require('../models/rack');
 const Asset = require('../models/asset');
 const Vendor = require('../models/vendor');
 const appConfig = require('../config/app');
+const { requireMaintenance } = require('../middleware/auth');
+const AuditLog = require('../models/auditLog');
 
 // List server rooms for network layout
 router.get('/', (req, res) => {
@@ -36,7 +38,7 @@ router.get('/:roomId', (req, res) => {
   const racks = Rack.findByRoom(room.id);
   const allConnections = NetworkConnection.findByRoom(room.id);
   const stats = NetworkConnection.getStats(room.id);
-  const assets = Asset.findAll({ room_id: room.id });
+  const assets = Asset.findAll({ room_id: room.id }).filter(a => a.status !== 'inactive' && a.status !== 'returned');
   const vendors = Vendor.findAll();
 
   // All switches in this room
@@ -91,7 +93,7 @@ router.get('/:roomId', (req, res) => {
 });
 
 // Add connection
-router.post('/:roomId/connections', (req, res) => {
+router.post('/:roomId/connections', requireMaintenance, (req, res) => {
   try {
     NetworkConnection.create({
       room_id: req.params.roomId,
@@ -109,6 +111,7 @@ router.post('/:roomId/connections', (req, res) => {
       status: req.body.status || 'active',
       description: req.body.description || null
     });
+    AuditLog.log(req, { action: 'create', targetType: 'network_connection', targetLabel: req.body.from_port + ' -> ' + req.body.to_port });
     req.flash('success', '연결이 추가되었습니다.');
   } catch (err) {
     req.flash('error', '추가 실패: ' + err.message);
@@ -116,24 +119,35 @@ router.post('/:roomId/connections', (req, res) => {
   res.redirect('/network-layout/' + req.params.roomId);
 });
 
-// Batch move connections to a different switch
-router.post('/connections/batch-move', (req, res) => {
+// Batch move connections (switch change and/or cable group change)
+router.post('/connections/batch-move', requireMaintenance, (req, res) => {
   try {
-    const { conn_ids, old_switch_id, new_switch_id, room_id } = req.body;
-    if (!conn_ids || !Array.isArray(conn_ids) || !old_switch_id || !new_switch_id) {
+    const { conn_ids, old_switch_id, new_switch_id, speed, cable_type } = req.body;
+    if (!conn_ids || !Array.isArray(conn_ids) || conn_ids.length === 0) {
       return res.status(400).json({ error: '잘못된 요청입니다.' });
     }
-    conn_ids.forEach(id => {
-      NetworkConnection.moveToSwitch(id, old_switch_id, new_switch_id);
-    });
-    res.json({ success: true });
+    let switchMoved = 0;
+    let fieldsChanged = 0;
+    // Switch move
+    if (new_switch_id && old_switch_id && Number(new_switch_id) !== Number(old_switch_id)) {
+      const results = conn_ids.map(id => NetworkConnection.moveToSwitch(id, old_switch_id, new_switch_id));
+      switchMoved = results.filter(r => r && r.updated).length;
+    }
+    // Cable group change (speed / cable_type)
+    const fieldUpdates = {};
+    if (speed !== undefined) fieldUpdates.speed = speed;
+    if (cable_type !== undefined) fieldUpdates.cable_type = cable_type;
+    if (Object.keys(fieldUpdates).length > 0) {
+      fieldsChanged = NetworkConnection.batchUpdateFields(conn_ids, fieldUpdates);
+    }
+    res.json({ success: true, switchMoved, fieldsChanged });
   } catch (err) {
     res.status(500).json({ error: '이동 실패: ' + err.message });
   }
 });
 
 // Update connection
-router.post('/connections/:id', (req, res) => {
+router.post('/connections/:id', requireMaintenance, (req, res) => {
   try {
     const conn = NetworkConnection.findById(req.params.id);
     if (!conn) {
@@ -155,6 +169,7 @@ router.post('/connections/:id', (req, res) => {
       status: req.body.status || 'active',
       description: req.body.description || null
     });
+    AuditLog.log(req, { action: 'update', targetType: 'network_connection', targetId: req.params.id });
     req.flash('success', '연결이 수정되었습니다.');
     res.redirect('/network-layout/' + conn.room_id);
   } catch (err) {
@@ -164,7 +179,7 @@ router.post('/connections/:id', (req, res) => {
 });
 
 // Delete connection
-router.post('/connections/:id/delete', (req, res) => {
+router.post('/connections/:id/delete', requireMaintenance, (req, res) => {
   try {
     const conn = NetworkConnection.findById(req.params.id);
     if (!conn) {
@@ -173,6 +188,7 @@ router.post('/connections/:id/delete', (req, res) => {
     }
     const roomId = conn.room_id;
     NetworkConnection.delete(req.params.id);
+    AuditLog.log(req, { action: 'delete', targetType: 'network_connection', targetId: req.params.id });
     req.flash('success', '연결이 삭제되었습니다.');
     res.redirect('/network-layout/' + roomId);
   } catch (err) {

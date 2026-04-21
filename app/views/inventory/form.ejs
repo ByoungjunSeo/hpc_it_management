@@ -50,9 +50,16 @@
             <input type="text" name="management_number" id="invMgmtInput" class="form-control" list="mgmt-list" value="<%= l.management_number || '' %>" required autocomplete="off">
             <datalist id="mgmt-list">
                 <% if (typeof assets !== 'undefined') { assets.forEach(a => { if (a.management_number) { %>
-                <option value="<%= a.management_number %>" data-asset-id="<%= a.id %>"><%= a.management_number %> - <%= a.model_name || '' %></option>
+                <option value="<%= a.management_number %>" data-asset-id="<%= a.id %>"><%= a.management_number %> - <%= a.model_name || '' %><%= a.parent_asset_id ? ' [노드]' : '' %></option>
                 <% }}) } %>
             </datalist>
+            <!-- Node selector: appears when a chassis with children is selected -->
+            <div id="nodeSelectArea" style="display:none; margin-top:6px;">
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                    <small style="color:#3b82f6; font-weight:600;">섀시 노드 선택:</small>
+                    <span id="nodeSelectButtons"></span>
+                </div>
+            </div>
         </div>
         <div class="form-group" id="assetNumGroup">
             <label>자산번호</label>
@@ -113,6 +120,34 @@
         <div class="form-group">
             <label>상세시험명</label>
             <input type="text" name="test_detail" class="form-control" value="<%= l.test_detail || '' %>">
+        </div>
+    </div>
+</div>
+
+<!-- Infrastructure equipment (immersion_tank) capacity section -->
+<div class="card" id="tankSection" style="display:none">
+    <div class="card-header"><h2>탱크 용량</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>서버 수용 U수</label>
+            <input type="number" name="tank_capacity_u" id="tankCapacityU" class="form-control" value="<%= (typeof linkedRack !== 'undefined' && linkedRack) ? linkedRack.total_units : 42 %>" min="1" max="100">
+        </div>
+        <div class="form-group">
+            <label>스위치 슬롯</label>
+            <input type="number" name="switch_slots" id="tankSwitchSlots" class="form-control" value="<%= (typeof linkedRack !== 'undefined' && linkedRack) ? linkedRack.switch_slots : 0 %>" min="0" max="20">
+        </div>
+    </div>
+</div>
+
+<!-- Connected infrastructure asset (CDU→탱크, 칠러→CDU/탱크) -->
+<div class="card" id="infraLinkSection" style="display:none">
+    <div class="card-header"><h2>연결 설비</h2></div>
+    <div class="form-row">
+        <div class="form-group" style="flex:2">
+            <label id="infraLinkLabel">연결 대상</label>
+            <select name="linked_infra_asset_id" id="infraLinkSelect" class="form-control">
+                <option value="">미지정</option>
+            </select>
         </div>
     </div>
 </div>
@@ -271,8 +306,9 @@
         </div>
         <% }) %>
     </div>
-    <div style="margin-bottom:16px;">
+    <div style="margin-bottom:16px; display:flex; gap:8px;">
         <button type="button" class="btn btn-sm btn-outline" onclick="addInvIpRow()">+ IP 추가</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="openInvIpModal()" style="color:var(--primary);">가용 IP 조회</button>
     </div>
 </div>
 
@@ -301,12 +337,13 @@
             <input type="text" id="invRoomManualInput" class="form-control" value="<%= (l.room && !serverRooms.some(r => r.name === l.room)) ? l.room : '' %>" placeholder="장소명 입력">
         </div>
         <input type="hidden" name="room" id="invRoomHidden" value="<%= l.room || '' %>">
+        <span id="rackUnitGroup">
         <div class="form-group">
             <label>Rack</label>
             <select id="invRackSelect" class="form-control" onchange="onInvRackChange()">
                 <option value="">선택</option>
                 <% racks.forEach(r => { %>
-                <option value="<%= r.name %>" data-room-id="<%= r.room_id %>" <%= l.rack === r.name ? 'selected' : '' %>><%= r.room_name %> - <%= r.name %></option>
+                <option value="<%= r.name %>" data-room-id="<%= r.room_id %>" data-rack-id="<%= r.id %>" data-rack-type="<%= r.rack_type || 'standard' %>" data-switch-slots="<%= r.switch_slots || 0 %>" <%= l.rack === r.name ? 'selected' : '' %>><%= r.room_name %> - <%= r.name %><%= r.rack_type === 'immersion' ? ' 💧' : '' %></option>
                 <% }) %>
                 <option value="__manual__" <%= (l.rack && !racks.some(r => r.name === l.rack)) ? 'selected' : '' %>>직접 입력</option>
             </select>
@@ -316,10 +353,42 @@
             <input type="text" id="invRackManualInput" class="form-control" value="<%= (l.rack && !racks.some(r => r.name === l.rack)) ? l.rack : '' %>" placeholder="랙 이름 입력">
         </div>
         <input type="hidden" name="rack" id="invRackHidden" value="<%= l.rack || '' %>">
-        <div class="form-group">
+        <div class="form-group" id="invUnitGroup">
             <label>Unit</label>
             <input type="text" name="unit" class="form-control" value="<%= l.unit || '' %>" placeholder="예: U1-U4">
         </div>
+        <div class="form-group" id="invSwitchSlotGroup" style="display:none;">
+            <label>스위치 슬롯</label>
+            <select name="switch_slot" id="invSwitchSlotSelect" class="form-control">
+                <option value="">선택</option>
+            </select>
+            <small class="text-muted" style="display:block; margin-top:4px;">액침탱크 상단 스위치 전용 슬롯</small>
+        </div>
+        </span>
+    </div>
+    <!-- 랙 미리보기 -->
+    <div id="invRackPreview" style="display:none; margin-top:12px; padding:0 8px 8px;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+            <strong style="font-size:13px;">랙 미리보기</strong>
+            <small style="color:#64748b;" id="invRackPreviewInfo"></small>
+            <div style="display:flex; align-items:center; gap:4px; margin-left:12px;">
+                <label style="font-size:12px; color:#475569; font-weight:600; white-space:nowrap;">배치 크기:</label>
+                <input type="number" id="invPlaceUSize" min="1" max="42" value="1" style="width:50px; padding:2px 6px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="onInvPlaceUSizeChange()">
+                <span style="font-size:12px; color:#64748b;">U</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:4px; margin-left:8px;">
+                <label style="font-size:12px; color:#475569; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap;">
+                    <input type="checkbox" id="invShelfCheck" onchange="onInvShelfToggle()" style="margin:0;">
+                    <span>선반 포함</span>
+                </label>
+                <span id="invShelfUSizeWrap" style="display:none; margin-left:2px;">
+                    <input type="number" id="invShelfUSize" min="1" max="10" value="1" style="width:42px; padding:2px 4px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="onInvPlaceUSizeChange()">
+                    <span style="font-size:12px; color:#64748b;">U</span>
+                </span>
+            </div>
+            <small style="color:#94a3b8; margin-left:auto;">빈 칸 클릭 → Unit 자동 입력</small>
+        </div>
+        <div id="invRackPreviewContainer" style="max-height:500px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:4px; background:#f8fafc;"></div>
     </div>
 </div>
 
@@ -404,15 +473,23 @@
         %>
         <% if (hwItems.length > 0) { %>
         <div class="form-row hw-row-header" style="font-weight:600; font-size:13px; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:8px;">
-            <div class="form-group" style="flex:0 0 140px; margin-bottom:0;"><label>유형</label></div>
+            <div class="form-group" style="flex:0 0 90px; margin-bottom:0;"><label>소유</label></div>
+            <div class="form-group" style="flex:0 0 120px; margin-bottom:0;"><label>유형</label></div>
             <div class="form-group" style="flex:2; margin-bottom:0;"><label>부품 코드</label></div>
             <div class="form-group" style="flex:0 0 80px; margin-bottom:0;"><label>수량</label></div>
+            <div class="form-group hw-role-header" style="flex:0 0 100px; margin-bottom:0; <%= hwItems.some(h => h.type === 'psu') ? '' : 'display:none;' %>"><label>역할</label></div>
             <div class="form-group" style="flex:0 0 50px; margin-bottom:0;"></div>
         </div>
         <% } %>
         <% hwItems.forEach((hw, idx) => { %>
         <div class="form-row inv-hw-row" style="align-items:center;">
-            <div class="form-group" style="flex:0 0 140px; margin-bottom:8px;">
+            <div class="form-group" style="flex:0 0 90px; margin-bottom:8px;">
+                <select name="hw_ownerships[]" class="form-control" onchange="onHwOwnerChange(this)">
+                    <option value="company" <%= (hw.ownership || 'company') === 'company' ? 'selected' : '' %>>자사</option>
+                    <option value="vendor" <%= hw.ownership === 'vendor' ? 'selected' : '' %>>업체</option>
+                </select>
+            </div>
+            <div class="form-group" style="flex:0 0 120px; margin-bottom:8px;">
                 <select name="hw_types[]" class="form-control" onchange="onHwTypeChange(this)">
                     <% appConfig.moduleTypes.forEach(mt => { %>
                     <option value="<%= mt.value %>" <%= hw.type === mt.value ? 'selected' : '' %>><%= mt.label %></option>
@@ -420,11 +497,19 @@
                 </select>
             </div>
             <div class="form-group" style="flex:2; margin-bottom:8px;">
-                <input type="text" name="hw_codes[]" class="form-control" list="hw-list-<%= hw.type %>" value="<%= hw.code || '' %>" placeholder="코드 선택 또는 직접 입력">
+                <input type="text" name="hw_codes[]" class="form-control" <%= (hw.ownership || 'company') === 'company' ? 'list="hw-list-' + hw.type + '"' : '' %> value="<%= hw.code || '' %>" placeholder="<%= hw.ownership === 'vendor' ? '모델명 직접 입력' : '코드 선택 또는 직접 입력' %>">
             </div>
             <div class="form-group" style="flex:0 0 80px; margin-bottom:8px;">
                 <input type="number" name="hw_nums[]" class="form-control" value="<%= hw.num || '' %>" min="0" placeholder="수량">
             </div>
+            <div class="form-group hw-role-cell" style="flex:0 0 100px; margin-bottom:8px; <%= hw.type === 'psu' ? '' : 'display:none;' %>">
+                <select name="hw_roles[]" class="form-control">
+                    <option value="" <%= !hw.role ? 'selected' : '' %>>-</option>
+                    <option value="active" <%= hw.role === 'active' ? 'selected' : '' %>>Active</option>
+                    <option value="standby" <%= hw.role === 'standby' ? 'selected' : '' %>>Standby</option>
+                </select>
+            </div>
+            <input type="hidden" name="hw_roles_flag[]" value="<%= hw.type === 'psu' ? (hw.role || '') : '' %>">
             <div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">
                 <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.inv-hw-row').remove(); updateHwHeader();">X</button>
             </div>
@@ -438,6 +523,7 @@
         <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('network')">+ NIC</button>
         <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('raid')">+ RAID</button>
         <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('gpu')">+ GPU</button>
+        <button type="button" class="btn btn-sm btn-outline" onclick="addHwRow('psu')">+ PSU</button>
     </div>
 </div>
 </div><!-- /hardwareSection -->
@@ -457,12 +543,35 @@
     </div>
 </div>
 
+<input type="hidden" name="shelf_size" id="invShelfSizeHidden" value="0">
+
 <div class="form-actions" style="margin-bottom:24px;">
     <button type="submit" class="btn btn-primary"><%= isEdit ? '수정' : '등록' %></button>
     <a href="/inventory" class="btn btn-secondary">취소</a>
 </div>
 
 </form>
+
+<!-- 가용 IP 조회 모달 -->
+<div id="invIpModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">
+  <div style="background:#fff; border-radius:8px; padding:24px; max-width:480px; width:90%; max-height:70vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <h3 style="margin:0; font-size:16px;">가용 IP 조회</h3>
+      <button type="button" onclick="closeInvIpModal()" style="background:none; border:none; font-size:20px; cursor:pointer; color:#64748b;">&times;</button>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:13px; font-weight:600; margin-bottom:4px; display:block;">서브넷 선택</label>
+      <select id="invIpSubnetSelect" class="form-control" onchange="loadInvAvailableIps()">
+        <option value="">서브넷 선택</option>
+        <% appConfig.subnets.forEach(s => { %>
+        <option value="<%= s.subnet %>"><%= s.label %> (<%= s.subnet %>)</option>
+        <% }) %>
+      </select>
+    </div>
+    <div id="invIpList" style="max-height:300px; overflow-y:auto;"></div>
+    <div id="invIpLoading" style="display:none; text-align:center; padding:20px; color:#64748b;">조회 중...</div>
+  </div>
+</div>
 
 <script>
 // Module type values for detection
@@ -474,6 +583,35 @@ function isModuleType(val) {
 
 // Module inventory items for datalist
 var _moduleInventoryItems = <%- JSON.stringify(typeof moduleInventoryItems !== 'undefined' ? moduleInventoryItems : []) %>;
+
+// Infrastructure asset types (no rack placement, no network/credentials)
+var infraTypes = ['immersion_tank', 'cdu', 'chiller'];
+function isInfraType(val) { return infraTypes.indexOf(val) !== -1; }
+
+// Infrastructure assets for linking (CDU→tank, chiller→CDU/tank)
+var _infraAssets = <%- JSON.stringify((typeof assets !== 'undefined' ? assets : []).filter(a => ['immersion_tank','cdu'].includes(a.asset_type) && a.status === 'active').map(a => ({ id: a.id, type: a.asset_type, mgmt: a.management_number || '', model: a.model_name || '', room: a.room_name || '' }))) %>;
+
+function populateInfraLinkSelect(assetType) {
+    var sel = document.getElementById('infraLinkSelect');
+    var label = document.getElementById('infraLinkLabel');
+    sel.innerHTML = '<option value="">미지정</option>';
+
+    var filterTypes = [];
+    if (assetType === 'cdu' || assetType === 'chiller') {
+        filterTypes = ['immersion_tank'];
+        label.textContent = '연결 액침탱크';
+    }
+
+    var typeLabels = { immersion_tank: '액침탱크', cdu: 'CDU' };
+    _infraAssets.forEach(function(a) {
+        if (filterTypes.indexOf(a.type) !== -1) {
+            var opt = document.createElement('option');
+            opt.value = a.id;
+            opt.textContent = '[' + (typeLabels[a.type] || a.type) + '] ' + a.mgmt + (a.model ? ' (' + a.model + ')' : '') + (a.room ? ' - ' + a.room : '');
+            sel.appendChild(opt);
+        }
+    });
+}
 
 // === Asset Type Change (usage form) ===
 function onUsageTypeChange() {
@@ -489,6 +627,10 @@ function onUsageTypeChange() {
     var locationModule = document.getElementById('locationModule');
     var osGroup = document.getElementById('osGroup');
     var assetNumGroup = document.getElementById('assetNumGroup');
+    var tankSection = document.getElementById('tankSection');
+    var infraLinkSection = document.getElementById('infraLinkSection');
+    var rackUnitGroup = document.getElementById('rackUnitGroup');
+    var invRackPreview = document.getElementById('invRackPreview');
 
     if (isModuleType(val)) {
         // Module mode: hide equipment-only sections
@@ -498,9 +640,34 @@ function onUsageTypeChange() {
         locationModule.style.display = '';
         osGroup.style.display = 'none';
         assetNumGroup.style.display = 'none';
+        tankSection.style.display = 'none';
+        infraLinkSection.style.display = 'none';
 
         // Update management_number datalist to show module_inventory items
         updateModuleMgmtDatalist(val);
+    } else if (isInfraType(val)) {
+        // Infrastructure mode: hide credentials/network/hardware, show room only
+        equipSections.style.display = 'none';
+        hardwareSection.style.display = 'none';
+        locationEquipment.style.display = '';
+        locationModule.style.display = 'none';
+        osGroup.style.display = 'none';
+        assetNumGroup.style.display = '';
+        // Hide rack/unit selectors, show only room
+        rackUnitGroup.style.display = 'none';
+        invRackPreview.style.display = 'none';
+        // Show tank section only for immersion_tank
+        tankSection.style.display = (val === 'immersion_tank') ? '' : 'none';
+        // Show infra link section for cdu/chiller
+        if (val === 'cdu' || val === 'chiller') {
+            infraLinkSection.style.display = '';
+            populateInfraLinkSelect(val);
+        } else {
+            infraLinkSection.style.display = 'none';
+        }
+
+        // Restore asset datalist
+        restoreAssetDatalist();
     } else {
         // Equipment mode: show all
         equipSections.style.display = '';
@@ -509,6 +676,9 @@ function onUsageTypeChange() {
         locationModule.style.display = 'none';
         osGroup.style.display = '';
         assetNumGroup.style.display = '';
+        tankSection.style.display = 'none';
+        infraLinkSection.style.display = 'none';
+        rackUnitGroup.style.display = '';
 
         // Restore asset datalist
         restoreAssetDatalist();
@@ -618,12 +788,21 @@ if (moduleStorageLoc) {
 var hwTypeOptions = '<% appConfig.moduleTypes.forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %>';
 var hwTypeLabels = {<% appConfig.moduleTypes.forEach((t, i) => { %>'<%= t.value %>':'<%= t.label %>'<% if (i < appConfig.moduleTypes.length - 1) { %>,<% } %><% }) %>};
 
+var hwOwnerOptions = '<option value="company">자사</option><option value="vendor">업체</option>';
+
 function addHwRow(defaultType) {
     var container = document.getElementById('hwRows');
-    // Add header if this is the first row
     updateHwHeader();
+    var isPsu = (defaultType === 'psu');
+    var roleHtml = '<div class="form-group hw-role-cell" style="flex:0 0 100px; margin-bottom:8px; ' + (isPsu ? '' : 'display:none;') + '">' +
+        '<select name="hw_roles[]" class="form-control"><option value="">-</option><option value="active"' + (isPsu ? ' selected' : '') + '>Active</option><option value="standby">Standby</option></select>' +
+        '</div>' +
+        '<input type="hidden" name="hw_roles_flag[]" value="">';
     var html = '<div class="form-row inv-hw-row" style="align-items:center;">' +
-        '<div class="form-group" style="flex:0 0 140px; margin-bottom:8px;">' +
+        '<div class="form-group" style="flex:0 0 90px; margin-bottom:8px;">' +
+        '<select name="hw_ownerships[]" class="form-control" onchange="onHwOwnerChange(this)">' + hwOwnerOptions + '</select>' +
+        '</div>' +
+        '<div class="form-group" style="flex:0 0 120px; margin-bottom:8px;">' +
         '<select name="hw_types[]" class="form-control" onchange="onHwTypeChange(this)">' + hwTypeOptions + '</select>' +
         '</div>' +
         '<div class="form-group" style="flex:2; margin-bottom:8px;">' +
@@ -632,12 +811,12 @@ function addHwRow(defaultType) {
         '<div class="form-group" style="flex:0 0 80px; margin-bottom:8px;">' +
         '<input type="number" name="hw_nums[]" class="form-control" min="0" placeholder="수량">' +
         '</div>' +
+        roleHtml +
         '<div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">' +
         '<button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.inv-hw-row\').remove(); updateHwHeader();">X</button>' +
         '</div>' +
         '</div>';
     container.insertAdjacentHTML('beforeend', html);
-    // Set the default type in the newly added row
     var rows = container.querySelectorAll('.inv-hw-row');
     var lastRow = rows[rows.length - 1];
     var sel = lastRow.querySelector('select[name="hw_types[]"]');
@@ -646,16 +825,63 @@ function addHwRow(defaultType) {
             if (sel.options[i].value === defaultType) { sel.selectedIndex = i; break; }
         }
     }
+    if (isPsu) showRoleColumn();
     updateHwHeader();
 }
 
 function onHwTypeChange(sel) {
-    // Update the datalist on the code input to match the selected type
     var row = sel.closest('.inv-hw-row');
     var codeInput = row.querySelector('input[name="hw_codes[]"]');
+    var ownerSel = row.querySelector('select[name="hw_ownerships[]"]');
+    var isVendor = ownerSel && ownerSel.value === 'vendor';
     if (codeInput) {
-        codeInput.setAttribute('list', 'hw-list-' + sel.value);
+        if (isVendor) {
+            codeInput.removeAttribute('list');
+        } else {
+            codeInput.setAttribute('list', 'hw-list-' + sel.value);
+        }
         codeInput.value = '';
+    }
+    // Show/hide role cell for PSU
+    var roleCell = row.querySelector('.hw-role-cell');
+    if (roleCell) {
+        roleCell.style.display = (sel.value === 'psu') ? '' : 'none';
+        if (sel.value !== 'psu') {
+            var roleSel = roleCell.querySelector('select');
+            if (roleSel) roleSel.value = '';
+        }
+    }
+    updateRoleColumnVisibility();
+}
+
+function showRoleColumn() {
+    var header = document.querySelector('.hw-role-header');
+    if (header) header.style.display = '';
+}
+
+function updateRoleColumnVisibility() {
+    var rows = document.querySelectorAll('.inv-hw-row');
+    var hasPsu = false;
+    rows.forEach(function(r) {
+        var typeSel = r.querySelector('select[name="hw_types[]"]');
+        if (typeSel && typeSel.value === 'psu') hasPsu = true;
+    });
+    var header = document.querySelector('.hw-role-header');
+    if (header) header.style.display = hasPsu ? '' : 'none';
+}
+
+function onHwOwnerChange(sel) {
+    var row = sel.closest('.inv-hw-row');
+    var codeInput = row.querySelector('input[name="hw_codes[]"]');
+    var typeSel = row.querySelector('select[name="hw_types[]"]');
+    if (!codeInput) return;
+    if (sel.value === 'vendor') {
+        codeInput.removeAttribute('list');
+        codeInput.placeholder = '모델명 직접 입력';
+    } else {
+        var hwType = typeSel ? typeSel.value : 'cpu';
+        codeInput.setAttribute('list', 'hw-list-' + hwType);
+        codeInput.placeholder = '코드 선택 또는 직접 입력';
     }
 }
 
@@ -665,7 +891,8 @@ function updateHwHeader() {
     var header = container.querySelector('.hw-row-header');
     if (rows.length > 0 && !header) {
         var hdr = '<div class="form-row hw-row-header" style="font-weight:600; font-size:13px; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:8px;">' +
-            '<div class="form-group" style="flex:0 0 140px; margin-bottom:0;"><label>유형</label></div>' +
+            '<div class="form-group" style="flex:0 0 90px; margin-bottom:0;"><label>소유</label></div>' +
+            '<div class="form-group" style="flex:0 0 120px; margin-bottom:0;"><label>유형</label></div>' +
             '<div class="form-group" style="flex:2; margin-bottom:0;"><label>부품 코드</label></div>' +
             '<div class="form-group" style="flex:0 0 80px; margin-bottom:0;"><label>수량</label></div>' +
             '<div class="form-group" style="flex:0 0 50px; margin-bottom:0;"></div>' +
@@ -802,19 +1029,88 @@ function onInvRoomChange() {
     filterInvRacks();
 }
 
+var _pendingBladeSlot = '';  // blade_slot to pre-select after rack change
+
 function onInvRackChange() {
     var sel = document.getElementById('invRackSelect');
     var manualGroup = document.getElementById('invRackManualGroup');
     var hidden = document.getElementById('invRackHidden');
+    var unitGroup = document.getElementById('invUnitGroup');
+    var switchSlotGroup = document.getElementById('invSwitchSlotGroup');
+    var switchSlotSelect = document.getElementById('invSwitchSlotSelect');
+
     if (sel.value === '__manual__') {
         manualGroup.style.display = '';
         document.getElementById('invRackManualInput').focus();
         hidden.value = document.getElementById('invRackManualInput').value;
+        document.getElementById('invRackPreview').style.display = 'none';
+        unitGroup.style.display = '';
+        switchSlotGroup.style.display = 'none';
     } else {
         manualGroup.style.display = 'none';
         hidden.value = sel.value;
+
+        // Check if selected rack is immersion type with switch slots
+        var selOpt = sel.options[sel.selectedIndex];
+        var rackType = selOpt ? selOpt.getAttribute('data-rack-type') : '';
+        var switchSlots = parseInt(selOpt ? selOpt.getAttribute('data-switch-slots') : 0) || 0;
+
+        if (rackType === 'immersion' && switchSlots > 0) {
+            // Show both Unit (for servers) and switch slot selector
+            unitGroup.style.display = '';
+            switchSlotGroup.style.display = '';
+            // Populate switch slot dropdown
+            switchSlotSelect.innerHTML = '<option value="">사용 안 함</option>';
+            for (var i = 1; i <= switchSlots; i++) {
+                var opt = document.createElement('option');
+                opt.value = 'SW' + i;
+                opt.textContent = 'SW' + i;
+                switchSlotSelect.appendChild(opt);
+            }
+            // Fetch occupied switch slots (exclude current asset)
+            var rackId = selOpt.getAttribute('data-rack-id');
+            if (rackId) {
+                var excludeId = _invCurrentAssetId || '';
+                fetch('/racks/' + rackId + '/switch-slots?exclude=' + excludeId)
+                    .then(function(r) { return r.ok ? r.json() : { occupied: [] }; })
+                    .then(function(data) {
+                        var opts = switchSlotSelect.options;
+                        for (var j = 1; j < opts.length; j++) {
+                            var slotVal = opts[j].value;
+                            var occ = data.occupied.find(function(o) { return o.slot === slotVal; });
+                            if (occ) {
+                                opts[j].textContent = slotVal + ' (사용중: ' + (occ.name || '') + ')';
+                                opts[j].disabled = true;
+                            }
+                        }
+                        // Pre-select pending blade slot if set
+                        if (_pendingBladeSlot) {
+                            for (var j = 0; j < switchSlotSelect.options.length; j++) {
+                                if (switchSlotSelect.options[j].value === _pendingBladeSlot) {
+                                    switchSlotSelect.options[j].disabled = false;
+                                    switchSlotSelect.options[j].textContent = _pendingBladeSlot + ' (현재)';
+                                    switchSlotSelect.selectedIndex = j;
+                                    break;
+                                }
+                            }
+                            _pendingBladeSlot = '';
+                        }
+                    });
+            }
+        } else {
+            switchSlotGroup.style.display = 'none';
+            switchSlotSelect.value = '';
+        }
+        loadInvRackPreview();
     }
 }
+
+// When switch slot is selected, clear unit; when unit is filled, clear switch slot
+document.getElementById('invSwitchSlotSelect').addEventListener('change', function() {
+    if (this.value) {
+        document.querySelector('#invUnitGroup input[name="unit"]').value = '';
+    }
+});
 
 // Sync manual inputs to hidden fields
 document.getElementById('invRoomManualInput').addEventListener('input', function() {
@@ -837,6 +1133,9 @@ function filterInvRacks() {
 // Initialize rack filter on load
 filterInvRacks();
 
+// Track current asset U size for rack preview
+var _currentAssetUSize = 1;
+
 // === Asset auto-fill logic ===
 <% if (typeof assets !== 'undefined') { %>
 var _assetMap = {};
@@ -848,8 +1147,14 @@ _assetMap['anum_<%= (a.asset_number || '').replace(/'/g, "\\'") %>'] = <%= a.id 
 function findAssetIdByMgmt(val) { return _assetMap['mgmt_' + val] || null; }
 function findAssetIdByAnum(val) { return _assetMap['anum_' + val] || null; }
 
+function hideNodeSelector() {
+    var area = document.getElementById('nodeSelectArea');
+    if (area) area.style.display = 'none';
+}
+
 function onAssetSelect(assetId) {
     if (!assetId) return;
+    _invCurrentAssetId = assetId;
     fetch('/inventory/api/asset/' + assetId)
         .then(function(r) { return r.ok ? r.json() : null; })
         .then(function(data) {
@@ -857,6 +1162,54 @@ function onAssetSelect(assetId) {
             var a = data.asset;
             var ips = data.ips || [];
             var creds = data.credentials || [];
+
+            // If this is a chassis with children, show node selector buttons
+            var nodeArea = document.getElementById('nodeSelectArea');
+            var nodeBtns = document.getElementById('nodeSelectButtons');
+            if (data.children && data.children.length > 0 && !a.parent_asset_id) {
+                nodeBtns.innerHTML = '';
+                data.children.forEach(function(child, idx) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-sm';
+                    btn.style.cssText = 'padding:3px 12px; font-size:12px; border:1px solid #3b82f6; border-radius:4px; background:#eff6ff; color:#1e40af; cursor:pointer; font-weight:600;';
+                    btn.textContent = 'N' + (idx + 1) + ' (' + child.management_number + ')';
+                    if (child.assigned_user) {
+                        btn.textContent += ' - ' + child.assigned_user;
+                    }
+                    btn.addEventListener('click', function() {
+                        hideNodeSelector();
+                        onAssetSelect(child.id);
+                    });
+                    nodeBtns.appendChild(btn);
+                });
+                nodeArea.style.display = '';
+                return; // Don't fill form with chassis data - wait for node selection
+            }
+            hideNodeSelector();
+
+            // Track U size for rack preview
+            _currentAssetUSize = Math.ceil((a.rack_unit_size || 3) / 3);
+            var placeInput = document.getElementById('invPlaceUSize');
+            if (placeInput) placeInput.value = _currentAssetUSize;
+
+            // If this is a node with a parent chassis, use parent's location
+            var locSource = a;
+            if (data.parent && data.parent.room_name) {
+                locSource = data.parent;
+            }
+
+            // Show chassis info banner if this is a node
+            var chassisBanner = document.getElementById('chassisInfoBanner');
+            if (chassisBanner) chassisBanner.remove();
+            if (data.parent) {
+                var banner = document.createElement('div');
+                banner.id = 'chassisInfoBanner';
+                banner.style.cssText = 'background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:8px 14px; margin-bottom:12px; font-size:13px; color:#1e40af;';
+                banner.innerHTML = '<strong>섀시:</strong> ' + data.parent.management_number + ' (' + (data.parent.model_name || '') + ') &mdash; 위치는 섀시 기준으로 자동 적용됩니다';
+                var locationCard = document.getElementById('locationEquipment');
+                if (locationCard) locationCard.insertBefore(banner, locationCard.querySelector('.form-row'));
+            }
 
             // Fill basic fields
             document.querySelector('[name="management_number"]').value = a.management_number || '';
@@ -871,31 +1224,30 @@ function onAssetSelect(assetId) {
                 }
             }
 
-            // Room
+            // Room (use locSource - parent chassis location if available)
             var roomSel = document.getElementById('invRoomSelect');
             var roomMatched = false;
-            if (a.room_name) {
+            if (locSource.room_name) {
                 for (var i = 0; i < roomSel.options.length; i++) {
-                    if (roomSel.options[i].value === a.room_name) {
+                    if (roomSel.options[i].value === locSource.room_name) {
                         roomSel.selectedIndex = i; roomMatched = true; break;
                     }
                 }
                 if (!roomMatched) {
-                    // Select manual and fill
                     for (var i = 0; i < roomSel.options.length; i++) {
                         if (roomSel.options[i].value === '__manual__') { roomSel.selectedIndex = i; break; }
                     }
-                    document.getElementById('invRoomManualInput').value = a.room_name;
+                    document.getElementById('invRoomManualInput').value = locSource.room_name;
                 }
                 onInvRoomChange();
             }
 
-            // Rack
+            // Rack (use locSource for parent chassis location)
             var rackSel = document.getElementById('invRackSelect');
             var rackMatched = false;
-            if (a.rack_name) {
+            if (locSource.rack_name) {
                 for (var i = 0; i < rackSel.options.length; i++) {
-                    if (rackSel.options[i].value === a.rack_name && rackSel.options[i].style.display !== 'none') {
+                    if (rackSel.options[i].value === locSource.rack_name && rackSel.options[i].style.display !== 'none') {
                         rackSel.selectedIndex = i; rackMatched = true; break;
                     }
                 }
@@ -903,7 +1255,11 @@ function onAssetSelect(assetId) {
                     for (var i = 0; i < rackSel.options.length; i++) {
                         if (rackSel.options[i].value === '__manual__') { rackSel.selectedIndex = i; break; }
                     }
-                    document.getElementById('invRackManualInput').value = a.rack_name;
+                    document.getElementById('invRackManualInput').value = locSource.rack_name;
+                }
+                // Set pending blade slot for pre-selection after rack change
+                if (a.blade_slot && /^SW\d+$/i.test(a.blade_slot)) {
+                    _pendingBladeSlot = a.blade_slot;
                 }
                 onInvRackChange();
             }
@@ -983,6 +1339,71 @@ function onAssetSelect(assetId) {
                 }
             });
             updateCredHeader();
+
+            // Hardware — clear existing rows and add from asset
+            var hwData = data.hardware || [];
+            if (hwData.length > 0) {
+                var hwContainer = document.getElementById('hwRows');
+                hwContainer.querySelectorAll('.inv-hw-row').forEach(function(r) { r.remove(); });
+                var hwHeader = hwContainer.querySelector('.hw-row-header');
+                if (hwHeader) hwHeader.remove();
+                var hasPsu = hwData.some(function(h) { return h.type === 'psu'; });
+                // Add header
+                var headerHtml = '<div class="form-row hw-row-header" style="font-weight:600; font-size:13px; padding:4px 0; border-bottom:1px solid var(--border); margin-bottom:8px;">' +
+                    '<div class="form-group" style="flex:0 0 90px; margin-bottom:0;"><label>소유</label></div>' +
+                    '<div class="form-group" style="flex:0 0 120px; margin-bottom:0;"><label>유형</label></div>' +
+                    '<div class="form-group" style="flex:2; margin-bottom:0;"><label>부품 코드</label></div>' +
+                    '<div class="form-group" style="flex:0 0 80px; margin-bottom:0;"><label>수량</label></div>' +
+                    '<div class="form-group hw-role-header" style="flex:0 0 100px; margin-bottom:0; ' + (hasPsu ? '' : 'display:none;') + '"><label>역할</label></div>' +
+                    '<div class="form-group" style="flex:0 0 50px; margin-bottom:0;"></div>' +
+                    '</div>';
+                hwContainer.insertAdjacentHTML('beforeend', headerHtml);
+
+                hwData.forEach(function(hw) {
+                    var isPsu = hw.type === 'psu';
+                    var ownerVal = hw.ownership || 'company';
+                    var isVendor = ownerVal === 'vendor';
+                    var roleHtml = '<div class="form-group hw-role-cell" style="flex:0 0 100px; margin-bottom:8px; ' + (isPsu ? '' : 'display:none;') + '">' +
+                        '<select name="hw_roles[]" class="form-control">' +
+                        '<option value="">-</option>' +
+                        '<option value="active"' + (hw.role === 'active' ? ' selected' : '') + '>Active</option>' +
+                        '<option value="standby"' + (hw.role === 'standby' ? ' selected' : '') + '>Standby</option>' +
+                        '</select></div>' +
+                        '<input type="hidden" name="hw_roles_flag[]" value="' + (isPsu ? (hw.role || '') : '') + '">';
+                    var listAttr = isVendor ? '' : 'list="hw-list-' + hw.type + '"';
+                    var html = '<div class="form-row inv-hw-row" style="align-items:center;">' +
+                        '<div class="form-group" style="flex:0 0 90px; margin-bottom:8px;">' +
+                        '<select name="hw_ownerships[]" class="form-control" onchange="onHwOwnerChange(this)">' +
+                        '<option value="company"' + (ownerVal === 'company' ? ' selected' : '') + '>자사</option>' +
+                        '<option value="vendor"' + (ownerVal === 'vendor' ? ' selected' : '') + '>업체</option>' +
+                        '</select></div>' +
+                        '<div class="form-group" style="flex:0 0 120px; margin-bottom:8px;">' +
+                        '<select name="hw_types[]" class="form-control" onchange="onHwTypeChange(this)">' + hwTypeOptions + '</select></div>' +
+                        '<div class="form-group" style="flex:2; margin-bottom:8px;">' +
+                        '<input type="text" name="hw_codes[]" class="form-control" ' + listAttr + ' value="' + (hw.code || '').replace(/"/g, '&quot;') + '" placeholder="' + (isVendor ? '모델명 직접 입력' : '코드 선택 또는 직접 입력') + '"></div>' +
+                        '<div class="form-group" style="flex:0 0 80px; margin-bottom:8px;">' +
+                        '<input type="number" name="hw_nums[]" class="form-control" value="' + (hw.num || '') + '" min="0" placeholder="수량"></div>' +
+                        roleHtml +
+                        '<div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">' +
+                        '<button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.inv-hw-row\').remove(); updateHwHeader();">X</button></div>' +
+                        '</div>';
+                    hwContainer.insertAdjacentHTML('beforeend', html);
+                    // Set the type select to the correct value
+                    var rows = hwContainer.querySelectorAll('.inv-hw-row');
+                    var lastRow = rows[rows.length - 1];
+                    var typeSel = lastRow.querySelector('select[name="hw_types[]"]');
+                    if (typeSel) {
+                        for (var j = 0; j < typeSel.options.length; j++) {
+                            if (typeSel.options[j].value === hw.type) { typeSel.selectedIndex = j; break; }
+                        }
+                    }
+                });
+                if (hasPsu) showRoleColumn();
+                updateHwHeader();
+                // Show hardware section
+                var hwSection = document.getElementById('hardwareSection');
+                if (hwSection) hwSection.style.display = '';
+            }
         });
 }
 
@@ -994,6 +1415,360 @@ document.getElementById('invAssetNumInput').addEventListener('input', function()
     if (id) onAssetSelect(id);
 });
 <% } %>
+
+// === 랙 미리보기 ===
+var _invRackOccupancy = {}; // uMap[u] = { full, left, right }
+var _invTotalU = 42;
+var _invCurrentAssetId = null; // 현재 선택된 자산 ID (자기 자신 제외용)
+
+function escapeInvHtml(str) {
+    var d = document.createElement('div'); d.textContent = str; return d.innerHTML;
+}
+
+function getInvShelfUSize() {
+    var input = document.getElementById('invShelfUSize');
+    return Math.max(1, parseInt(input ? input.value : 1) || 1);
+}
+
+function getInvPlaceUSize() {
+    var input = document.getElementById('invPlaceUSize');
+    var base = Math.max(1, parseInt(input ? input.value : 1) || 1);
+    var shelf = document.getElementById('invShelfCheck');
+    return base + (shelf && shelf.checked ? getInvShelfUSize() : 0);
+}
+
+function getInvBaseUSize() {
+    var input = document.getElementById('invPlaceUSize');
+    return Math.max(1, parseInt(input ? input.value : 1) || 1);
+}
+
+function isInvShelfChecked() {
+    var shelf = document.getElementById('invShelfCheck');
+    return shelf && shelf.checked;
+}
+
+function onInvShelfToggle() {
+    var checked = isInvShelfChecked();
+    document.getElementById('invShelfUSizeWrap').style.display = checked ? '' : 'none';
+    onInvPlaceUSizeChange();
+}
+
+function onInvPlaceUSizeChange() {
+    _currentAssetUSize = getInvPlaceUSize();
+}
+
+function loadInvRackPreview() {
+    var sel = document.getElementById('invRackSelect');
+    var opt = sel.options[sel.selectedIndex];
+    var rackId = opt ? opt.getAttribute('data-rack-id') : '';
+    var preview = document.getElementById('invRackPreview');
+    if (!rackId || sel.value === '' || sel.value === '__manual__') {
+        preview.style.display = 'none';
+        return;
+    }
+    fetch('/racks/' + rackId + '/slots')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(data) {
+            if (!data) { preview.style.display = 'none'; return; }
+            renderInvRackPreview(data);
+            preview.style.display = '';
+        })
+        .catch(function() { preview.style.display = 'none'; });
+}
+
+function renderInvRackPreview(data) {
+    _invTotalU = data.totalU || 42;
+    var totalSlots = _invTotalU * 3;
+    var container = document.getElementById('invRackPreviewContainer');
+    var info = document.getElementById('invRackPreviewInfo');
+    info.textContent = data.rack.name + ' (' + _invTotalU + 'U)';
+
+    // Build slot-level occupancy map: _invRackOccupancy[slot] = { full, left, right }
+    // 현재 선택된 자산은 점유에서 제외 (기존 위치 재선택 허용)
+    _invRackOccupancy = {};
+    data.assets.forEach(function(a) {
+        if (_invCurrentAssetId && a.id === _invCurrentAssetId) return; // 자기 자신 제외
+        var slotStart = a.rack_unit_start;
+        var slotSize = a.rack_unit_size || 3;
+        var side = a.blade_slot || 'full';
+        var uStart = Math.floor((slotStart - 1) / 3) + 1;
+        var uSize = Math.max(1, Math.ceil(slotSize / 3));
+        var assetInfo = { name: a.name, mgmt: a.management_number, slotStart: slotStart, slotSize: slotSize, uStart: uStart, uSize: uSize, side: side, id: a.id };
+        for (var s = slotStart; s < slotStart + slotSize; s++) {
+            if (!_invRackOccupancy[s]) _invRackOccupancy[s] = { full: null, left: null, right: null };
+            if (side === 'full') _invRackOccupancy[s].full = assetInfo;
+            else _invRackOccupancy[s][side] = assetInfo;
+        }
+    });
+
+    var occColors = { full: '#e2e8f0', left: '#dbeafe', right: '#fce7f3' };
+    var occTextColors = { full: '#475569', left: '#1e40af', right: '#9d174d' };
+    var holeLabels = ['하', '중', '상'];
+
+    var html = '<table style="width:100%; border-collapse:collapse; font-size:11px; table-layout:fixed;">';
+    html += '<colgroup><col style="width:40px"><col style="width:20px"><col style="width:50%"><col style="width:50%"></colgroup>';
+
+    // Render from top (U42 H3) to bottom (U1 H1)
+    for (var u = _invTotalU; u >= 1; u--) {
+        for (var h = 3; h >= 1; h--) {
+            var slot = (u - 1) * 3 + h;
+            var m = _invRackOccupancy[slot] || { full: null, left: null, right: null };
+            var hasFull = !!m.full;
+            var hasLeft = !!m.left;
+            var hasRight = !!m.right;
+
+            var cellH = 'height:18px; padding:1px 4px; border:1px solid #e2e8f0; font-size:10px; vertical-align:middle;';
+            var emptyCell = cellH + ' background:#fff; cursor:pointer;';
+
+            html += '<tr data-slot="' + slot + '" data-u="' + u + '" data-h="' + h + '">';
+
+            // U label - only on first hole (h=3, top of U since we render top-down)
+            if (h === 3) {
+                html += '<td rowspan="3" style="padding:1px 4px; text-align:right; font-weight:600; color:#64748b; border:1px solid #e2e8f0; background:#f8fafc; font-size:11px; white-space:nowrap; vertical-align:middle;">U' + u + '</td>';
+            }
+
+            // Hole indicator
+            html += '<td style="padding:0 3px; text-align:center; color:#94a3b8; border:1px solid #f1f5f9; background:#f8fafc; font-size:9px;">' + holeLabels[h - 1] + '</td>';
+
+            if (hasFull) {
+                var a = m.full;
+                var isStart = a.slotStart === slot;
+                html += '<td colspan="2" style="' + cellH + ' background:' + occColors.full + ';">';
+                if (isStart) {
+                    html += '<span style="color:' + occTextColors.full + '; font-weight:500;">' + escapeInvHtml(a.name) + '</span>';
+                    if (a.mgmt) html += ' <span style="color:#94a3b8; font-size:9px;">' + escapeInvHtml(a.mgmt) + '</span>';
+                    if (a.uSize > 1) html += ' <span style="color:#94a3b8; font-size:9px;">(' + a.uSize + 'U)</span>';
+                }
+                html += '</td>';
+            } else if (hasLeft || hasRight) {
+                if (hasLeft) {
+                    var a = m.left;
+                    var isStart = a.slotStart === slot;
+                    html += '<td style="' + cellH + ' background:' + occColors.left + ';">';
+                    if (isStart) html += '<span style="color:' + occTextColors.left + '; font-weight:500; font-size:10px;">' + escapeInvHtml(a.name) + '</span>';
+                    html += '</td>';
+                } else {
+                    html += '<td style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                }
+                if (hasRight) {
+                    var a = m.right;
+                    var isStart = a.slotStart === slot;
+                    html += '<td style="' + cellH + ' background:' + occColors.right + ';">';
+                    if (isStart) html += '<span style="color:' + occTextColors.right + '; font-weight:500; font-size:10px;">' + escapeInvHtml(a.name) + '</span>';
+                    html += '</td>';
+                } else {
+                    html += '<td style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                }
+            } else {
+                html += '<td colspan="2" style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+            }
+            html += '</tr>';
+        }
+    }
+    html += '</table>';
+    container.innerHTML = html;
+}
+
+function isInvSlotOccupied(slot) {
+    var m = _invRackOccupancy[slot];
+    return m && (m.full || m.left || m.right);
+}
+
+function slotToU(slot) { return Math.floor((slot - 1) / 3) + 1; }
+function slotToH(slot) { return ((slot - 1) % 3) + 1; }
+function uhToSlot(u, h) { return (u - 1) * 3 + h; }
+
+// Slot-level click: place equipment starting at this slot
+function onInvSlotClick(slot) {
+    var baseUSize = getInvBaseUSize();
+    var hasShelf = isInvShelfChecked();
+    var shelfUSize = hasShelf ? getInvShelfUSize() : 0;
+    var totalSlots = (baseUSize + shelfUSize) * 3;
+    var slotEnd = slot + totalSlots - 1;
+    var totalSlotMax = _invTotalU * 3;
+
+    // Bounds check
+    if (slotEnd > totalSlotMax) {
+        alert('슬롯 범위 초과: ' + formatSlotRange(slot, slotEnd) + ' (최대 U' + _invTotalU + ')');
+        return;
+    }
+
+    // Overlap check
+    var conflicts = [];
+    for (var s = slot; s <= slotEnd; s++) {
+        if (isInvSlotOccupied(s)) {
+            var m = _invRackOccupancy[s];
+            var name = (m.full || m.left || m.right).name;
+            if (conflicts.indexOf(name) === -1) conflicts.push(name);
+        }
+    }
+    if (conflicts.length > 0) {
+        alert(formatSlotRange(slot, slotEnd) + ' 범위에 이미 장비가 있습니다:\n' + conflicts.join(', '));
+        return;
+    }
+
+    // Set Unit field
+    var unitInput = document.querySelector('[name="unit"]');
+    if (unitInput) {
+        if (hasShelf) {
+            var shelfSlots = shelfUSize * 3;
+            var shelfEnd = slot + shelfSlots - 1;
+            var equipStart = slot + shelfSlots;
+            unitInput.value = formatSlotRange(slot, slotEnd) + ' (선반 ' + formatSlotRange(slot, shelfEnd) + ', 장비 ' + formatSlotRange(equipStart, slotEnd) + ')';
+        } else {
+            unitInput.value = formatSlotRange(slot, slotEnd);
+        }
+    }
+
+    // Store shelf_size (in slots) for server-side
+    var shelfHidden = document.getElementById('invShelfSizeHidden');
+    if (shelfHidden) shelfHidden.value = hasShelf ? shelfUSize * 3 : 0;
+
+    highlightInvSlots(slot, totalSlots, hasShelf ? shelfUSize * 3 : 0);
+}
+
+// Format slot range as human-readable U/H text
+function formatSlotRange(slotStart, slotEnd) {
+    var u1 = slotToU(slotStart), h1 = slotToH(slotStart);
+    var u2 = slotToU(slotEnd), h2 = slotToH(slotEnd);
+    var startStr = 'U' + u1 + (h1 !== 1 ? 'H' + h1 : '');
+    var endStr = 'U' + u2 + (h2 !== 3 ? 'H' + h2 : '');
+    if (slotStart === slotEnd) return startStr;
+    return startStr + '-' + endStr;
+}
+
+function highlightInvSlots(slotStart, count, shelfSlots) {
+    clearInvSlotHighlight();
+    var shelfEnd = slotStart + shelfSlots; // exclusive
+    for (var s = slotStart; s < slotStart + count; s++) {
+        var row = document.querySelector('#invRackPreviewContainer tr[data-slot="' + s + '"]');
+        if (!row) continue;
+        var isShelf = shelfSlots > 0 && (s < shelfEnd);
+        // Skip the U label (rowspan) and hole label cells
+        var cells = row.querySelectorAll('td');
+        var startIdx = (slotToH(s) === 3) ? 2 : 1; // h=3 has U label td
+        for (var c = startIdx; c < cells.length; c++) {
+            if (!isInvSlotOccupied(s)) {
+                if (isShelf) {
+                    cells[c].style.background = '#fef3c7';
+                    cells[c].style.outline = '1px solid #f59e0b';
+                    cells[c].style.outlineOffset = '-1px';
+                    if (s === slotStart) cells[c].innerHTML = '<span style="color:#92400e; font-size:9px; font-weight:600;">선반</span>';
+                } else {
+                    cells[c].style.background = '#dbeafe';
+                    cells[c].style.outline = '1px solid #3b82f6';
+                    cells[c].style.outlineOffset = '-1px';
+                    if (s === shelfEnd) cells[c].innerHTML = '<span style="color:#1e40af; font-size:9px; font-weight:600;">장비</span>';
+                }
+            }
+        }
+    }
+}
+
+function clearInvSlotHighlight() {
+    var rows = document.querySelectorAll('#invRackPreviewContainer tr[data-slot]');
+    rows.forEach(function(row) {
+        var s = parseInt(row.getAttribute('data-slot'));
+        if (!isInvSlotOccupied(s)) {
+            var cells = row.querySelectorAll('td');
+            var startIdx = (slotToH(s) === 3) ? 2 : 1;
+            for (var c = startIdx; c < cells.length; c++) {
+                cells[c].style.background = '#fff';
+                cells[c].style.outline = 'none';
+                cells[c].innerHTML = '';
+            }
+        }
+    });
+}
+
+// === 가용 IP 조회 ===
+function openInvIpModal() {
+    var modal = document.getElementById('invIpModal');
+    modal.style.display = 'flex';
+    document.getElementById('invIpList').innerHTML = '<div style="text-align:center; padding:20px; color:#94a3b8;">서브넷을 선택하세요</div>';
+}
+
+function closeInvIpModal() {
+    document.getElementById('invIpModal').style.display = 'none';
+}
+
+// Close modal on background click
+document.getElementById('invIpModal').addEventListener('click', function(e) {
+    if (e.target === this) closeInvIpModal();
+});
+
+function loadInvAvailableIps() {
+    var subnet = document.getElementById('invIpSubnetSelect').value;
+    if (!subnet) {
+        document.getElementById('invIpList').innerHTML = '<div style="text-align:center; padding:20px; color:#94a3b8;">서브넷을 선택하세요</div>';
+        return;
+    }
+    var listEl = document.getElementById('invIpList');
+    var loadingEl = document.getElementById('invIpLoading');
+    listEl.innerHTML = '';
+    loadingEl.style.display = '';
+    fetch('/assets/api/available-ips?subnet=' + encodeURIComponent(subnet))
+        .then(function(r) { return r.ok ? r.json() : { ips: [] }; })
+        .then(function(data) {
+            loadingEl.style.display = 'none';
+            if (!data.ips || data.ips.length === 0) {
+                listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#ef4444;">가용 IP가 없습니다</div>';
+                return;
+            }
+            var html = '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px;">';
+            data.ips.forEach(function(ip) {
+                html += '<button type="button" onclick="selectInvAvailableIp(\'' + ip + '\')" style="padding:6px 8px; font-size:12px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; cursor:pointer; text-align:center; transition:background 0.15s;" onmouseenter="this.style.background=\'#eff6ff\'" onmouseleave="this.style.background=\'#fff\'">' + ip + '</button>';
+            });
+            html += '</div>';
+            listEl.innerHTML = html;
+        })
+        .catch(function() {
+            loadingEl.style.display = 'none';
+            listEl.innerHTML = '<div style="text-align:center; padding:20px; color:#ef4444;">조회 실패</div>';
+        });
+}
+
+function selectInvAvailableIp(ip) {
+    // Find the last IP row's input and fill it, or add a new row
+    var rows = document.querySelectorAll('.inv-ip-row');
+    var filled = false;
+    if (rows.length > 0) {
+        var lastRow = rows[rows.length - 1];
+        var ipInput = lastRow.querySelector('input[name="ip_values[]"]');
+        if (ipInput && !ipInput.value) {
+            ipInput.value = ip;
+            filled = true;
+        }
+    }
+    if (!filled) {
+        addInvIpRow('management');
+        var newRows = document.querySelectorAll('.inv-ip-row');
+        var newLast = newRows[newRows.length - 1];
+        var ipInput = newLast.querySelector('input[name="ip_values[]"]');
+        if (ipInput) ipInput.value = ip;
+    }
+    closeInvIpModal();
+}
+
+// Load rack preview and switch slot on page load if rack is already selected
+(function() {
+    var sel = document.getElementById('invRackSelect');
+    if (sel && sel.value && sel.value !== '' && sel.value !== '__manual__') {
+        var opt = sel.options[sel.selectedIndex];
+        if (opt && opt.getAttribute('data-rack-id')) {
+            // Set pending blade slot for pre-selection (edit mode)
+            var editBladeSlot = '<%= typeof linkedAssetBladeSlot !== "undefined" ? linkedAssetBladeSlot : "" %>';
+            var editAssetId = '<%= typeof linkedAssetId !== "undefined" && linkedAssetId ? linkedAssetId : "" %>';
+            if (editBladeSlot && /^SW\d+$/i.test(editBladeSlot)) {
+                _pendingBladeSlot = editBladeSlot;
+            }
+            if (editAssetId) {
+                _invCurrentAssetId = editAssetId;
+            }
+            onInvRackChange();
+        }
+    }
+})();
 </script>
 
 <%- include('../partials/footer', { extraJs }) %>
