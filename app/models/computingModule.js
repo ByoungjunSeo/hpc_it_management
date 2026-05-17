@@ -20,6 +20,13 @@ const ComputingModule = {
       sql += ' AND cm.asset_id = ?';
       params.push(filters.asset_id);
     }
+    if (filters.owner) {
+      if (filters.owner === 'company') {
+        sql += " AND (cm.owner IS NULL OR cm.owner = 'company')";
+      } else if (filters.owner === 'vendor') {
+        sql += " AND cm.owner = 'vendor'";
+      }
+    }
     if (filters.search) {
       sql += ` AND (cm.model LIKE ? OR cm.manufacturer LIKE ? OR a.model_name LIKE ?
         OR cm.specification LIKE ? OR a.management_number LIKE ?

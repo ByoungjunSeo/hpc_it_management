@@ -1,0 +1,24 @@
+# Dependencies
+app/node_modules/
+node_modules/
+
+# Database files
+*.db
+*.sqlite
+
+# Uploads
+app/public/uploads/
+
+# Logs
+*.log
+
+# Node binary
+node-v*/
+node-v*.tar.xz
+
+# Backup folder
+backup/
+
+# OS files
+.DS_Store
+Thumbs.db

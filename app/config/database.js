@@ -222,6 +222,42 @@ function runMigrations() {
     db.exec("ALTER TABLE computing_modules ADD COLUMN is_onboard INTEGER DEFAULT 0");
   }
 
+  // Migration: widen computing_modules module_type CHECK to include 'npu'
+  const cmSchema = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='computing_modules'").get();
+  if (cmSchema && cmSchema.sql && !cmSchema.sql.includes("'npu'")) {
+    db.pragma('foreign_keys = OFF');
+    db.exec(`
+      CREATE TABLE computing_modules_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL,
+        module_type TEXT NOT NULL CHECK(module_type IN ('cpu', 'memory', 'disk', 'network', 'raid', 'gpu', 'npu', 'psu')),
+        model TEXT,
+        manufacturer TEXT,
+        capacity TEXT,
+        count INTEGER DEFAULT 1,
+        specification TEXT,
+        slot_info TEXT,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        owner TEXT DEFAULT 'company',
+        owner_vendor_id INTEGER REFERENCES vendor_info(id),
+        is_onboard INTEGER DEFAULT 0,
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+      );
+    `);
+    const cmExistingCols = db.prepare("PRAGMA table_info(computing_modules)").all().map(c => c.name);
+    const cmNewCols = db.prepare("PRAGMA table_info(computing_modules_new)").all().map(c => c.name);
+    const cmCommonCols = cmExistingCols.filter(c => cmNewCols.includes(c));
+    const cmColList = cmCommonCols.join(', ');
+    db.exec(`INSERT INTO computing_modules_new (${cmColList}) SELECT ${cmColList} FROM computing_modules`);
+    db.exec('DROP TABLE computing_modules');
+    db.exec('ALTER TABLE computing_modules_new RENAME TO computing_modules');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_computing_modules_asset ON computing_modules(asset_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_computing_modules_type ON computing_modules(module_type)');
+    db.pragma('foreign_keys = ON');
+  }
+
   // Migration: create module_transfer_logs table
   const mtlTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='module_transfer_logs'").get();
   if (!mtlTable) {
@@ -286,16 +322,84 @@ function runMigrations() {
       CREATE INDEX IF NOT EXISTS idx_mil_created_at ON module_inventory_logs(created_at);
     `);
   }
-  // Migration: ensure storage_quantity column exists and has correct values
+  // Migration: ensure storage_quantity column exists
   const miCols2 = db.prepare("PRAGMA table_info(module_inventory)").all();
   if (!miCols2.some(c => c.name === 'storage_quantity')) {
     db.exec("ALTER TABLE module_inventory ADD COLUMN storage_quantity INTEGER DEFAULT 0");
   }
-  db.prepare(`
-    UPDATE module_inventory
-    SET storage_quantity = total_quantity
-    WHERE storage_quantity IS NULL OR storage_quantity = 0
-  `).run();
+
+  // Migration: add owner and owner_vendor_id columns to module_inventory
+  const miCols3 = db.prepare("PRAGMA table_info(module_inventory)").all();
+  if (!miCols3.some(c => c.name === 'owner')) {
+    db.exec("ALTER TABLE module_inventory ADD COLUMN owner TEXT DEFAULT 'company'");
+  }
+  if (!miCols3.some(c => c.name === 'owner_vendor_id')) {
+    db.exec("ALTER TABLE module_inventory ADD COLUMN owner_vendor_id INTEGER");
+  }
+
+  // Migration: sync module_inventory owner from assets ownership
+  // module_inventory items whose item_code matches computing_modules installed on vendor assets → mark as vendor
+  const miOwnerSynced = db.prepare("SELECT COUNT(*) as cnt FROM module_inventory WHERE owner = 'vendor'").get();
+  if (miOwnerSynced.cnt === 0) {
+    // 1) By specification match: find item_codes used only in vendor-owned assets
+    const vendorBySpec = db.prepare(`
+      SELECT DISTINCT cm.specification as item_code, a.vendor_id
+      FROM computing_modules cm
+      JOIN assets a ON cm.asset_id = a.id
+      WHERE a.ownership = 'vendor'
+        AND cm.specification IS NOT NULL AND cm.specification != ''
+        AND cm.specification IN (SELECT item_code FROM module_inventory WHERE item_code != '')
+    `).all();
+    for (const row of vendorBySpec) {
+      const companyUsage = db.prepare(`
+        SELECT COUNT(*) as cnt FROM computing_modules cm
+        JOIN assets a ON cm.asset_id = a.id
+        WHERE cm.specification = ? AND a.ownership = 'company'
+      `).get(row.item_code);
+      if (companyUsage.cnt === 0) {
+        db.prepare("UPDATE module_inventory SET owner = 'vendor', owner_vendor_id = ? WHERE item_code = ?")
+          .run(row.vendor_id, row.item_code);
+      }
+    }
+    // 2) By module_type + model match for items without item_code
+    const vendorByModel = db.prepare(`
+      SELECT DISTINCT cm.module_type, cm.model, a.vendor_id
+      FROM computing_modules cm
+      JOIN assets a ON cm.asset_id = a.id
+      WHERE a.ownership = 'vendor'
+        AND cm.model IS NOT NULL AND cm.model != ''
+        AND (cm.specification IS NULL OR cm.specification = '')
+    `).all();
+    for (const row of vendorByModel) {
+      const companyUsage = db.prepare(`
+        SELECT COUNT(*) as cnt FROM computing_modules cm
+        JOIN assets a ON cm.asset_id = a.id
+        WHERE cm.module_type = ? AND cm.model = ? AND a.ownership = 'company'
+      `).get(row.module_type, row.model);
+      if (companyUsage.cnt === 0) {
+        db.prepare("UPDATE module_inventory SET owner = 'vendor', owner_vendor_id = ? WHERE module_type = ? AND model = ? AND owner = 'company'")
+          .run(row.vendor_id, row.module_type, row.model);
+      }
+    }
+  }
+
+  // Migration: create photos table
+  const photosTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='photos'").get();
+  if (!photosTable) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS photos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        original_name TEXT,
+        description TEXT,
+        uploaded_at TEXT DEFAULT (datetime('now', 'localtime')),
+        uploaded_by TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_photos_entity ON photos(entity_type, entity_id);
+    `);
+  }
 
   // Migration: add rack_type column to racks
   const rackCols = db.prepare("PRAGMA table_info(racks)").all();
@@ -370,18 +474,38 @@ function runMigrations() {
     db.exec("ALTER TABLE racks ADD COLUMN switch_slots INTEGER DEFAULT 0");
   }
 
+  // ── asset_credentials CHECK 제약 확장 (os, etc 추가) ──
+  const credCheckInfo = db.prepare("SELECT sql FROM sqlite_master WHERE name='asset_credentials'").get();
+  if (credCheckInfo && credCheckInfo.sql && credCheckInfo.sql.includes("IN ('root','user','bmc')")) {
+    db.exec(`
+      CREATE TABLE asset_credentials_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        asset_id INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        password TEXT,
+        credential_type TEXT NOT NULL DEFAULT 'root'
+          CHECK(credential_type IN ('root','user','bmc','os','etc')),
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+      );
+      INSERT INTO asset_credentials_new SELECT * FROM asset_credentials;
+      DROP TABLE asset_credentials;
+      ALTER TABLE asset_credentials_new RENAME TO asset_credentials;
+    `);
+  }
+
   // ── 앱 시작 시 equipment_usage_logs → asset_ips, asset_credentials 동기화 ──
   syncUsageLogsToAssets(db);
 
   // 앱 시작 시 computing_modules 기반으로 재고 재계산
-  // 1) specification 직접 매칭
+  // 1) specification 직접 매칭 (자사+업체 모두 카운트)
   const directRows = db.prepare(`
     SELECT cm.specification as item_code, SUM(cm.count) as total_count
     FROM computing_modules cm
     JOIN assets a ON cm.asset_id = a.id
     WHERE cm.specification IS NOT NULL
       AND cm.specification != ''
-      AND (cm.owner IS NULL OR cm.owner = 'company')
       AND a.status = 'active'
     GROUP BY cm.specification
   `).all();
@@ -393,7 +517,6 @@ function runMigrations() {
     JOIN module_inventory mi ON mi.module_type = cm.module_type AND mi.model = cm.model
     WHERE (cm.specification IS NULL OR cm.specification = '')
       AND cm.model IS NOT NULL AND cm.model != ''
-      AND (cm.owner IS NULL OR cm.owner = 'company')
       AND a.status = 'active'
     GROUP BY mi.item_code
   `).all();
@@ -409,20 +532,20 @@ function runMigrations() {
   db.prepare(`
     UPDATE module_inventory
     SET in_use_quantity = 0,
-        storage_quantity = total_quantity,
-        spare_quantity = total_quantity
+        total_quantity = storage_quantity,
+        spare_quantity = storage_quantity
   `).run();
 
   const recalcStmt = db.prepare(`
     UPDATE module_inventory
     SET in_use_quantity = ?,
-        storage_quantity = MAX(0, total_quantity - ?),
-        spare_quantity = MAX(0, total_quantity - ?),
+        total_quantity = storage_quantity + ?,
+        spare_quantity = storage_quantity,
         updated_at = CURRENT_TIMESTAMP
     WHERE item_code = ?
   `);
   for (const [code, count] of Object.entries(usageMap)) {
-    recalcStmt.run(count, count, count, code);
+    recalcStmt.run(count, count, code);
   }
 }
 

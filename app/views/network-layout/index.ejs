@@ -1,0 +1,27 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>네트워크 배치도</h1>
+</div>
+
+<% if (rooms.length === 0) { %>
+<div class="card">
+    <p class="text-center text-muted" style="padding: 40px;">등록된 서버실이 없습니다.</p>
+</div>
+<% } else { %>
+<div class="stats-grid">
+    <% rooms.forEach(room => { %>
+    <a href="/network-layout/<%= room.id %>" style="text-decoration: none; color: inherit;">
+        <div class="stat-card" style="cursor: pointer; transition: box-shadow 0.2s;">
+            <div class="stat-value"><%= room.connectionCount || 0 %></div>
+            <div class="stat-label"><%= room.name %></div>
+            <div style="font-size: 12px; color: var(--text-light); margin-top: 4px;">
+                네트워크 연결 | 스위치 <%= room.switchCount || 0 %>대
+            </div>
+        </div>
+    </a>
+    <% }) %>
+</div>
+<% } %>
+
+<%- include('../partials/footer', { extraJs }) %>

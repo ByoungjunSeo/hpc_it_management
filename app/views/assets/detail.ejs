@@ -7,6 +7,12 @@
         <form method="POST" action="/assets/<%= asset.id %>/delete" style="display:inline" onsubmit="return confirmDelete('이 자산을 삭제하시겠습니까?')">
             <button type="submit" class="btn btn-danger">삭제</button>
         </form>
+        <% if (modules && modules.length > 0) { %>
+        <button class="btn btn-warning" onclick="openFaultRepairModal()">장애/수리</button>
+        <% } %>
+        <% if (asset.status === 'maintenance') { %>
+        <button class="btn btn-success" onclick="openRestoreModal()">수리완료/복귀</button>
+        <% } %>
         <a href="/assets" class="btn btn-secondary">목록</a>
     </div>
 </div>
@@ -119,6 +125,8 @@
     </div>
 </div>
 <% } %>
+
+<%- include('../partials/photo-section', { entityType: 'asset', entityId: asset.id, photos: typeof assetPhotos !== 'undefined' ? assetPhotos : [], editable: true }) %>
 
 <% if (typeof childInfraAssets !== 'undefined' && childInfraAssets && childInfraAssets.length > 0) { %>
 <div class="card">
@@ -263,13 +271,17 @@
 <div class="card">
     <div class="card-header">
         <h2>컴퓨팅 모듈</h2>
-        <a href="/module-inventory/modules/new?asset_id=<%= asset.id %>" class="btn btn-sm btn-primary">+ 모듈 추가</a>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <button type="button" class="btn btn-sm btn-outline" id="bulkTransferBtn" style="display:none" onclick="openBulkTransfer()">선택 이동 (<span id="bulkCount">0</span>)</button>
+            <a href="/module-inventory/modules/new?asset_id=<%= asset.id %>" class="btn btn-sm btn-primary">+ 모듈 추가</a>
+        </div>
     </div>
 <% if (modules && modules.length > 0) { %>
     <div class="table-wrapper">
         <table>
             <thead>
                 <tr>
+                    <th><input type="checkbox" id="selectAllModules" onchange="toggleAllModules(this)" title="전체 선택"></th>
                     <th>유형</th>
                     <th>소유</th>
                     <th>코드</th>
@@ -284,6 +296,7 @@
             <tbody>
                 <% modules.forEach(m => { %>
                 <tr>
+                    <td><input type="checkbox" class="module-check" value="<%= m.id %>" data-label="<%= (m.module_type || '').toUpperCase() + ' ' + (m.model || '') %>" onchange="updateBulkBtn()"></td>
                     <td><span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span></td>
                     <td>
                         <% if (m.owner === 'vendor') { %>
@@ -304,12 +317,17 @@
                             <span class="badge badge-info">애드온</span>
                         <% } %>
                     </td>
-                    <td>
+                    <td style="white-space:nowrap;">
+                        <button type="button" class="btn btn-sm btn-outline" onclick="openTransferModal([<%= m.id %>], '<%= (m.module_type || '').toUpperCase() + ' ' + (m.model || '').replace(/'/g, "\\'") %>')">이동</button>
                         <a href="/module-inventory/modules/<%= m.id %>/edit" class="btn btn-sm btn-outline">수정</a>
                         <form method="POST" action="/module-inventory/modules/<%= m.id %>/delete" style="display:inline" onsubmit="return confirm('이 모듈을 삭제하시겠습니까?')">
                             <input type="hidden" name="returnTo" value="/assets/<%= asset.id %>">
                             <button type="submit" class="btn btn-sm btn-danger">삭제</button>
                         </form>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="openModuleActionModal(<%= m.id %>, 'storage', '<%= (m.module_type || '').toUpperCase() + ' ' + (m.model || '').replace(/'/g, "\\'") %>')">장비실</button>
+                        <% if (m.owner === 'vendor') { %>
+                        <button type="button" class="btn btn-sm btn-warning" onclick="openModuleActionModal(<%= m.id %>, 'vendor_return', '<%= (m.module_type || '').toUpperCase() + ' ' + (m.model || '').replace(/'/g, "\\'") %>')">반납</button>
+                        <% } %>
                     </td>
                 </tr>
                 <% }) %>
@@ -391,7 +409,7 @@
                     <td style="white-space:nowrap; font-size:12px;"><%= log.created_at ? log.created_at.replace('T', ' ').substring(0, 16) : '-' %></td>
                     <td><span class="badge badge-<%= modEventColors[log.event_type] || 'secondary' %>"><%= modEventLabels[log.event_type] || log.event_type %></span></td>
                     <td><code><%= log.item_code || '-' %></code></td>
-                    <td style="font-weight:bold;"><%= log.quantity_change > 0 ? '+' + log.quantity_change : (log.quantity_change || '-') %></td>
+                    <td style="font-weight:bold;"><%= log.quantity_change ? Math.abs(log.quantity_change) : '-' %></td>
                     <td><%= log.username || '-' %></td>
                     <td style="font-size:12px;"><%= log.notes || '-' %></td>
                 </tr>
@@ -401,5 +419,664 @@
     </div>
 </div>
 <% } %>
+
+<% if (typeof moduleTransferLogs !== 'undefined' && moduleTransferLogs && moduleTransferLogs.length > 0) { %>
+<div class="card">
+    <div class="card-header">
+        <h2>모듈 이동 이력</h2>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>일시</th>
+                    <th>유형</th>
+                    <th>모델</th>
+                    <th>수량</th>
+                    <th>출발</th>
+                    <th>도착</th>
+                    <th>사유</th>
+                    <th>처리자</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% moduleTransferLogs.forEach(tlog => { %>
+                <tr>
+                    <td style="white-space:nowrap; font-size:12px;"><%= tlog.created_at ? tlog.created_at.replace('T', ' ').substring(0, 16) : (tlog.transfer_date || '-') %></td>
+                    <td><span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === tlog.module_type)?.label || tlog.module_type %></span></td>
+                    <td><%= tlog.model || '-' %></td>
+                    <td><%= tlog.count || 1 %></td>
+                    <td>
+                        <% if (tlog.from_asset_id === asset.id) { %>
+                            <span class="badge badge-warning"><%= asset.management_number || asset.model_name %></span>
+                        <% } else if (tlog.from_asset_id) { %>
+                            <a href="/assets/<%= tlog.from_asset_id %>"><%= tlog.from_asset_label || ('ID:' + tlog.from_asset_id) %></a>
+                        <% } else { %>
+                            <%= tlog.from_asset_label || '-' %>
+                        <% } %>
+                    </td>
+                    <td>
+                        <% if (tlog.to_asset_id === asset.id) { %>
+                            <span class="badge badge-success"><%= asset.management_number || asset.model_name %></span>
+                        <% } else if (tlog.to_asset_id) { %>
+                            <a href="/assets/<%= tlog.to_asset_id %>"><%= tlog.to_asset_label || ('ID:' + tlog.to_asset_id) %></a>
+                        <% } else { %>
+                            <%= tlog.to_asset_label || '-' %>
+                        <% } %>
+                    </td>
+                    <td><%= tlog.reason || '-' %></td>
+                    <td><%= tlog.username || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% } %>
+
+<!-- Module Transfer Modal -->
+<div id="moduleTransferModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:8px; width:90%; max-width:520px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee;">
+      <h3 style="margin:0;" id="transferModalTitle">모듈 이동</h3>
+      <button onclick="closeTransferModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
+    </div>
+    <div style="padding:20px;">
+      <p id="transferModuleInfo" style="font-size:13px; color:#666; margin-bottom:12px;"></p>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label>이동 대상 서버 *</label>
+        <input type="text" id="transferAssetSearch" class="form-control" placeholder="관리번호 또는 모델명 검색..." oninput="filterTransferAssets()" style="margin-bottom:6px;">
+        <select id="transferAssetSelect" class="form-control" size="6" style="height:auto;">
+          <option value="">로딩 중...</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label>사유 (선택)</label>
+        <input type="text" id="transferReasonInput" class="form-control" placeholder="이동 사유">
+      </div>
+      <div id="transferResultMsg" style="font-size:13px; min-height:20px; margin-bottom:8px;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn btn-outline" onclick="closeTransferModal()">취소</button>
+        <button type="button" class="btn btn-primary" onclick="submitModuleTransfer()">이동</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Fault Repair Modal -->
+<div id="faultRepairModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; align-items:center; justify-content:center; overflow-y:auto;">
+  <div style="background:#fff; border-radius:8px; width:95%; max-width:800px; box-shadow:0 4px 20px rgba(0,0,0,0.3); margin:30px auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee; background:#fff3cd; border-radius:8px 8px 0 0;">
+      <h3 style="margin:0;">장애/수리 처리</h3>
+      <button onclick="closeFaultRepairModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
+    </div>
+    <div style="padding:20px;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+        <div class="form-group" style="flex:1; min-width:120px; margin-bottom:0;">
+          <label>사유</label>
+          <select id="faultReason" class="form-control">
+            <option value="장애">장애</option>
+            <option value="수리">수리</option>
+            <option value="점검">점검</option>
+            <option value="교체">교체</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:1; min-width:120px; margin-bottom:0;">
+          <label>처리후 상태</label>
+          <select id="faultTargetStatus" class="form-control">
+            <option value="maintenance">점검중</option>
+            <option value="active">운영중</option>
+            <option value="inactive">비활성</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:2; min-width:200px; margin-bottom:0;">
+          <label>비고</label>
+          <input type="text" id="faultNotes" class="form-control" placeholder="장애 내용 메모">
+        </div>
+      </div>
+
+      <div class="table-wrapper" style="margin-bottom:16px; max-height:300px; overflow-y:auto;">
+        <table id="faultModuleTable">
+          <thead>
+            <tr>
+              <th>소유</th>
+              <th>유형</th>
+              <th>모델</th>
+              <th>수량</th>
+              <th>처리</th>
+            </tr>
+          </thead>
+          <tbody id="faultModuleBody"></tbody>
+        </table>
+      </div>
+
+      <div id="faultTransferSection" style="display:none; border:1px solid #ddd; border-radius:6px; padding:12px; margin-bottom:16px; background:#f9f9f9;">
+        <label style="font-weight:bold; margin-bottom:6px; display:block;">이동 대상 자산</label>
+        <input type="text" id="faultTransferSearch" class="form-control" placeholder="관리번호 또는 모델명 검색..." oninput="filterFaultTransferAssets()" style="margin-bottom:6px;">
+        <select id="faultTransferAssetSelect" class="form-control" size="5" style="height:auto;">
+          <option value="">로딩 중...</option>
+        </select>
+      </div>
+
+      <div id="faultResultMsg" style="font-size:13px; min-height:20px; margin-bottom:8px;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn btn-outline" onclick="closeFaultRepairModal()">취소</button>
+        <button type="button" class="btn btn-warning" onclick="submitFaultRepair()">장애/수리 처리</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Restore Modal -->
+<% if (asset.status === 'maintenance') { %>
+<div id="restoreModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:8px; width:90%; max-width:500px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee; background:#d4edda; border-radius:8px 8px 0 0;">
+      <h3 style="margin:0;">수리완료 / 복귀</h3>
+      <button onclick="closeRestoreModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
+    </div>
+    <form method="POST" action="/assets/<%= asset.id %>/restore">
+      <div style="padding:20px;">
+        <p style="color:#666; font-size:13px; margin-bottom:16px;">위치를 지정하면 해당 위치로 배치하고 운영중으로 전환합니다. 비워두면 위치 변경 없이 상태만 전환됩니다.</p>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>서버실</label>
+          <select name="room_id" id="restoreRoomSelect" class="form-control" onchange="onRestoreRoomChange()">
+            <option value="">변경 안 함</option>
+            <% if (typeof rooms !== 'undefined') { rooms.forEach(r => { %>
+            <option value="<%= r.id %>" <%= asset.room_id == r.id ? 'selected' : '' %>><%= r.name %></option>
+            <% }) } %>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label>랙</label>
+          <select name="rack_id" id="restoreRackSelect" class="form-control" onchange="onRestoreRackChange()">
+            <option value="">변경 안 함</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+          <label>랙 유닛 시작</label>
+          <input type="number" name="rack_unit_start" id="restoreUnitStart" class="form-control" placeholder="예: 1" min="1" max="42" value="<%= asset.rack_unit_start || '' %>">
+        </div>
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button type="button" class="btn btn-outline" onclick="closeRestoreModal()">취소</button>
+          <button type="submit" class="btn btn-success">복귀 처리</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+<% } %>
+
+<!-- Module Action Modal (장비실/반납) -->
+<div id="moduleActionModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:8px; width:90%; max-width:480px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee;">
+      <h3 style="margin:0;" id="moduleActionTitle">모듈 처리</h3>
+      <button onclick="closeModuleActionModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
+    </div>
+    <div style="padding:20px;">
+      <p id="moduleActionInfo" style="font-size:13px; color:#666; margin-bottom:12px;"></p>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label>사유 (선택)</label>
+        <input type="text" id="moduleActionReason" class="form-control" placeholder="사유 입력">
+      </div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label>사진 첨부 (선택)</label>
+        <input type="file" id="moduleActionPhotos" class="form-control" multiple accept="image/*">
+        <div id="moduleActionPhotoPreview" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"></div>
+      </div>
+      <div id="moduleActionResultMsg" style="font-size:13px; min-height:20px; margin-bottom:8px;"></div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn btn-outline" onclick="closeModuleActionModal()">취소</button>
+        <button type="button" class="btn btn-primary" id="moduleActionSubmitBtn" onclick="submitModuleAction()">처리</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var _faultModules = <%- JSON.stringify(modules || []) %>;
+var _transferModuleIds = [];
+var _allTransferAssets = [];
+var _transferAssetsLoaded = false;
+
+function toggleAllModules(master) {
+  document.querySelectorAll('.module-check').forEach(function(cb) { cb.checked = master.checked; });
+  updateBulkBtn();
+}
+
+function updateBulkBtn() {
+  var checked = document.querySelectorAll('.module-check:checked');
+  var btn = document.getElementById('bulkTransferBtn');
+  document.getElementById('bulkCount').textContent = checked.length;
+  btn.style.display = checked.length > 0 ? '' : 'none';
+}
+
+function openBulkTransfer() {
+  var checked = document.querySelectorAll('.module-check:checked');
+  var ids = [];
+  var labels = [];
+  checked.forEach(function(cb) {
+    ids.push(parseInt(cb.value));
+    labels.push(cb.dataset.label);
+  });
+  if (ids.length === 0) return;
+  openTransferModal(ids, ids.length + '개 모듈: ' + labels.join(', '));
+}
+
+function openTransferModal(moduleIds, label) {
+  _transferModuleIds = moduleIds;
+  document.getElementById('transferModalTitle').textContent = moduleIds.length > 1 ? '모듈 일괄 이동' : '모듈 이동';
+  document.getElementById('transferModuleInfo').textContent = label;
+  document.getElementById('transferReasonInput').value = '';
+  document.getElementById('transferResultMsg').textContent = '';
+  document.getElementById('transferAssetSearch').value = '';
+  document.getElementById('moduleTransferModal').style.display = 'flex';
+
+  if (!_transferAssetsLoaded) {
+    fetch('/module-inventory/api/assets')
+      .then(function(r) { return r.json(); })
+      .then(function(assets) {
+        _allTransferAssets = assets;
+        _transferAssetsLoaded = true;
+        renderTransferAssets(assets);
+      });
+  } else {
+    renderTransferAssets(_allTransferAssets);
+  }
+}
+
+function renderTransferAssets(assets) {
+  var sel = document.getElementById('transferAssetSelect');
+  var currentAssetId = '<%= asset.id %>';
+  sel.innerHTML = '';
+  assets.forEach(function(a) {
+    if (String(a.id) === currentAssetId) return;
+    var opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = a.label;
+    sel.appendChild(opt);
+  });
+  if (sel.options.length === 0) {
+    sel.innerHTML = '<option value="">이동 가능한 자산 없음</option>';
+  }
+}
+
+function filterTransferAssets() {
+  var q = document.getElementById('transferAssetSearch').value.toLowerCase().trim();
+  if (!q) {
+    renderTransferAssets(_allTransferAssets);
+    return;
+  }
+  var filtered = _allTransferAssets.filter(function(a) {
+    return a.label.toLowerCase().indexOf(q) >= 0;
+  });
+  renderTransferAssets(filtered);
+}
+
+function closeTransferModal() {
+  document.getElementById('moduleTransferModal').style.display = 'none';
+}
+
+function submitModuleTransfer() {
+  var sel = document.getElementById('transferAssetSelect');
+  var toAssetId = sel.value;
+  if (!toAssetId) { alert('이동 대상 서버를 선택해주세요.'); return; }
+
+  var resultEl = document.getElementById('transferResultMsg');
+  resultEl.textContent = '처리 중... (0/' + _transferModuleIds.length + ')';
+  resultEl.style.color = '#3b82f6';
+
+  var reason = document.getElementById('transferReasonInput').value.trim() || null;
+  var done = 0;
+  var errors = [];
+
+  function doTransfer(idx) {
+    if (idx >= _transferModuleIds.length) {
+      if (errors.length > 0) {
+        resultEl.style.color = '#ef4444';
+        resultEl.textContent = '일부 실패: ' + errors.join(', ');
+      } else {
+        resultEl.style.color = '#22c55e';
+        resultEl.textContent = '완료! ' + done + '개 모듈 이동됨';
+        setTimeout(function() { location.reload(); }, 800);
+      }
+      return;
+    }
+    fetch('/module-inventory/modules/' + _transferModuleIds[idx] + '/transfer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_asset_id: toAssetId, reason: reason })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.success) {
+        done++;
+        resultEl.textContent = '처리 중... (' + done + '/' + _transferModuleIds.length + ')';
+      } else {
+        errors.push(data.error || 'ID:' + _transferModuleIds[idx]);
+      }
+      doTransfer(idx + 1);
+    })
+    .catch(function(err) {
+      errors.push(err.message);
+      doTransfer(idx + 1);
+    });
+  }
+  doTransfer(0);
+}
+
+// === Module Action Modal (장비실/반납) ===
+var _moduleActionId = null;
+var _moduleActionType = null;
+var _moduleActionLabel = '';
+
+function openModuleActionModal(moduleId, action, label) {
+  _moduleActionId = moduleId;
+  _moduleActionType = action;
+  _moduleActionLabel = label;
+
+  var actionLabel = action === 'storage' ? '장비실 보관' : '업체 반납';
+  document.getElementById('moduleActionTitle').textContent = actionLabel;
+  document.getElementById('moduleActionInfo').textContent = label + ' 모듈을 ' + actionLabel + ' 처리합니다.';
+  document.getElementById('moduleActionReason').value = '';
+  document.getElementById('moduleActionPhotos').value = '';
+  document.getElementById('moduleActionPhotoPreview').innerHTML = '';
+  document.getElementById('moduleActionResultMsg').textContent = '';
+  document.getElementById('moduleActionSubmitBtn').disabled = false;
+  document.getElementById('moduleActionSubmitBtn').textContent = actionLabel;
+  document.getElementById('moduleActionSubmitBtn').className = action === 'vendor_return' ? 'btn btn-warning' : 'btn btn-primary';
+  document.getElementById('moduleActionModal').style.display = 'flex';
+}
+
+function closeModuleActionModal() {
+  document.getElementById('moduleActionModal').style.display = 'none';
+}
+
+var _moduleActionPhotosEl = document.getElementById('moduleActionPhotos');
+if (_moduleActionPhotosEl) _moduleActionPhotosEl.addEventListener('change', function() {
+  var preview = document.getElementById('moduleActionPhotoPreview');
+  preview.innerHTML = '';
+  var files = this.files;
+  for (var i = 0; i < files.length; i++) {
+    var reader = new FileReader();
+    reader.onload = (function(file) {
+      return function(e) {
+        var img = document.createElement('img');
+        img.src = e.target.result;
+        img.style.cssText = 'width:60px; height:45px; object-fit:cover; border-radius:4px; border:1px solid #e2e8f0;';
+        img.title = file.name;
+        preview.appendChild(img);
+      };
+    })(files[i]);
+    reader.readAsDataURL(files[i]);
+  }
+});
+
+function submitModuleAction() {
+  var actionLabel = _moduleActionType === 'storage' ? '장비실 보관' : '업체 반납';
+  var reason = document.getElementById('moduleActionReason').value.trim();
+  var resultEl = document.getElementById('moduleActionResultMsg');
+  var submitBtn = document.getElementById('moduleActionSubmitBtn');
+
+  submitBtn.disabled = true;
+  resultEl.textContent = '처리 중...';
+  resultEl.style.color = '#3b82f6';
+
+  fetch('/assets/<%= asset.id %>/module-action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ module_id: _moduleActionId, action: _moduleActionType, reason: reason || null })
+  })
+  .then(function(r) {
+    if (!r.ok) {
+      return r.text().then(function(t) {
+        try { return JSON.parse(t); } catch(e) { throw new Error('서버 오류 (' + r.status + ')'); }
+      });
+    }
+    return r.json();
+  })
+  .then(function(data) {
+    if (!data.success) {
+      throw new Error(data.error || '처리 실패');
+    }
+    // Upload photos if any
+    var photoFiles = document.getElementById('moduleActionPhotos').files;
+    if (photoFiles && photoFiles.length > 0) {
+      resultEl.textContent = '사진 업로드 중...';
+      var formData = new FormData();
+      for (var i = 0; i < photoFiles.length; i++) {
+        formData.append('photos', photoFiles[i]);
+      }
+      return fetch('/api/photos/asset/<%= asset.id %>', {
+        method: 'POST',
+        body: formData
+      }).then(function(r2) { return r2.json(); }).then(function() {
+        return { success: true };
+      });
+    }
+    return { success: true };
+  })
+  .then(function(result) {
+    if (result.success) {
+      resultEl.style.color = '#22c55e';
+      resultEl.textContent = actionLabel + ' 처리 완료';
+      setTimeout(function() { location.reload(); }, 800);
+    }
+  })
+  .catch(function(err) {
+    resultEl.style.color = '#ef4444';
+    resultEl.textContent = '오류: ' + err.message;
+    submitBtn.disabled = false;
+  });
+}
+
+// === Fault Repair Modal ===
+var _faultTransferAssetsLoaded = false;
+
+function openFaultRepairModal() {
+  document.getElementById('faultReason').value = '장애';
+  document.getElementById('faultTargetStatus').value = 'maintenance';
+  document.getElementById('faultNotes').value = '';
+  document.getElementById('faultResultMsg').textContent = '';
+  document.getElementById('faultTransferSection').style.display = 'none';
+
+  var tbody = document.getElementById('faultModuleBody');
+  tbody.innerHTML = '';
+  _faultModules.forEach(function(m, idx) {
+    var ownerLabel = m.owner === 'vendor' ? (m.owner_vendor_name || '업체') : '자사';
+    var ownerClass = m.owner === 'vendor' ? 'badge-warning' : 'badge-success';
+    var typeLabel = m.module_type || '-';
+    <% if (typeof appConfig !== 'undefined') { %>
+    var typeMap = {};
+    <%- JSON.stringify(appConfig.moduleTypes) %>.forEach(function(t) { typeMap[t.value] = t.label; });
+    typeLabel = typeMap[m.module_type] || m.module_type;
+    <% } %>
+
+    var isVendor = m.owner === 'vendor';
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><span class="badge ' + ownerClass + '">' + ownerLabel + '</span></td>' +
+      '<td><span class="badge badge-info">' + typeLabel + '</span></td>' +
+      '<td>' + (m.model || '-') + '</td>' +
+      '<td>' + (m.count || 1) + '</td>' +
+      '<td style="white-space:nowrap;">' +
+        '<label style="margin-right:8px;"><input type="radio" name="fault_action_' + idx + '" value="keep" checked onchange="onFaultActionChange()"> 유지</label>' +
+        '<label style="margin-right:8px;"><input type="radio" name="fault_action_' + idx + '" value="storage" onchange="onFaultActionChange()"> 장비실</label>' +
+        '<label style="margin-right:8px;"><input type="radio" name="fault_action_' + idx + '" value="transfer" onchange="onFaultActionChange()"> 이동</label>' +
+        (isVendor ? '<label><input type="radio" name="fault_action_' + idx + '" value="vendor_send" onchange="onFaultActionChange()"> 업체반출</label>' : '') +
+      '</td>';
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('faultRepairModal').style.display = 'flex';
+
+  // Load transfer assets
+  if (!_faultTransferAssetsLoaded && !_transferAssetsLoaded) {
+    fetch('/module-inventory/api/assets')
+      .then(function(r) { return r.json(); })
+      .then(function(assets) {
+        _allTransferAssets = assets;
+        _transferAssetsLoaded = true;
+        _faultTransferAssetsLoaded = true;
+        renderFaultTransferAssets(assets);
+      });
+  } else {
+    _faultTransferAssetsLoaded = true;
+    renderFaultTransferAssets(_allTransferAssets);
+  }
+}
+
+function closeFaultRepairModal() {
+  document.getElementById('faultRepairModal').style.display = 'none';
+}
+
+function onFaultActionChange() {
+  var hasTransfer = false;
+  _faultModules.forEach(function(m, idx) {
+    var radios = document.getElementsByName('fault_action_' + idx);
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].checked && radios[i].value === 'transfer') {
+        hasTransfer = true;
+        break;
+      }
+    }
+  });
+  document.getElementById('faultTransferSection').style.display = hasTransfer ? '' : 'none';
+}
+
+function renderFaultTransferAssets(assets) {
+  var sel = document.getElementById('faultTransferAssetSelect');
+  var currentAssetId = '<%= asset.id %>';
+  sel.innerHTML = '';
+  assets.forEach(function(a) {
+    if (String(a.id) === currentAssetId) return;
+    var opt = document.createElement('option');
+    opt.value = a.id;
+    opt.textContent = a.label;
+    sel.appendChild(opt);
+  });
+  if (sel.options.length === 0) {
+    sel.innerHTML = '<option value="">이동 가능한 자산 없음</option>';
+  }
+}
+
+function filterFaultTransferAssets() {
+  var q = document.getElementById('faultTransferSearch').value.toLowerCase().trim();
+  if (!q) {
+    renderFaultTransferAssets(_allTransferAssets);
+    return;
+  }
+  var filtered = _allTransferAssets.filter(function(a) {
+    return a.label.toLowerCase().indexOf(q) >= 0;
+  });
+  renderFaultTransferAssets(filtered);
+}
+
+function submitFaultRepair() {
+  var reason = document.getElementById('faultReason').value;
+  var targetStatus = document.getElementById('faultTargetStatus').value;
+  var notes = document.getElementById('faultNotes').value.trim();
+  var toAssetId = document.getElementById('faultTransferAssetSelect').value;
+
+  var moduleActions = [];
+  var hasTransfer = false;
+  _faultModules.forEach(function(m, idx) {
+    var radios = document.getElementsByName('fault_action_' + idx);
+    var action = 'keep';
+    for (var i = 0; i < radios.length; i++) {
+      if (radios[i].checked) { action = radios[i].value; break; }
+    }
+    if (action === 'transfer') hasTransfer = true;
+    var entry = { id: m.id, action: action };
+    if (action === 'transfer' && toAssetId) {
+      entry.to_asset_id = parseInt(toAssetId);
+    }
+    moduleActions.push(entry);
+  });
+
+  if (hasTransfer && !toAssetId) {
+    alert('이동 대상 자산을 선택해주세요.');
+    return;
+  }
+
+  var allKeep = moduleActions.every(function(m) { return m.action === 'keep'; });
+  if (allKeep && !targetStatus) {
+    alert('처리할 모듈을 선택하거나 상태를 변경해주세요.');
+    return;
+  }
+
+  var resultEl = document.getElementById('faultResultMsg');
+  resultEl.textContent = '처리 중...';
+  resultEl.style.color = '#3b82f6';
+
+  fetch('/assets/<%= asset.id %>/fault-repair', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({
+      reason: reason,
+      notes: notes,
+      target_status: targetStatus,
+      modules: moduleActions
+    })
+  })
+  .then(function(r) {
+    if (!r.ok) {
+      return r.text().then(function(t) {
+        try { return JSON.parse(t); } catch(e) { throw new Error('서버 오류 (' + r.status + ')'); }
+      });
+    }
+    return r.json();
+  })
+  .then(function(data) {
+    if (data.success) {
+      resultEl.style.color = '#22c55e';
+      resultEl.textContent = '처리 완료!';
+      setTimeout(function() { location.reload(); }, 800);
+    } else {
+      resultEl.style.color = '#ef4444';
+      resultEl.textContent = '오류: ' + (data.error || '알 수 없는 오류');
+    }
+  })
+  .catch(function(err) {
+    resultEl.style.color = '#ef4444';
+    resultEl.textContent = '오류: ' + err.message;
+  });
+}
+
+// === Restore Modal ===
+function openRestoreModal() {
+  document.getElementById('restoreModal').style.display = 'flex';
+  onRestoreRoomChange();
+}
+
+function closeRestoreModal() {
+  document.getElementById('restoreModal').style.display = 'none';
+}
+
+function onRestoreRoomChange() {
+  var roomId = document.getElementById('restoreRoomSelect').value;
+  var rackSel = document.getElementById('restoreRackSelect');
+  rackSel.innerHTML = '<option value="">변경 안 함</option>';
+  if (!roomId) return;
+
+  fetch('/assets/api/racks-by-room/' + roomId)
+    .then(function(r) { return r.json(); })
+    .then(function(racks) {
+      var currentRackId = '<%= asset.rack_id || "" %>';
+      racks.forEach(function(rack) {
+        var opt = document.createElement('option');
+        opt.value = rack.id;
+        opt.textContent = rack.name;
+        if (String(rack.id) === currentRackId) opt.selected = true;
+        rackSel.appendChild(opt);
+      });
+    });
+}
+
+function onRestoreRackChange() {
+  // placeholder for future rack preview
+}
+</script>
 
 <%- include('../partials/footer', { extraJs }) %>

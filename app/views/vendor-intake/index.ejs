@@ -1,0 +1,110 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>입고 신청 관리</h1>
+    <form method="POST" action="/vendor-intake/create-link" style="display:inline">
+        <button type="submit" class="btn btn-primary">+ 입고 링크 생성</button>
+    </form>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value"><%= (stats.draft || 0) + (stats.pending || 0) + (stats.approved || 0) + (stats.rejected || 0) %></div>
+        <div class="stat-label">전체 신청</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="stat-value"><%= stats.pending || 0 %></div>
+        <div class="stat-label">검토 대기</div>
+    </div>
+    <div class="stat-card success">
+        <div class="stat-value"><%= stats.approved || 0 %></div>
+        <div class="stat-label">승인</div>
+    </div>
+    <div class="stat-card danger">
+        <div class="stat-value"><%= stats.rejected || 0 %></div>
+        <div class="stat-label">반려</div>
+    </div>
+</div>
+
+<div class="card">
+    <div style="margin-bottom:12px;">
+        <a href="/vendor-intake" class="btn btn-sm <%= currentStatus === 'all' ? 'btn-primary' : 'btn-outline' %>">전체</a>
+        <a href="/vendor-intake?status=pending" class="btn btn-sm <%= currentStatus === 'pending' ? 'btn-primary' : 'btn-outline' %>">검토 대기</a>
+        <a href="/vendor-intake?status=approved" class="btn btn-sm <%= currentStatus === 'approved' ? 'btn-primary' : 'btn-outline' %>">승인</a>
+        <a href="/vendor-intake?status=rejected" class="btn btn-sm <%= currentStatus === 'rejected' ? 'btn-primary' : 'btn-outline' %>">반려</a>
+        <a href="/vendor-intake?status=draft" class="btn btn-sm <%= currentStatus === 'draft' ? 'btn-primary' : 'btn-outline' %>">미작성</a>
+    </div>
+
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>상태</th>
+                    <th>업체명</th>
+                    <th>담당자</th>
+                    <th>장비</th>
+                    <th>수량</th>
+                    <th>입고 예정일</th>
+                    <th>신청일</th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% if (requests.length === 0) { %>
+                <tr><td colspan="9" class="text-center text-muted">신청 내역이 없습니다.</td></tr>
+                <% } %>
+                <% requests.forEach(r => { %>
+                <tr>
+                    <td><%= r.id %></td>
+                    <td>
+                        <% if (r.status === 'draft') { %>
+                        <span class="badge badge-secondary">미작성</span>
+                        <% } else if (r.status === 'pending') { %>
+                        <span class="badge badge-warning">검토중</span>
+                        <% } else if (r.status === 'approved') { %>
+                        <span class="badge badge-success">승인</span>
+                        <% } else if (r.status === 'rejected') { %>
+                        <span class="badge badge-danger">반려</span>
+                        <% } %>
+                    </td>
+                    <td><%= r.company_name || '-' %></td>
+                    <td><%= r.contact_name || '-' %></td>
+                    <td>
+                        <% const eqLabels = {server:'서버',storage:'스토리지',switch:'스위치',other:'기타'}; %>
+                        <%= r.model_name || eqLabels[r.equipment_type] || r.equipment_type || '-' %>
+                    </td>
+                    <td><%= r.quantity || 1 %></td>
+                    <td><%= r.expected_start || '-' %></td>
+                    <td><%= r.submitted_at ? r.submitted_at.substring(0, 10) : '-' %></td>
+                    <td>
+                        <div class="btn-group">
+                            <a href="/vendor-intake/<%= r.id %>" class="btn btn-sm btn-outline">상세</a>
+                            <% if (r.status === 'draft') { %>
+                            <button type="button" class="btn btn-sm btn-info" onclick="copyLink('<%= r.token %>')">링크복사</button>
+                            <% } %>
+                            <form method="POST" action="/vendor-intake/<%= r.id %>/delete" style="display:inline" onsubmit="return confirm('삭제하시겠습니까?')">
+                                <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted mt-1">총 <%= requests.length %>건</p>
+</div>
+
+<script>
+function copyLink(token) {
+    const url = location.origin + '/intake/' + token;
+    navigator.clipboard.writeText(url).then(() => {
+        alert('링크가 복사되었습니다:\n' + url);
+    }).catch(() => {
+        prompt('아래 링크를 복사하세요:', url);
+    });
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

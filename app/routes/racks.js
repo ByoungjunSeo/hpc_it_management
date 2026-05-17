@@ -113,15 +113,16 @@ router.get('/:id/power-status', async (req, res) => {
         return;
       }
 
-      let bmcCred = db.prepare(
+      const bmcCred = db.prepare(
         "SELECT username, password FROM asset_credentials WHERE asset_id = ? AND credential_type = 'bmc' LIMIT 1"
       ).get(asset.id);
 
-      // Fallback: try ADMIN/ADMIN (common BMC default)
-      const user = bmcCred ? bmcCred.username : 'ADMIN';
-      const pass = bmcCred ? (bmcCred.password || 'ADMIN') : 'ADMIN';
+      if (!bmcCred) {
+        results[asset.id] = { status: 'no_cred', message: 'BMC 계정 미등록' };
+        return;
+      }
 
-      const result = await ipmiPowerStatus(bmcIp.ip_address, user, pass);
+      const result = await ipmiPowerStatus(bmcIp.ip_address, bmcCred.username, bmcCred.password || '');
       result.bmc_ip = bmcIp.ip_address;
       results[asset.id] = result;
     }));
@@ -156,14 +157,15 @@ router.post('/:id/power-control', async (req, res) => {
       return res.status(400).json({ error: 'BMC IP가 등록되지 않았습니다.' });
     }
 
-    let bmcCred = db.prepare(
+    const bmcCred = db.prepare(
       "SELECT username, password FROM asset_credentials WHERE asset_id = ? AND credential_type = 'bmc' LIMIT 1"
     ).get(assetId);
 
-    const user = bmcCred ? bmcCred.username : 'ADMIN';
-    const pass = bmcCred ? (bmcCred.password || 'ADMIN') : 'ADMIN';
+    if (!bmcCred) {
+      return res.status(400).json({ error: 'BMC 계정이 등록되지 않았습니다.' });
+    }
 
-    const result = await ipmiPowerControl(bmcIp.ip_address, user, pass, action);
+    const result = await ipmiPowerControl(bmcIp.ip_address, bmcCred.username, bmcCred.password || '', action);
 
     // Get updated power status after control
     let status = null;

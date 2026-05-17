@@ -243,6 +243,7 @@
         </div>
     </div>
 
+    <input type="hidden" name="_ip_section_present" value="1">
     <div class="card-header mt-2"><h2>IP 주소</h2></div>
 
     <div id="ipRows">
@@ -325,6 +326,7 @@
         </div>
     </div>
 
+    <input type="hidden" name="_cred_section_present" value="1">
     <div id="credRows">
         <% const creds = (typeof assetCredentials !== 'undefined' && assetCredentials.length > 0) ? assetCredentials : (asset && asset.ssh_user ? [{ username: asset.ssh_user, password: asset.ssh_password || '', credential_type: 'root', description: '' }] : []); %>
         <% creds.forEach((cred, idx) => { %>
@@ -359,6 +361,58 @@
         <button type="button" class="btn btn-sm btn-outline" onclick="addCredRow()">+ 계정 추가</button>
     </div>
 
+    <% if (asset && typeof modules !== 'undefined' && modules && modules.length > 0) { %>
+    <div class="card-header mt-2">
+        <h2>컴퓨팅 모듈</h2>
+        <a href="/module-inventory/modules/new?asset_id=<%= asset.id %>" class="btn btn-sm btn-outline" style="margin-left:auto;">+ 모듈 추가</a>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>소유</th>
+                    <th>모델</th>
+                    <th>제조사</th>
+                    <th>용량</th>
+                    <th>수량</th>
+                    <th>사양코드</th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% modules.forEach(m => { %>
+                <tr>
+                    <td><span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span></td>
+                    <td>
+                        <% if (m.owner === 'vendor') { %>
+                            <span class="badge badge-warning">업체</span>
+                        <% } else { %>
+                            <span class="badge badge-success">자사</span>
+                        <% } %>
+                    </td>
+                    <td><%= m.model || '-' %></td>
+                    <td><%= m.manufacturer || '-' %></td>
+                    <td><%= m.capacity || '-' %></td>
+                    <td><%= m.count || 1 %></td>
+                    <td><% if (m.specification) { %><code style="font-size:12px;"><%= m.specification %></code><% } else { %>-<% } %></td>
+                    <td>
+                        <a href="/module-inventory/modules/<%= m.id %>/edit?returnTo=/assets/<%= asset.id %>/edit" class="btn btn-sm btn-outline">수정</a>
+                        <button type="button" class="btn btn-sm btn-danger" onclick="deleteModule(<%= m.id %>, '/assets/<%= asset.id %>/edit')">삭제</button>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% } else if (asset) { %>
+    <div class="card-header mt-2">
+        <h2>컴퓨팅 모듈</h2>
+        <a href="/module-inventory/modules/new?asset_id=<%= asset.id %>" class="btn btn-sm btn-outline" style="margin-left:auto;">+ 모듈 추가</a>
+    </div>
+    <p class="text-muted" style="padding:0 16px;">등록된 컴퓨팅 모듈이 없습니다.</p>
+    <% } %>
+
     <div class="card-header mt-2"><h2>운영 정보</h2></div>
 
     <div class="form-row">
@@ -391,6 +445,10 @@
     </div>
 </form>
 
+<% if (asset) { %>
+<%- include('../partials/photo-section', { entityType: 'asset', entityId: asset.id, photos: typeof assetPhotos !== 'undefined' ? assetPhotos : [], editable: true }) %>
+<% } %>
+
 <!-- 가용 IP 조회 모달 -->
 <div id="ipModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999;">
     <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; border-radius:8px; padding:20px; width:520px; max-height:80vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
@@ -413,6 +471,19 @@
 </div>
 
 <script>
+function deleteModule(moduleId, returnTo) {
+    if (!confirm('이 모듈을 삭제하시겠습니까?')) return;
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/module-inventory/modules/' + moduleId + '/delete';
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'returnTo';
+    input.value = returnTo;
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
 function toggleVendor() {
     var sel = document.getElementById('ownershipSelect');
     var isVendor = sel.value === 'vendor';

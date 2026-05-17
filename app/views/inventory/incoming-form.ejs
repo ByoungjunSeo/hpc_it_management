@@ -1,0 +1,523 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>입고 등록</h1>
+    <a href="/inventory" class="btn btn-secondary">목록</a>
+</div>
+
+<form method="POST" action="/inventory/incoming" enctype="multipart/form-data">
+
+<!-- Asset Type Selection -->
+<div class="card">
+    <div class="card-header"><h2>자산유형</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>자산유형 *</label>
+            <select name="asset_type" id="incomingType" class="form-control" required onchange="onIncomingTypeChange()">
+                <option value="">선택</option>
+                <optgroup label="장비">
+                    <% appConfig.allIncomingTypes.filter(t => t.category === 'equipment').forEach(t => { %>
+                    <option value="<%= t.value %>" data-category="equipment"><%= t.label %></option>
+                    <% }) %>
+                </optgroup>
+                <optgroup label="부품">
+                    <% appConfig.allIncomingTypes.filter(t => t.category === 'module').forEach(t => { %>
+                    <option value="<%= t.value %>" data-category="module"><%= t.label %></option>
+                    <% }) %>
+                </optgroup>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>소유구분</label>
+            <select name="ownership" id="incomingOwnership" class="form-control">
+                <% appConfig.ownershipTypes.forEach(t => { %>
+                <option value="<%= t.value %>"><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group" id="vendorSelectGroup" style="display:none">
+            <label>업체 선택</label>
+            <select name="vendor_id" id="vendorSelect" class="form-control" onchange="toggleNewVendor()">
+                <option value="">선택</option>
+                <% vendors.forEach(v => { %>
+                <option value="<%= v.id %>"><%= v.vendor_name %></option>
+                <% }) %>
+                <option value="__new__">+ 신규 업체 등록</option>
+            </select>
+        </div>
+        <div class="form-group" id="newVendorGroup" style="display:none">
+            <label>신규 업체명</label>
+            <input type="text" name="new_vendor_name" class="form-control" placeholder="업체명 입력">
+        </div>
+    </div>
+</div>
+
+<!-- Basic Info -->
+<div class="card">
+    <div class="card-header"><h2>기본 정보</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>관리번호 * <small class="text-muted" id="mgmtHelpText" style="display:none">(기존 코드 선택 또는 새 코드 직접 입력)</small></label>
+            <input type="text" name="management_number" id="incomingMgmtInput" class="form-control" list="incoming-mgmt-list" required autocomplete="off" placeholder="관리번호 입력">
+            <datalist id="incoming-mgmt-list">
+                <!-- Populated dynamically for modules -->
+            </datalist>
+            <small id="vendorMgmtPreview" style="display:none; color:var(--primary); font-weight:600;"></small>
+            <!-- Duplicate check result -->
+            <small id="mgmtDupCheck" style="display:none; font-weight:600;"></small>
+            <!-- Next management number suggestions (non-vendor equipment only) -->
+            <div id="mgmtSuggestionArea" style="display:none; margin-top:6px;">
+                <div id="mgmtSuggestions" style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                    <small style="color:#64748b;">추천:</small>
+                </div>
+                <div id="mgmtRecent" style="margin-top:4px;">
+                    <small style="color:#94a3b8;"></small>
+                </div>
+            </div>
+        </div>
+        <div class="form-group" id="assetNumberGroup">
+            <label>자산번호</label>
+            <input type="text" name="asset_number" id="incomingAssetNumber" class="form-control" autocomplete="off">
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>제조사</label>
+            <input type="text" name="manufacturer" id="incomingManufacturer" class="form-control">
+        </div>
+        <div class="form-group">
+            <label>모델명</label>
+            <input type="text" name="model_name" id="incomingModelName" class="form-control">
+        </div>
+        <div class="form-group">
+            <label>시리얼번호</label>
+            <input type="text" name="serial_number" class="form-control">
+        </div>
+    </div>
+</div>
+
+<!-- Module-specific fields (hidden for equipment) -->
+<div class="card" id="moduleFields" style="display:none">
+    <div class="card-header"><h2>부품 정보</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>용량</label>
+            <input type="text" name="capacity" id="incomingCapacity" class="form-control" placeholder="예: 32GB, 1TB">
+        </div>
+        <div class="form-group">
+            <label>수량</label>
+            <input type="number" name="quantity" class="form-control" value="1" min="1">
+        </div>
+        <div class="form-group" style="flex:2">
+            <label>사양</label>
+            <input type="text" name="specification" class="form-control" placeholder="예: DDR5 4800MHz">
+        </div>
+    </div>
+</div>
+
+<!-- Equipment-specific fields (hidden for modules) -->
+<div class="card" id="equipmentFields">
+    <div class="card-header"><h2>장비 정보</h2></div>
+    <div class="form-row">
+        <div class="form-group" id="nodeCountGroup">
+            <label>노드 수 <small class="text-muted">(블레이드 서버)</small></label>
+            <input type="number" name="node_count" id="nodeCountInput" class="form-control" value="1" min="1" max="8">
+            <small class="text-muted" id="nodeCountHint" style="display:none">
+                섀시 + 노드별 자산 자동 생성: <span id="nodeCountPreview"></span>
+            </small>
+        </div>
+        <div class="form-group">
+            <label>상태</label>
+            <select name="status" class="form-control">
+                <% appConfig.assetStatuses.forEach(s => { %>
+                <option value="<%= s.value %>"><%= s.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>구매일</label>
+            <input type="date" name="purchase_date" class="form-control">
+        </div>
+        <div class="form-group">
+            <label>입고일</label>
+            <input type="date" name="incoming_date" class="form-control" value="<%= new Date().toISOString().split('T')[0] %>">
+        </div>
+    </div>
+    <div class="form-row" id="uSizeRow" style="display:none">
+        <div class="form-group">
+            <label>U 사이즈</label>
+            <input type="number" name="u_size" id="uSizeInput" class="form-control" value="1" min="1" max="42">
+            <small class="text-muted">장비의 U 크기 (1U, 2U, 4U 등)</small>
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>보증만료일</label>
+            <input type="date" name="warranty_end" class="form-control">
+        </div>
+        <div class="form-group">
+            <label>반납예정일</label>
+            <input type="date" name="return_expected" class="form-control">
+        </div>
+    </div>
+</div>
+
+<!-- Notes -->
+<div class="card">
+    <div class="card-header"><h2>기타</h2></div>
+    <div class="form-row">
+        <div class="form-group" style="flex:2">
+            <label>비고</label>
+            <input type="text" name="notes" class="form-control">
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group" style="flex:2">
+            <label>사진 첨부 (선택)</label>
+            <input type="file" name="photos" id="incomingPhotos" class="form-control" multiple accept="image/*">
+            <div id="incomingPhotoPreview" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"></div>
+        </div>
+    </div>
+</div>
+
+<div class="form-actions" style="margin-bottom:24px;">
+    <button type="submit" class="btn btn-primary">입고 등록</button>
+    <a href="/inventory" class="btn btn-secondary">취소</a>
+</div>
+
+</form>
+
+<script>
+// Module inventory items for datalist (from server)
+var moduleInventoryItems = <%- JSON.stringify(moduleInventoryItems || []) %>;
+
+// Module type values for category detection
+var moduleTypeValues = [<% appConfig.moduleTypes.forEach(function(t, i) { %>'<%= t.value %>'<% if (i < appConfig.moduleTypes.length - 1) { %>,<% } %><% }) %>];
+
+function isModuleType(val) {
+    return moduleTypeValues.indexOf(val) !== -1;
+}
+
+function onIncomingTypeChange() {
+    var sel = document.getElementById('incomingType');
+    var val = sel.value;
+    var moduleFields = document.getElementById('moduleFields');
+    var equipmentFields = document.getElementById('equipmentFields');
+    var mgmtInput = document.getElementById('incomingMgmtInput');
+    var mgmtHelp = document.getElementById('mgmtHelpText');
+
+    if (isModuleType(val)) {
+        moduleFields.style.display = '';
+        equipmentFields.style.display = 'none';
+        mgmtInput.placeholder = '기존 코드 선택 또는 새 코드 입력 (예: CPU-NEW1)';
+        mgmtHelp.style.display = '';
+        updateModuleDatalist(val);
+        hideMgmtSuggestions();
+    } else {
+        moduleFields.style.display = 'none';
+        equipmentFields.style.display = '';
+        // Show U size for server/storage/switch
+        var uSizeRow = document.getElementById('uSizeRow');
+        if (uSizeRow) {
+            var showUSize = ['server', 'storage', 'switch'].indexOf(val) !== -1;
+            uSizeRow.style.display = showUSize ? '' : 'none';
+        }
+        mgmtInput.placeholder = '관리번호 입력';
+        mgmtHelp.style.display = 'none';
+        // Clear module datalist
+        document.getElementById('incoming-mgmt-list').innerHTML = '';
+        // Fetch suggestions for non-vendor equipment
+        var ownership = document.getElementById('incomingOwnership').value;
+        if (ownership !== 'vendor' && val) {
+            fetchMgmtSuggestions(val);
+        } else {
+            hideMgmtSuggestions();
+        }
+    }
+}
+
+function updateModuleDatalist(moduleType) {
+    var datalist = document.getElementById('incoming-mgmt-list');
+    datalist.innerHTML = '';
+    var filtered = moduleInventoryItems.filter(function(m) { return m.module_type === moduleType; });
+    filtered.forEach(function(m) {
+        var opt = document.createElement('option');
+        opt.value = m.item_code;
+        opt.textContent = m.item_code + ' - ' + (m.model || '') + ' ' + (m.capacity || '');
+        datalist.appendChild(opt);
+    });
+}
+
+// Vendor toggle
+document.getElementById('incomingOwnership').addEventListener('change', function() {
+    toggleVendor();
+    toggleVendorMgmt();
+});
+
+function toggleVendor() {
+    var ownership = document.getElementById('incomingOwnership').value;
+    var vendorGroup = document.getElementById('vendorSelectGroup');
+    if (ownership === 'vendor') {
+        vendorGroup.style.display = '';
+    } else {
+        vendorGroup.style.display = 'none';
+        document.getElementById('newVendorGroup').style.display = 'none';
+    }
+}
+
+function fetchVendorMgmtPreview() {
+    var ownership = document.getElementById('incomingOwnership').value;
+    if (ownership !== 'vendor') return;
+
+    var mgmtInput = document.getElementById('incomingMgmtInput');
+    var preview = document.getElementById('vendorMgmtPreview');
+    var vendorSel = document.getElementById('vendorSelect');
+    var newVendorInput = document.querySelector('input[name="new_vendor_name"]');
+
+    var params = '';
+    if (vendorSel.value === '__new__' && newVendorInput.value.trim()) {
+        params = '?vendor_name=' + encodeURIComponent(newVendorInput.value.trim());
+    } else if (vendorSel.value && vendorSel.value !== '__new__') {
+        params = '?vendor_id=' + vendorSel.value;
+    }
+
+    fetch('/inventory/api/vendor-mgmt-number' + params)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            mgmtInput.placeholder = data.management_number;
+            preview.textContent = '자동 생성: ' + data.management_number;
+            preview.style.display = '';
+        });
+}
+
+function toggleVendorMgmt() {
+    var ownership = document.getElementById('incomingOwnership').value;
+    var mgmtInput = document.getElementById('incomingMgmtInput');
+    var assetInput = document.getElementById('incomingAssetNumber');
+    var preview = document.getElementById('vendorMgmtPreview');
+    var assetGroup = document.getElementById('assetNumberGroup');
+    var dupCheck = document.getElementById('mgmtDupCheck');
+
+    var currentType = document.getElementById('incomingType').value;
+    var isModule = isModuleType(currentType);
+
+    if (ownership === 'vendor') {
+        mgmtInput.readOnly = false;
+        mgmtInput.style.background = '';
+        mgmtInput.removeAttribute('required');
+        mgmtInput.placeholder = '자동생성 또는 기존 관리번호 입력 (재입고)';
+        if (!isModule) {
+            assetInput.value = '';
+            assetInput.readOnly = true;
+            assetInput.style.background = '#f1f5f9';
+            assetGroup.style.display = 'none';
+        }
+        fetchVendorMgmtPreview();
+        fetchVendorReturnedAssets();
+        hideMgmtSuggestions();
+        dupCheck.style.display = 'none';
+    } else {
+        mgmtInput.readOnly = false;
+        mgmtInput.style.background = '';
+        mgmtInput.placeholder = '관리번호 입력';
+        mgmtInput.setAttribute('required', '');
+        preview.style.display = 'none';
+        assetInput.readOnly = false;
+        assetInput.style.background = '';
+        assetInput.placeholder = '';
+        assetGroup.style.display = '';
+        document.getElementById('incoming-mgmt-list').innerHTML = '';
+        // Fetch suggestions if asset type is selected
+        var assetType = document.getElementById('incomingType').value;
+        if (assetType && !isModuleType(assetType)) {
+            fetchMgmtSuggestions(assetType);
+        }
+    }
+}
+
+function toggleNewVendor() {
+    var vendorSel = document.getElementById('vendorSelect');
+    var newGroup = document.getElementById('newVendorGroup');
+    if (vendorSel.value === '__new__') {
+        newGroup.style.display = '';
+    } else {
+        newGroup.style.display = 'none';
+    }
+    fetchVendorMgmtPreview();
+    fetchVendorReturnedAssets();
+}
+
+function fetchVendorReturnedAssets() {
+    var vendorSel = document.getElementById('vendorSelect');
+    var datalist = document.getElementById('incoming-mgmt-list');
+    var currentType = document.getElementById('incomingType').value;
+    if (isModuleType(currentType)) return; // modules use their own datalist
+
+    datalist.innerHTML = '';
+    if (!vendorSel.value || vendorSel.value === '__new__') return;
+
+    fetch('/inventory/api/vendor-returned-assets?vendor_id=' + vendorSel.value)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            datalist.innerHTML = '';
+            if (data.assets && data.assets.length > 0) {
+                data.assets.forEach(function(a) {
+                    var opt = document.createElement('option');
+                    opt.value = a.management_number;
+                    opt.textContent = a.management_number + ' - ' + (a.model_name || a.asset_type) + ' (반납됨, 재입고 가능)';
+                    datalist.appendChild(opt);
+                });
+            }
+        });
+}
+
+// Update preview when new vendor name is typed
+document.querySelector('input[name="new_vendor_name"]').addEventListener('input', function() {
+    clearTimeout(this._debounce);
+    this._debounce = setTimeout(fetchVendorMgmtPreview, 300);
+});
+
+// === Management Number Suggestions & Duplicate Check ===
+
+function hideMgmtSuggestions() {
+    document.getElementById('mgmtSuggestionArea').style.display = 'none';
+}
+
+function fetchMgmtSuggestions(assetType) {
+    var area = document.getElementById('mgmtSuggestionArea');
+    var sugDiv = document.getElementById('mgmtSuggestions');
+    var recentDiv = document.getElementById('mgmtRecent');
+
+    fetch('/inventory/api/next-mgmt-number?asset_type=' + encodeURIComponent(assetType))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            // Build suggestion buttons
+            sugDiv.innerHTML = '<small style="color:#64748b;">추천:</small>';
+            if (data.suggestions && data.suggestions.length > 0) {
+                data.suggestions.forEach(function(s) {
+                    var btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-sm';
+                    btn.style.cssText = 'padding:2px 10px; font-size:13px; border:1px solid #cbd5e1; border-radius:4px; background:#f8fafc; cursor:pointer; color:#334155;';
+                    btn.textContent = s.next;
+                    btn.title = '마지막: ' + s.last + ' (총 ' + s.count + '건)';
+                    btn.addEventListener('click', function() {
+                        var mgmtInput = document.getElementById('incomingMgmtInput');
+                        mgmtInput.value = s.next;
+                        checkMgmtDuplicate(s.next);
+                    });
+                    sugDiv.appendChild(btn);
+                });
+                area.style.display = '';
+            } else {
+                sugDiv.innerHTML = '<small style="color:#94a3b8;">추천: 해당 유형의 기존 관리번호가 없습니다</small>';
+                area.style.display = '';
+            }
+
+            // Build recent list
+            if (data.recent && data.recent.length > 0) {
+                recentDiv.innerHTML = '<small style="color:#94a3b8;">최근 등록: ' + data.recent.join(', ') + '</small>';
+            } else {
+                recentDiv.innerHTML = '';
+            }
+        })
+        .catch(function() {
+            area.style.display = 'none';
+        });
+}
+
+var _mgmtDupTimer = null;
+function checkMgmtDuplicate(value) {
+    var dupEl = document.getElementById('mgmtDupCheck');
+    if (!value || !value.trim()) {
+        dupEl.style.display = 'none';
+        return;
+    }
+    fetch('/inventory/api/check-mgmt-number?management_number=' + encodeURIComponent(value.trim()))
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.exists && data.reIncoming) {
+                var modelInfo = data.asset.model_name ? ' (' + data.asset.model_name + ')' : '';
+                dupEl.innerHTML = '\u21BB <b>재입고 가능</b> — 반납된 장비' + modelInfo + '가 있습니다. 이 번호로 입고하면 기존 자산이 재활성화됩니다.';
+                dupEl.style.color = '#2563eb';
+            } else if (data.exists) {
+                dupEl.textContent = '\u2717 이미 사용 중인 관리번호입니다';
+                dupEl.style.color = '#dc2626';
+            } else {
+                dupEl.textContent = '\u2713 사용 가능';
+                dupEl.style.color = '#16a34a';
+            }
+            dupEl.style.display = '';
+        })
+        .catch(function() {
+            dupEl.style.display = 'none';
+        });
+}
+
+// Debounced duplicate check on management number input
+document.getElementById('incomingMgmtInput').addEventListener('input', function() {
+    var val = this.value;
+    // Module auto-fill (existing logic)
+    var match = moduleInventoryItems.find(function(m) { return m.item_code === val; });
+    if (match) {
+        document.getElementById('incomingModelName').value = match.model || '';
+        document.getElementById('incomingManufacturer').value = match.manufacturer || '';
+        document.getElementById('incomingCapacity').value = match.capacity || '';
+        // Auto-fill asset_number from existing item
+        document.getElementById('incomingAssetNumber').value = match.asset_number || '';
+    }
+    // Duplicate check for non-module types (including vendor for re-incoming)
+    var assetType = document.getElementById('incomingType').value;
+    if (!isModuleType(assetType)) {
+        clearTimeout(_mgmtDupTimer);
+        _mgmtDupTimer = setTimeout(function() {
+            checkMgmtDuplicate(val);
+        }, 300);
+    }
+    // Update node count preview when management number changes
+    updateNodeCountPreview();
+});
+
+// === Node Count (블레이드 서버 다중 노드) ===
+document.getElementById('nodeCountInput').addEventListener('input', function() {
+    updateNodeCountPreview();
+});
+
+// Photo preview
+document.getElementById('incomingPhotos').addEventListener('change', function() {
+    var preview = document.getElementById('incomingPhotoPreview');
+    preview.innerHTML = '';
+    for (var i = 0; i < this.files.length; i++) {
+        (function(file) {
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var img = document.createElement('img');
+                img.src = e.target.result;
+                img.style.cssText = 'width:80px; height:60px; object-fit:cover; border-radius:4px; border:1px solid #e2e8f0;';
+                img.title = file.name;
+                preview.appendChild(img);
+            };
+            reader.readAsDataURL(file);
+        })(this.files[i]);
+    }
+});
+
+function updateNodeCountPreview() {
+    var nodeCount = parseInt(document.getElementById('nodeCountInput').value) || 1;
+    var hint = document.getElementById('nodeCountHint');
+    var preview = document.getElementById('nodeCountPreview');
+    if (nodeCount > 1) {
+        var baseMgmt = document.getElementById('incomingMgmtInput').value || '(관리번호)';
+        var parts = [baseMgmt + ' (섀시)'];
+        for (var i = 1; i <= nodeCount; i++) {
+            parts.push(baseMgmt + '-N' + i);
+        }
+        preview.textContent = parts.join(', ');
+        hint.style.display = '';
+    } else {
+        hint.style.display = 'none';
+    }
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

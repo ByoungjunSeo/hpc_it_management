@@ -1,0 +1,198 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>이력 관리</h1>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2>필터</h2></div>
+    <form method="GET" action="/audit-log">
+        <div class="form-row">
+            <div class="form-group">
+                <label>시작일</label>
+                <input type="date" name="date_from" class="form-control" value="<%= filters.date_from %>">
+            </div>
+            <div class="form-group">
+                <label>종료일</label>
+                <input type="date" name="date_to" class="form-control" value="<%= filters.date_to %>">
+            </div>
+            <div class="form-group">
+                <label>사용자</label>
+                <select name="username" class="form-control">
+                    <option value="">전체</option>
+                    <% users.forEach(u => { %>
+                    <option value="<%= u %>" <%= filters.username === u ? 'selected' : '' %>><%= u %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>대상 유형</label>
+                <select name="target_type" class="form-control">
+                    <option value="">전체</option>
+                    <% targetTypes.forEach(t => { %>
+                    <option value="<%= t %>" <%= filters.target_type === t ? 'selected' : '' %>><%= t %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>작업</label>
+                <select name="action" class="form-control">
+                    <option value="">전체</option>
+                    <option value="create" <%= filters.action === 'create' ? 'selected' : '' %>>생성</option>
+                    <option value="update" <%= filters.action === 'update' ? 'selected' : '' %>>수정</option>
+                    <option value="delete" <%= filters.action === 'delete' ? 'selected' : '' %>>삭제</option>
+                    <option value="login" <%= filters.action === 'login' ? 'selected' : '' %>>로그인</option>
+                    <option value="scan" <%= filters.action === 'scan' ? 'selected' : '' %>>스캔</option>
+                    <option value="backup" <%= filters.action === 'backup' ? 'selected' : '' %>>백업</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group" style="flex:2">
+                <label>검색</label>
+                <input type="text" name="search" class="form-control" value="<%= filters.search %>" placeholder="대상명, 상세 내용 검색...">
+            </div>
+            <div class="form-group" style="align-self:flex-end">
+                <button type="submit" class="btn btn-primary">검색</button>
+                <a href="/audit-log" class="btn btn-secondary">초기화</a>
+            </div>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>이력 목록 (<%= logs.length %>건)</h2>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th class="sortable" data-col="0">시간 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="1">사용자 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="2">작업 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="3">대상유형 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="4">대상 <span class="sort-icon"></span></th>
+                    <th>상세</th>
+                    <th class="sortable" data-col="6">IP <span class="sort-icon"></span></th>
+                </tr>
+            </thead>
+            <tbody id="auditTableBody">
+                <% if (logs.length === 0) { %>
+                <tr><td colspan="7" class="text-muted" style="text-align:center">이력이 없습니다.</td></tr>
+                <% } %>
+                <% logs.forEach(log => { %>
+                <tr>
+                    <td data-sort="<%= log.created_at || '' %>" style="white-space:nowrap; font-size:12px;"><%= log.created_at ? log.created_at.substring(0, 19).replace('T', ' ') : '-' %></td>
+                    <td data-sort="<%= log.username || '' %>"><strong><%= log.username || '-' %></strong></td>
+                    <td data-sort="<%= log.action || '' %>">
+                        <span class="badge badge-<%= log.action === 'create' ? 'success' : log.action === 'delete' ? 'danger' : log.action === 'update' ? 'warning' : 'info' %>">
+                            <%= log.action === 'create' ? '생성' : log.action === 'update' ? '수정' : log.action === 'delete' ? '삭제' : log.action === 'login' ? '로그인' : log.action === 'scan' ? '스캔' : log.action === 'backup' ? '백업' : log.action %>
+                        </span>
+                    </td>
+                    <td data-sort="<%= log.target_type || '' %>"><%= log.target_type || '-' %></td>
+                    <td data-sort="<%= log.target_label || '' %>">
+                        <% if (log.target_id && log.target_type === 'asset') { %>
+                        <a href="/assets/<%= log.target_id %>"><%= log.target_label || log.target_id %></a>
+                        <% } else { %>
+                        <%= log.target_label || (log.target_id ? '#' + log.target_id : '-') %>
+                        <% } %>
+                    </td>
+                    <td style="max-width:400px; font-size:12px;">
+                        <% if (log.details) { %>
+                        <% try { const d = JSON.parse(log.details); %>
+                        <% if (d.changes && typeof d.changes === 'object') { %>
+                        <% const entries = Object.entries(d.changes); %>
+                        <% if (entries.length > 0) { %>
+                        <% entries.forEach(([key, val]) => { %>
+                        <div style="margin-bottom:2px;"><strong><%= key %></strong>: <span style="color:var(--danger,#dc2626);text-decoration:line-through;"><%= val.from || '-' %></span> → <span style="color:var(--success,#16a34a);"><%= val.to || '-' %></span></div>
+                        <% }); %>
+                        <% } else { %>
+                        <span class="text-muted">변경 없음</span>
+                        <% } %>
+                        <% } else if (d.field) { %>
+                        <div><strong><%= d.field %></strong>: <span style="color:var(--danger,#dc2626);text-decoration:line-through;"><%= d.oldValue || '-' %></span> → <span style="color:var(--success,#16a34a);"><%= d.newValue || '-' %></span></div>
+                        <% } else { %>
+                        <span title="<%= log.details %>"><% const keys = Object.keys(d).filter(k => k !== 'server' && d[k]); %><%= keys.map(k => k + ': ' + d[k]).join(', ').substring(0, 100) || '-' %></span>
+                        <% } %>
+                        <% } catch(e) { %>
+                        <%= log.details.substring(0, 100) %>
+                        <% } %>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td data-sort="<%= log.ip_address || '' %>" style="font-size:11px;"><%= log.ip_address || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+.sortable { cursor: pointer; user-select: none; position: relative; }
+.sortable:hover { background: #e2e8f0; }
+.sort-icon { font-size: 10px; opacity: 0.3; margin-left: 2px; }
+.sort-icon::after { content: '▲▼'; }
+.sortable.asc .sort-icon { opacity: 1; }
+.sortable.asc .sort-icon::after { content: '▲'; }
+.sortable.desc .sort-icon { opacity: 1; }
+.sortable.desc .sort-icon::after { content: '▼'; }
+</style>
+
+<script>
+function naturalCompare(a, b) {
+    var re = /(\d+)|(\D+)/g, m, ax = [], bx = [];
+    while (m = re.exec(a)) ax.push(m[1] ? parseInt(m[1]) : m[2]);
+    re.lastIndex = 0;
+    while (m = re.exec(b)) bx.push(m[1] ? parseInt(m[1]) : m[2]);
+    for (var i = 0; i < Math.max(ax.length, bx.length); i++) {
+        if (i >= ax.length) return -1;
+        if (i >= bx.length) return 1;
+        var va = ax[i], vb = bx[i];
+        var an = typeof va === 'number', bn = typeof vb === 'number';
+        if (an && bn) { if (va !== vb) return va - vb; }
+        else if (an !== bn) { return an ? -1 : 1; }
+        else { var c = va.localeCompare(vb, 'ko'); if (c !== 0) return c; }
+    }
+    return 0;
+}
+
+(function() {
+    var currentCol = -1;
+    var currentDir = '';
+
+    document.querySelectorAll('th.sortable').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var col = parseInt(this.dataset.col);
+            var dir;
+            if (currentCol === col) {
+                dir = currentDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                dir = 'asc';
+            }
+            currentCol = col;
+            currentDir = dir;
+
+            document.querySelectorAll('th.sortable').forEach(function(h) {
+                h.classList.remove('asc', 'desc');
+            });
+            this.classList.add(dir);
+
+            var tbody = document.getElementById('auditTableBody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort(function(a, b) {
+                var cellA = a.cells[col];
+                var cellB = b.cells[col];
+                if (!cellA || !cellB) return 0;
+                var valA = cellA.dataset.sort || cellA.textContent.trim();
+                var valB = cellB.dataset.sort || cellB.textContent.trim();
+                var cmp = naturalCompare(valA, valB);
+                return dir === 'asc' ? cmp : -cmp;
+            });
+            rows.forEach(function(row) { tbody.appendChild(row); });
+        });
+    });
+})();
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

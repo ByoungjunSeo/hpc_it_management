@@ -1,0 +1,58 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>업체 장비 관리</h1>
+    <div class="btn-group">
+        <a href="/assets" class="btn btn-secondary">전체 자산</a>
+    </div>
+</div>
+
+<% Object.keys(grouped).forEach(vendorName => { %>
+<div class="card">
+    <div class="card-header">
+        <h2><%= vendorName %> <span class="badge badge-vendor"><%= grouped[vendorName].length %>대</span></h2>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>관리번호</th>
+                    <th>유형</th>
+                    <th>모델명</th>
+                    <th>서버실</th>
+                    <th>랙</th>
+                    <th>IP</th>
+                    <th>담당자</th>
+                    <th>상태</th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% grouped[vendorName].forEach(a => { %>
+                <tr>
+                    <td><a href="/assets/<%= a.id %>"><%= a.management_number || a.asset_number || '-' %></a></td>
+                    <td><span class="badge badge-<%= a.asset_type %>"><%= appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type %></span></td>
+                    <td><%= a.model_name || '-' %></td>
+                    <td><%= a.room_name || '-' %></td>
+                    <td><%= a.rack_name || '-' %></td>
+                    <td style="font-size:12px;"><% if (a.all_ips) { %><%= a.all_ips.split(',').join(', ') %><% } else { %>-<% } %></td>
+                    <td><%= a.assigned_user || '-' %></td>
+                    <td><span class="badge badge-<%= a.status === 'active' ? 'success' : a.status === 'returned' ? 'info' : a.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === a.status)?.label || a.status %></span></td>
+                    <td>
+                        <a href="/assets/<%= a.id %>/edit" class="btn btn-sm btn-outline">수정</a>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% }) %>
+
+<% if (Object.keys(grouped).length === 0) { %>
+<div class="card text-center">
+    <p class="text-muted">등록된 업체 장비가 없습니다.</p>
+</div>
+<% } %>
+
+<%- include('../partials/footer', { extraJs }) %>

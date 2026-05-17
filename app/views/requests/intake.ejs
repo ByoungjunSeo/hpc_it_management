@@ -1,0 +1,367 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>입고 신청서</h1>
+    <a href="/requests" class="btn btn-outline">목록으로</a>
+</div>
+
+<div style="max-width:900px;">
+    <!-- 양식 붙여넣기 -->
+    <div class="card" style="border:2px solid #f59e0b;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <h3 style="margin:0;color:#d97706;">양식 붙여넣기</h3>
+            <span style="font-size:12px;color:#64748b;">업체가 작성해서 보낸 양식을 여기에 붙여넣으면 자동으로 입력됩니다</span>
+        </div>
+        <textarea id="pasteArea" class="form-control" rows="4" style="font-size:13px;" placeholder="업체가 작성한 입고 신청서 텍스트를 여기에 붙여넣으세요..."></textarea>
+        <div style="margin-top:8px;text-align:right;">
+            <button type="button" class="btn" style="background:#d97706;color:#fff;" onclick="parseIntakeText()">자동 입력 &rarr;</button>
+        </div>
+    </div>
+
+    <!-- 기본 정보 -->
+    <div class="card">
+        <h3 style="margin-bottom:12px;">기본 정보</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="form-group">
+                <label>신청일</label>
+                <input type="date" id="intakeDate" class="form-control" value="<%= new Date().toISOString().slice(0,10) %>">
+            </div>
+            <div class="form-group">
+                <label>입고 희망일</label>
+                <input type="date" id="deliveryDate" class="form-control">
+            </div>
+        </div>
+    </div>
+
+    <!-- 업체 정보 -->
+    <div class="card">
+        <h3 style="margin-bottom:12px;">업체 정보</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <div class="form-group">
+                <label>업체명</label>
+                <input type="text" id="companyName" class="form-control" placeholder="업체명">
+            </div>
+            <div class="form-group">
+                <label>담당자</label>
+                <input type="text" id="contactName" class="form-control" placeholder="담당자명">
+            </div>
+            <div class="form-group">
+                <label>연락처</label>
+                <input type="text" id="contactPhone" class="form-control" placeholder="010-0000-0000">
+            </div>
+            <div class="form-group">
+                <label>이메일</label>
+                <input type="text" id="contactEmail" class="form-control" placeholder="email@company.com">
+            </div>
+        </div>
+    </div>
+
+    <!-- 입고 품목 -->
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;">입고 품목</h3>
+            <button type="button" class="btn btn-primary btn-sm" onclick="addItem()">+ 품목 추가</button>
+        </div>
+        <div class="table-wrapper">
+            <table id="itemsTable">
+                <thead>
+                    <tr>
+                        <th style="width:140px;">유형</th>
+                        <th>모델명</th>
+                        <th>규격/사양</th>
+                        <th style="width:70px;">수량</th>
+                        <th>비고</th>
+                        <th style="width:40px;"></th>
+                    </tr>
+                </thead>
+                <tbody id="itemsBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 추가 정보 -->
+    <div class="card">
+        <h3 style="margin-bottom:12px;">추가 정보</h3>
+        <div class="form-group">
+            <label>입고 목적</label>
+            <input type="text" id="purpose" class="form-control" placeholder="입고 목적">
+        </div>
+        <div class="form-group">
+            <label>특이사항 / 요청사항</label>
+            <textarea id="extraNotes" class="form-control" rows="3" placeholder="특이사항이나 요청사항"></textarea>
+        </div>
+    </div>
+
+    <!-- 미리보기 & 복사 -->
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;">미리보기</h3>
+            <div>
+                <button type="button" class="btn btn-sm btn-outline" onclick="clearForm()">양식 초기화</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="generatePreview()">미리보기 생성</button>
+                <button type="button" class="btn btn-sm" style="background:#16a34a;color:#fff;margin-left:4px;" onclick="copyPreview()">복사하기</button>
+            </div>
+        </div>
+        <textarea id="previewArea" class="form-control" rows="24" style="font-family:'D2Coding','Courier New',monospace;font-size:13px;line-height:1.5;background:#f8fafc;white-space:pre;overflow-x:auto;" readonly></textarea>
+        <p id="copyMsg" style="display:none;color:#16a34a;font-size:13px;margin-top:6px;font-weight:600;">클립보드에 복사되었습니다!</p>
+    </div>
+</div>
+
+<script>
+const HW_TYPES = [
+  { value: 'server', label: '서버' },
+  { value: 'cpu', label: 'CPU' },
+  { value: 'memory', label: '메모리' },
+  { value: 'ssd', label: 'SSD' },
+  { value: 'hdd', label: 'HDD' },
+  { value: 'gpu', label: 'GPU' },
+  { value: 'nic', label: '네트워크 카드(NIC)' },
+  { value: 'raid', label: 'RAID 컨트롤러' },
+  { value: 'cable_net', label: '네트워크 케이블' },
+  { value: 'cable_power', label: '전원 케이블' },
+  { value: 'psu', label: '파워 서플라이(PSU)' },
+  { value: 'switch', label: '스위치' },
+  { value: 'storage', label: '스토리지' },
+  { value: 'other', label: '기타' }
+];
+
+let itemCount = 0;
+
+function addItem(data) {
+  itemCount++;
+  const d = data || {};
+  const opts = HW_TYPES.map(t =>
+    '<option value="' + t.value + '"' + (d.type === t.value ? ' selected' : '') + '>' + t.label + '</option>'
+  ).join('');
+  const row = document.createElement('tr');
+  row.id = 'item-' + itemCount;
+  row.innerHTML =
+    '<td><select class="form-control item-type" style="font-size:13px;">' + opts + '</select></td>' +
+    '<td><input type="text" class="form-control item-model" placeholder="모델명" style="font-size:13px;" value="' + esc(d.model || '') + '"></td>' +
+    '<td><input type="text" class="form-control item-spec" placeholder="용량/규격" style="font-size:13px;" value="' + esc(d.spec || '') + '"></td>' +
+    '<td><input type="number" class="form-control item-qty" value="' + (d.qty || 1) + '" min="1" style="font-size:13px;"></td>' +
+    '<td><input type="text" class="form-control item-note" placeholder="비고" style="font-size:13px;" value="' + esc(d.note || '') + '"></td>' +
+    '<td><button type="button" class="btn btn-sm btn-danger" onclick="removeItem(' + itemCount + ')" style="padding:4px 8px;">&times;</button></td>';
+  document.getElementById('itemsBody').appendChild(row);
+}
+
+function removeItem(id) {
+  const row = document.getElementById('item-' + id);
+  if (row) row.remove();
+}
+
+function esc(s) { return s.replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+
+function getItems() {
+  const rows = document.querySelectorAll('#itemsBody tr');
+  const items = [];
+  rows.forEach(r => {
+    const typeVal = r.querySelector('.item-type').value;
+    const typeLabel = HW_TYPES.find(t => t.value === typeVal)?.label || typeVal;
+    items.push({
+      type: typeLabel,
+      model: r.querySelector('.item-model').value.trim(),
+      spec: r.querySelector('.item-spec').value.trim(),
+      qty: parseInt(r.querySelector('.item-qty').value) || 1,
+      note: r.querySelector('.item-note').value.trim()
+    });
+  });
+  return items;
+}
+
+function generatePreview() {
+  const date = document.getElementById('intakeDate').value || '';
+  const deliveryDate = document.getElementById('deliveryDate').value || '';
+  const company = document.getElementById('companyName').value.trim() || '';
+  const contact = document.getElementById('contactName').value.trim() || '';
+  const phone = document.getElementById('contactPhone').value.trim();
+  const email = document.getElementById('contactEmail').value.trim();
+  const purpose = document.getElementById('purpose').value.trim();
+  const notes = document.getElementById('extraNotes').value.trim();
+  const items = getItems();
+
+  const line = '═'.repeat(50);
+  let text = line + '\n';
+  text += '         TTA HPC/AIDC 장비 입고 신청서\n';
+  text += line + '\n\n';
+
+  text += '▶ 신청일: ' + (date || '____-__-__') + '\n';
+  text += '▶ 입고 희망일: ' + (deliveryDate || '____-__-__') + '\n\n';
+
+  text += '▶ 업체 정보\n';
+  text += '  업체명: ' + (company || '________________') + '\n';
+  text += '  담당자: ' + (contact || '________________');
+  if (phone || email) {
+    text += ' (' + [phone, email].filter(Boolean).join(' / ') + ')';
+  } else {
+    text += ' (연락처: ________________ / 이메일: ________________)';
+  }
+  text += '\n\n';
+
+  text += '▶ 입고 품목 (아래 양식에 맞춰 작성해 주세요)\n';
+  if (items.length === 0) {
+    text += '  1. [유형] 모델명 규격/사양 - 수량 (비고)\n';
+    text += '  2. \n';
+    text += '  3. \n';
+  } else {
+    items.forEach((item, i) => {
+      let desc = '  ' + (i + 1) + '. [' + item.type + ']';
+      if (item.model) desc += ' ' + item.model;
+      if (item.spec) desc += ' ' + item.spec;
+      desc += ' - ' + item.qty + '개';
+      if (item.note) desc += ' (' + item.note + ')';
+      text += desc + '\n';
+    });
+  }
+
+  text += '\n▶ 입고 목적\n';
+  text += '  ' + (purpose || '________________') + '\n';
+
+  text += '\n▶ 특이사항 / 요청사항\n';
+  text += '  ' + (notes ? notes.split('\n').join('\n  ') : '________________') + '\n';
+
+  text += '\n' + line + '\n';
+
+  document.getElementById('previewArea').value = text;
+}
+
+// --- 양식 붙여넣기 파서 ---
+function parseIntakeText() {
+  const text = document.getElementById('pasteArea').value.trim();
+  if (!text) return alert('붙여넣을 텍스트를 입력해주세요.');
+
+  // Parse date
+  const dateMatch = text.match(/신청일[:\s]+(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) document.getElementById('intakeDate').value = dateMatch[1];
+
+  const deliveryMatch = text.match(/(?:입고\s*희망일|입고\s*예정일)[:\s]+(\d{4}-\d{2}-\d{2})/);
+  if (deliveryMatch) document.getElementById('deliveryDate').value = deliveryMatch[1];
+
+  // Parse company info
+  const companyMatch = text.match(/업체명[:\s]+(.+)/);
+  if (companyMatch) document.getElementById('companyName').value = companyMatch[1].replace(/_/g, '').trim();
+
+  const contactMatch = text.match(/담당자[:\s]+([^(\n]+)/);
+  if (contactMatch) document.getElementById('contactName').value = contactMatch[1].replace(/_/g, '').trim();
+
+  const contactDetailMatch = text.match(/담당자[:\s]+[^(]*\(([^)]+)\)/);
+  if (contactDetailMatch) {
+    const parts = contactDetailMatch[1].split('/').map(s => s.replace(/연락처:|이메일:/g, '').replace(/_/g, '').trim());
+    if (parts[0]) document.getElementById('contactPhone').value = parts[0];
+    if (parts[1]) document.getElementById('contactEmail').value = parts[1];
+  }
+
+  // Parse items
+  document.getElementById('itemsBody').innerHTML = '';
+  itemCount = 0;
+  const itemRegex = /\d+\.\s*\[([^\]]+)\]\s*(.+)/g;
+  let m;
+  while ((m = itemRegex.exec(text)) !== null) {
+    const typeLabel = m[1].trim();
+    const rest = m[2].trim();
+
+    // Find matching type value
+    const typeEntry = HW_TYPES.find(t => t.label === typeLabel || t.label.startsWith(typeLabel) || t.value === typeLabel.toLowerCase());
+    const typeVal = typeEntry ? typeEntry.value : 'other';
+
+    // Parse: model spec - qty (note)
+    let model = '', spec = '', qty = 1, note = '';
+    const qtyMatch = rest.match(/[-–]\s*(\d+)\s*(개|장|대|ea|매|세트)/);
+    const noteMatch = rest.match(/\(([^)]+)\)\s*$/);
+
+    if (noteMatch) note = noteMatch[1];
+    if (qtyMatch) qty = parseInt(qtyMatch[1]);
+
+    let mainPart = rest;
+    if (qtyMatch) mainPart = mainPart.substring(0, mainPart.indexOf(qtyMatch[0])).trim();
+    if (noteMatch && mainPart.includes(noteMatch[0])) mainPart = mainPart.replace(noteMatch[0], '').trim();
+
+    // Split mainPart into model and spec (heuristic: first word(s) = model, rest = spec)
+    const words = mainPart.split(/\s+/);
+    if (words.length > 1) {
+      model = words.slice(0, Math.ceil(words.length / 2)).join(' ');
+      spec = words.slice(Math.ceil(words.length / 2)).join(' ');
+    } else {
+      model = mainPart;
+    }
+
+    if (model.replace(/_/g, '').trim()) {
+      addItem({ type: typeVal, model: model.trim(), spec: spec.trim(), qty, note });
+    }
+  }
+
+  // If no items parsed, add one empty row
+  if (document.querySelectorAll('#itemsBody tr').length === 0) {
+    addItem();
+  }
+
+  // Parse purpose
+  const purposeMatch = text.match(/(?:입고\s*목적|용도)[:\s]*\n?\s*(.+)/);
+  if (purposeMatch) {
+    const val = purposeMatch[1].replace(/_/g, '').trim();
+    if (val) document.getElementById('purpose').value = val;
+  }
+
+  // Parse notes
+  const notesMatch = text.match(/(?:특이사항|요청사항)[^\n]*\n([\s\S]*?)(?:\n═|$)/);
+  if (notesMatch) {
+    const val = notesMatch[1].replace(/^\s+/gm, '').replace(/_/g, '').trim();
+    if (val) document.getElementById('extraNotes').value = val;
+  }
+
+  generatePreview();
+}
+
+function clearForm() {
+  document.getElementById('intakeDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('deliveryDate').value = '';
+  document.getElementById('companyName').value = '';
+  document.getElementById('contactName').value = '';
+  document.getElementById('contactPhone').value = '';
+  document.getElementById('contactEmail').value = '';
+  document.getElementById('purpose').value = '';
+  document.getElementById('extraNotes').value = '';
+  document.getElementById('pasteArea').value = '';
+  document.getElementById('itemsBody').innerHTML = '';
+  itemCount = 0;
+  addItem();
+  generatePreview();
+}
+
+function copyPreview() {
+  const area = document.getElementById('previewArea');
+  if (!area.value.trim()) generatePreview();
+  navigator.clipboard.writeText(area.value).then(showCopyMsg).catch(() => {
+    area.select();
+    document.execCommand('copy');
+    showCopyMsg();
+  });
+}
+
+function showCopyMsg() {
+  const msg = document.getElementById('copyMsg');
+  msg.style.display = 'block';
+  setTimeout(() => { msg.style.display = 'none'; }, 2500);
+}
+
+// 샘플 데이터로 시작
+(function initSample() {
+  addItem({ type: 'server', model: 'Dell PowerEdge R760', spec: '2U 랙마운트', qty: 2, note: '' });
+  addItem({ type: 'gpu', model: 'NVIDIA A100', spec: '80GB SXM', qty: 8, note: '' });
+  addItem({ type: 'memory', model: 'Samsung DDR5', spec: '64GB DDR5-4800', qty: 16, note: '' });
+  addItem({ type: 'ssd', model: 'Samsung PM9A3', spec: '3.84TB NVMe', qty: 8, note: '' });
+  addItem({ type: 'cable_net', model: 'DAC 케이블', spec: '100GbE 3m', qty: 4, note: '' });
+
+  document.getElementById('companyName').value = '(주)예시업체';
+  document.getElementById('contactName').value = '홍길동';
+  document.getElementById('contactPhone').value = '010-0000-0000';
+  document.getElementById('contactEmail').value = 'hong@example.com';
+  document.getElementById('purpose').value = 'AI 학습 서버 구축';
+  document.getElementById('extraNotes').value = '이중 전원(220V 30A) 필요\n전용 랙 배정 요청';
+
+  generatePreview();
+})();
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

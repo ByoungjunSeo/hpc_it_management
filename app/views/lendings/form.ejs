@@ -1,0 +1,147 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= lending ? '대여 수정' : '대여 등록' %></h1>
+    <a href="/lendings" class="btn btn-secondary">목록</a>
+</div>
+
+<div class="card">
+    <form method="POST" action="<%= lending ? '/lendings/' + lending.id : '/lendings' %>">
+        <% if (typeof returnTo !== 'undefined' && returnTo) { %>
+        <input type="hidden" name="returnTo" value="<%= returnTo %>">
+        <% } %>
+        <div class="form-row">
+            <div class="form-group">
+                <label>방향 *</label>
+                <select name="direction" class="form-control" required>
+                    <% appConfig.lendingDirections.forEach(d => { %>
+                    <option value="<%= d.value %>" <%= lending && lending.direction === d.value ? 'selected' : '' %>><%= d.label %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>대상 기관 *</label>
+                <input type="text" name="counterparty" class="form-control" value="<%= lending ? lending.counterparty : '' %>" required>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>대여일</label>
+                <input type="date" name="loan_date" class="form-control" value="<%= lending && lending.loan_date ? lending.loan_date : '' %>">
+            </div>
+            <div class="form-group">
+                <label>반납일</label>
+                <input type="date" name="return_date" class="form-control" value="<%= lending && lending.return_date ? lending.return_date : '' %>">
+            </div>
+            <% if (lending) { %>
+            <div class="form-group">
+                <label>상태</label>
+                <select name="status" class="form-control">
+                    <% appConfig.lendingStatuses.forEach(s => { %>
+                    <option value="<%= s.value %>" <%= lending.status === s.value ? 'selected' : '' %>><%= s.label %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <% } %>
+        </div>
+        <div class="form-group">
+            <label>비고</label>
+            <textarea name="notes" class="form-control"><%= lending ? (lending.notes || '') : '' %></textarea>
+        </div>
+
+        <div class="card-header mt-2">
+            <h2>품목 목록</h2>
+            <button type="button" class="btn btn-sm btn-outline" onclick="addItemRow()">+ 품목 추가</button>
+        </div>
+
+        <div id="itemsContainer">
+            <% if (lending && lending.items && lending.items.length > 0) { %>
+            <% lending.items.forEach((item, idx) => { %>
+            <div class="form-row item-row" style="align-items:flex-end;">
+                <div class="form-group">
+                    <label>유형</label>
+                    <select name="item_type" class="form-control">
+                        <option value="">선택</option>
+                        <% appConfig.moduleTypes.forEach(m => { %>
+                        <option value="<%= m.value %>" <%= item.item_type === m.value ? 'selected' : '' %>><%= m.label %></option>
+                        <% }) %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>코드</label>
+                    <input type="text" name="item_code" class="form-control" value="<%= item.item_code || '' %>" placeholder="CPU-A, mem-64-A...">
+                </div>
+                <div class="form-group">
+                    <label>수량</label>
+                    <input type="number" name="item_quantity" class="form-control" value="<%= item.quantity || 1 %>" min="1">
+                </div>
+                <div class="form-group">
+                    <label>설명</label>
+                    <input type="text" name="item_description" class="form-control" value="<%= item.description || '' %>">
+                </div>
+                <div class="form-group">
+                    <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.item-row').remove()">삭제</button>
+                </div>
+            </div>
+            <% }) %>
+            <% } else { %>
+            <div class="form-row item-row" style="align-items:flex-end;">
+                <div class="form-group">
+                    <label>유형</label>
+                    <select name="item_type" class="form-control">
+                        <option value="">선택</option>
+                        <% appConfig.moduleTypes.forEach(m => { %>
+                        <option value="<%= m.value %>"><%= m.label %></option>
+                        <% }) %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>코드</label>
+                    <input type="text" name="item_code" class="form-control" placeholder="CPU-A, mem-64-A...">
+                </div>
+                <div class="form-group">
+                    <label>수량</label>
+                    <input type="number" name="item_quantity" class="form-control" value="1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>설명</label>
+                    <input type="text" name="item_description" class="form-control">
+                </div>
+                <div class="form-group">
+                    <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.item-row').remove()">삭제</button>
+                </div>
+            </div>
+            <% } %>
+        </div>
+
+        <div class="btn-group mt-2">
+            <button type="submit" class="btn btn-primary"><%= lending ? '수정' : '등록' %></button>
+            <a href="/lendings" class="btn btn-secondary">취소</a>
+        </div>
+    </form>
+</div>
+
+<% if (lending) { %>
+<%- include('../partials/photo-section', { entityType: 'lending', entityId: lending.id, photos: typeof lendingPhotos !== 'undefined' ? lendingPhotos : [], editable: true }) %>
+<% } %>
+
+<script>
+var moduleTypes = <%- JSON.stringify(appConfig.moduleTypes) %>;
+function addItemRow() {
+    var options = '<option value="">선택</option>';
+    moduleTypes.forEach(function(m) {
+        options += '<option value="' + m.value + '">' + m.label + '</option>';
+    });
+    var html =
+        '<div class="form-row item-row" style="align-items:flex-end;">' +
+        '<div class="form-group"><label>유형</label><select name="item_type" class="form-control">' + options + '</select></div>' +
+        '<div class="form-group"><label>코드</label><input type="text" name="item_code" class="form-control" placeholder="CPU-A, mem-64-A..."></div>' +
+        '<div class="form-group"><label>수량</label><input type="number" name="item_quantity" class="form-control" value="1" min="1"></div>' +
+        '<div class="form-group"><label>설명</label><input type="text" name="item_description" class="form-control"></div>' +
+        '<div class="form-group"><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.item-row\').remove()">삭제</button></div>' +
+        '</div>';
+    document.getElementById('itemsContainer').insertAdjacentHTML('beforeend', html);
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

@@ -116,8 +116,15 @@ function syncModulesToUsageLog(assetId) {
 router.get('/', (req, res) => {
   const tab = req.query.tab || 'inventory';
   const selectedType = req.query.type || '';
+  const selectedOwner = req.query.inv_owner || '';
+  const selectedVendorId = req.query.inv_vendor_id || '';
   const statsByType = ModuleInventory.getStatsByType();
-  let items = ModuleInventory.findAll(selectedType || undefined);
+  let items = ModuleInventory.findAll(selectedType || undefined, selectedOwner || undefined);
+
+  // Apply vendor filter
+  if (selectedVendorId) {
+    items = items.filter(item => String(item.owner_vendor_id) === selectedVendorId);
+  }
 
   // Apply spare_only filter
   const spareOnly = req.query.spare_only === '1';
@@ -129,6 +136,7 @@ router.get('/', (req, res) => {
   const filters = {
     module_type: req.query.module_type,
     asset_id: req.query.asset_id,
+    owner: req.query.owner,
     search: req.query.search
   };
   const modules = ComputingModule.findAll(filters);
@@ -146,6 +154,8 @@ router.get('/', (req, res) => {
   // All item codes for history filter dropdown
   const allItemCodes = tab === 'history' ? ModuleInventory.findAll().map(i => i.item_code).filter(Boolean) : [];
 
+  const vendors = Vendor.findAll();
+
   res.render('module-inventory/index', {
     title: '부품 현황',
     currentPath: '/module-inventory',
@@ -155,12 +165,15 @@ router.get('/', (req, res) => {
     statsByType,
     items,
     selectedType,
+    selectedOwner,
+    selectedVendorId,
     spareOnly,
     modules,
     filters,
     historyLogs,
     historyFilters,
     allItemCodes,
+    vendors,
     appConfig
   });
 });
@@ -264,11 +277,69 @@ router.post('/api/inventory/:id/adjust', requireMaintenance, (req, res) => {
   }
 });
 
+// API: update storage_quantity directly (from 장비실/시설 view)
+router.post('/api/inventory/:id/update-storage', requireMaintenance, (req, res) => {
+  try {
+    const item = ModuleInventory.findById(req.params.id);
+    if (!item) return res.status(404).json({ error: '부품을 찾을 수 없습니다.' });
+
+    const newStorage = parseInt(req.body.storage_quantity);
+    if (isNaN(newStorage) || newStorage < 0) return res.status(400).json({ error: '올바른 수량을 입력해주세요.' });
+
+    const oldStorage = item.storage_quantity || 0;
+    if (oldStorage === newStorage) return res.json({ success: true, unchanged: true });
+
+    const { getDb } = require('../config/database');
+    const db = getDb();
+
+    // Update storage_quantity directly
+    db.prepare(`
+      UPDATE module_inventory
+      SET storage_quantity = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(newStorage, req.params.id);
+
+    // Recalculate total/spare based on new storage
+    ModuleInventory.recalculateInUse();
+
+    const updated = ModuleInventory.findById(req.params.id);
+
+    // Log the change
+    ModuleInventoryLog.create({
+      item_code: item.item_code,
+      event_type: 'adjust',
+      quantity_change: newStorage - oldStorage,
+      user_id: req.user ? req.user.id : null,
+      username: req.user ? (req.user.display_name || req.user.username) : null,
+      notes: '장비실 보관 수량 직접 수정: ' + oldStorage + '개 → ' + newStorage + '개'
+    });
+
+    AuditLog.log(req, {
+      action: 'update',
+      targetType: 'module_inventory',
+      targetId: req.params.id,
+      targetLabel: item.item_code,
+      details: { field: 'storage_quantity', oldValue: oldStorage, newValue: newStorage, total: updated.total_quantity }
+    });
+
+    res.json({
+      success: true,
+      storage_quantity: updated.storage_quantity,
+      total_quantity: updated.total_quantity,
+      spare_quantity: updated.spare_quantity,
+      in_use_quantity: updated.in_use_quantity
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // API: transfer module between assets
 router.post('/modules/:id/transfer', requireMaintenance, (req, res) => {
   try {
     const mod = ComputingModule.findById(req.params.id);
-    if (!mod) return res.status(404).json({ error: '모듈을 찾을 수 없습니다.' });
+    if (!mod) return res.status(404).json({ error: '부품을 찾을 수 없습니다.' });
 
     const { to_asset_id, reason } = req.body;
     if (!to_asset_id) return res.status(400).json({ error: '이동 대상 서버를 선택해주세요.' });
@@ -410,18 +481,27 @@ router.post('/modules', requireMaintenance, (req, res) => {
   try {
     const modId = ComputingModule.create(req.body);
 
-    // Sync to usage log and recalculate inventory
+    // 모듈 설치: storage 감소 + 이력 기록
     if (req.body.asset_id) {
-      syncModulesToUsageLog(req.body.asset_id);
-
-      // Log installed event (company modules only)
       const isCompanyModule = !req.body.owner || req.body.owner === 'company';
-      if (req.body.specification && isCompanyModule) {
+      const installCount = parseInt(req.body.count) || 1;
+      if (req.body.specification) {
+        const inv = ModuleInventory.findByCode(req.body.specification);
+        if (inv && inv.storage_quantity >= installCount) {
+          const db = require('../config/database').getDb();
+          db.prepare(`
+            UPDATE module_inventory
+            SET storage_quantity = storage_quantity - ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE item_code = ?
+          `).run(installCount, req.body.specification);
+        }
+
         const asset = Asset.findById(req.body.asset_id);
         ModuleInventoryLog.create({
           item_code: req.body.specification,
           event_type: 'installed',
-          quantity_change: -(parseInt(req.body.count) || 1),
+          quantity_change: -installCount,
           asset_id: parseInt(req.body.asset_id),
           asset_label: asset ? (asset.management_number || asset.asset_number || String(req.body.asset_id)) : null,
           user_id: req.user ? req.user.id : null,
@@ -429,6 +509,9 @@ router.post('/modules', requireMaintenance, (req, res) => {
           notes: req.body.module_type + ' 모듈 설치'
         });
       }
+
+      // storage 조정 후 sync → recalculateInUse
+      syncModulesToUsageLog(req.body.asset_id);
     }
 
     const createAsset = req.body.asset_id ? Asset.findById(req.body.asset_id) : null;
@@ -482,63 +565,65 @@ router.post('/modules/:id', requireMaintenance, (req, res) => {
     // Sync to usage log and recalculate inventory
     const assetId = req.body.asset_id || (beforeMod && beforeMod.asset_id);
     if (assetId) {
-      syncModulesToUsageLog(assetId);
-      // If asset changed, also sync old asset
-      if (beforeMod && beforeMod.asset_id && String(beforeMod.asset_id) !== String(assetId)) {
-        syncModulesToUsageLog(beforeMod.asset_id);
-      }
-
-      // Log changes to module_inventory_logs (company modules only)
-      const isCompanyUpdate = (!req.body.owner || req.body.owner === 'company');
-      if (beforeMod && isCompanyUpdate) {
+      // 모듈 수정: storage_quantity 조정 (recalculateInUse 전에 실행해야 total이 정확함)
+      if (beforeMod) {
+        const dbConn = require('../config/database').getDb();
         const asset = Asset.findById(assetId);
         const assetLabel = asset ? (asset.management_number || asset.asset_number || String(assetId)) : null;
         const specChanged = req.body.specification && beforeMod.specification !== req.body.specification;
         const countChanged = String(beforeMod.count) !== String(req.body.count);
         const itemCode = req.body.specification || beforeMod.specification;
+        const oldCount = parseInt(beforeMod.count) || 1;
+        const newCount = parseInt(req.body.count) || 1;
 
         if (specChanged) {
-          // Specification changed: log removed (old) + installed (new)
+          // 부품코드 변경: 이전 코드 → storage 복원, 새 코드 → storage 감소
           if (beforeMod.specification) {
+            dbConn.prepare('UPDATE module_inventory SET storage_quantity = storage_quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE item_code = ?').run(oldCount, beforeMod.specification);
             ModuleInventoryLog.create({
               item_code: beforeMod.specification,
               event_type: 'removed',
-              quantity_change: parseInt(beforeMod.count) || 1,
+              quantity_change: oldCount,
               asset_id: parseInt(assetId),
               asset_label: assetLabel,
-              user_id: req.user ? req.user.id : null,
-              username: req.user ? (req.user.display_name || req.user.username) : null,
               notes: '부품코드 변경으로 제거 (' + beforeMod.specification + ' → ' + req.body.specification + ')'
             });
           }
           if (req.body.specification) {
+            dbConn.prepare('UPDATE module_inventory SET storage_quantity = MAX(storage_quantity - ?, 0), updated_at = CURRENT_TIMESTAMP WHERE item_code = ?').run(newCount, req.body.specification);
             ModuleInventoryLog.create({
               item_code: req.body.specification,
               event_type: 'installed',
-              quantity_change: -(parseInt(req.body.count) || 1),
+              quantity_change: -newCount,
               asset_id: parseInt(assetId),
               asset_label: assetLabel,
-              user_id: req.user ? req.user.id : null,
-              username: req.user ? (req.user.display_name || req.user.username) : null,
               notes: '부품코드 변경으로 설치 (' + (beforeMod.specification || '-') + ' → ' + req.body.specification + ')'
             });
           }
         } else if (countChanged && itemCode) {
-          // Count changed (same specification): log quantity adjustment
-          const oldCount = parseInt(beforeMod.count) || 0;
-          const newCount = parseInt(req.body.count) || 0;
+          // 수량 변경: 차이만큼 storage 조정 (증가하면 storage 감소, 감소하면 storage 증가)
           const diff = newCount - oldCount;
+          if (diff > 0) {
+            dbConn.prepare('UPDATE module_inventory SET storage_quantity = MAX(storage_quantity - ?, 0), updated_at = CURRENT_TIMESTAMP WHERE item_code = ?').run(diff, itemCode);
+          } else if (diff < 0) {
+            dbConn.prepare('UPDATE module_inventory SET storage_quantity = storage_quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE item_code = ?').run(-diff, itemCode);
+          }
           ModuleInventoryLog.create({
             item_code: itemCode,
             event_type: 'adjust',
             quantity_change: diff,
             asset_id: parseInt(assetId),
             asset_label: assetLabel,
-            user_id: req.user ? req.user.id : null,
-            username: req.user ? (req.user.display_name || req.user.username) : null,
             notes: '수량 변경: ' + oldCount + '개 → ' + newCount + '개'
           });
         }
+      }
+
+      // storage 조정 후 sync → recalculateInUse (total = storage + in_use 정확히 계산)
+      syncModulesToUsageLog(assetId);
+      // If asset changed, also sync old asset
+      if (beforeMod && beforeMod.asset_id && String(beforeMod.asset_id) !== String(assetId)) {
+        syncModulesToUsageLog(beforeMod.asset_id);
       }
     }
 
@@ -579,7 +664,7 @@ router.post('/modules/:id', requireMaintenance, (req, res) => {
 router.post('/modules/:id/inline-update', requireMaintenance, (req, res) => {
   try {
     const mod = ComputingModule.findById(req.params.id);
-    if (!mod) return res.status(404).json({ error: '모듈을 찾을 수 없습니다.' });
+    if (!mod) return res.status(404).json({ error: '부품을 찾을 수 없습니다.' });
 
     const { field, value } = req.body;
     const allowedFields = ['model', 'manufacturer', 'capacity', 'specification', 'slot_info', 'count', 'notes'];
@@ -679,25 +764,34 @@ router.post('/modules/:id/delete', requireMaintenance, (req, res) => {
   try {
     ComputingModule.delete(req.params.id);
 
-    // Sync to usage log and recalculate inventory
+    // 자사 모듈 제거: storage 증가를 recalculateInUse 전에 실행해야 total이 정확함
     if (mod && mod.asset_id) {
-      syncModulesToUsageLog(mod.asset_id);
-
-      // Log removed event (company modules only)
       const isCompanyDelete = (!mod.owner || mod.owner === 'company');
+      const removeCount = parseInt(mod.count) || 1;
       if (mod.specification && isCompanyDelete) {
+        const db = require('../config/database').getDb();
+        db.prepare(`
+          UPDATE module_inventory
+          SET storage_quantity = storage_quantity + ?,
+              updated_at = CURRENT_TIMESTAMP
+          WHERE item_code = ?
+        `).run(removeCount, mod.specification);
+
         const asset = Asset.findById(mod.asset_id);
         ModuleInventoryLog.create({
           item_code: mod.specification,
           event_type: 'removed',
-          quantity_change: parseInt(mod.count) || 1,
+          quantity_change: removeCount,
           asset_id: mod.asset_id,
           asset_label: asset ? (asset.management_number || asset.asset_number || String(mod.asset_id)) : null,
           user_id: req.user ? req.user.id : null,
           username: req.user ? (req.user.display_name || req.user.username) : null,
-          notes: mod.module_type + ' 모듈 제거'
+          notes: mod.module_type + ' 모듈 제거 → 장비실'
         });
       }
+
+      // storage 조정 후 sync → recalculateInUse
+      syncModulesToUsageLog(mod.asset_id);
     }
 
     const delAsset = mod && mod.asset_id ? Asset.findById(mod.asset_id) : null;
@@ -715,4 +809,91 @@ router.post('/modules/:id/delete', requireMaintenance, (req, res) => {
   res.redirect('/module-inventory?tab=installed');
 });
 
+// API: return vendor parts (업체 부품 반납)
+router.post('/api/inventory/:id/return-vendor', requireMaintenance, (req, res) => {
+  try {
+    const { getDb } = require('../config/database');
+    const db = getDb();
+    const item = ModuleInventory.findById(req.params.id);
+    if (!item) return res.status(404).json({ error: '부품을 찾을 수 없습니다.' });
+    if (item.owner !== 'vendor') return res.status(400).json({ error: '업체 부품만 반납할 수 있습니다.' });
+
+    const beforeTotal = item.total_quantity;
+    const beforeSpare = item.spare_quantity;
+
+    // Find affected computing_modules (installed on assets) matching this item_code + vendor
+    const installedModules = db.prepare(`
+      SELECT cm.id, cm.asset_id, cm.count
+      FROM computing_modules cm
+      WHERE cm.specification = ? AND cm.owner = 'vendor'
+    `).all(item.item_code);
+
+    // Also find by module_type + model fallback
+    const fallbackModules = db.prepare(`
+      SELECT cm.id, cm.asset_id, cm.count
+      FROM computing_modules cm
+      WHERE (cm.specification IS NULL OR cm.specification = '')
+        AND cm.module_type = ? AND cm.model = ? AND cm.owner = 'vendor'
+    `).all(item.module_type, item.model);
+
+    const allModules = [...installedModules, ...fallbackModules];
+    const affectedAssetIds = [...new Set(allModules.map(m => m.asset_id).filter(Boolean))];
+
+    // Delete vendor computing_modules
+    for (const m of allModules) {
+      db.prepare('DELETE FROM computing_modules WHERE id = ?').run(m.id);
+    }
+
+    // Set quantities to 0
+    db.prepare(`
+      UPDATE module_inventory
+      SET storage_quantity = 0, total_quantity = 0, spare_quantity = 0, in_use_quantity = 0,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(req.params.id);
+
+    // Log outgoing event
+    ModuleInventoryLog.create({
+      item_code: item.item_code,
+      event_type: 'outgoing',
+      quantity_change: -beforeTotal,
+      before_total: beforeTotal,
+      after_total: 0,
+      before_spare: beforeSpare,
+      after_spare: 0,
+      user_id: req.user ? req.user.id : null,
+      username: req.user ? (req.user.display_name || req.user.username) : null,
+      notes: '업체 부품 반납 (전량)'
+    });
+
+    // Sync affected assets
+    for (const assetId of affectedAssetIds) {
+      syncModulesToUsageLog(assetId);
+    }
+
+    AuditLog.log(req, {
+      action: 'update',
+      targetType: 'module_inventory',
+      targetId: req.params.id,
+      targetLabel: item.item_code,
+      details: {
+        event: 'vendor_return',
+        beforeTotal,
+        deletedModules: allModules.length,
+        affectedAssets: affectedAssetIds.length
+      }
+    });
+
+    res.json({
+      success: true,
+      item_code: item.item_code,
+      deleted_modules: allModules.length,
+      affected_assets: affectedAssetIds.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.syncModulesToUsageLog = syncModulesToUsageLog;
 module.exports = router;

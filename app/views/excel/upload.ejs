@@ -1,0 +1,60 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>엑셀 대량 업로드</h1>
+</div>
+
+<div class="card mb-2">
+    <h3>1. 양식 다운로드</h3>
+    <p class="text-muted">아래 버튼으로 엑셀 양식을 다운로드한 뒤, 데이터를 입력하여 업로드하세요.</p>
+    <a href="/excel/template" class="btn btn-primary">양식 다운로드 (.xlsx)</a>
+</div>
+
+<div class="card mb-2">
+    <h3>2. 파일 업로드</h3>
+    <form method="POST" action="/excel/upload" enctype="multipart/form-data">
+        <div class="form-group">
+            <label>엑셀 파일 선택 (.xlsx, 최대 5MB)</label>
+            <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+        </div>
+        <button type="submit" class="btn btn-primary">업로드</button>
+    </form>
+</div>
+
+<div class="card mb-2">
+    <h3>3. 시트 구성 안내</h3>
+    <table class="table">
+        <thead>
+            <tr><th>시트명</th><th>설명</th><th>필수 필드</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>자산</strong></td><td>서버/스위치/PDU 등 자산 등록 (자산번호 중복 시 업데이트)</td><td>자산번호</td></tr>
+            <tr><td><strong>IP주소</strong></td><td>자산번호로 연결하여 IP 등록</td><td>자산번호, IP주소</td></tr>
+            <tr><td><strong>접속정보</strong></td><td>자산번호로 연결하여 접속 계정 등록</td><td>자산번호, 사용자</td></tr>
+            <tr><td><strong>컴퓨팅모듈</strong></td><td>자산번호로 연결하여 CPU/메모리/디스크 등 등록</td><td>자산번호, 모듈유형</td></tr>
+            <tr><td><strong>참고(허용값)</strong></td><td>각 필드의 허용값 목록 (참고용)</td><td>-</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="card mb-2">
+    <h3>4. 허용값 참고</h3>
+    <table class="table">
+        <thead>
+            <tr><th>필드</th><th>허용값</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>유형 (asset_type)</td><td><% appConfig.assetTypes.forEach(t => { %><span class="badge" style="margin-right:4px;"><%= t.value %></span> <%= t.label %>&nbsp;&nbsp;<% }) %></td></tr>
+            <tr><td>소유 (ownership)</td><td><% appConfig.ownershipTypes.forEach(t => { %><span class="badge" style="margin-right:4px;"><%= t.value %></span> <%= t.label %>&nbsp;&nbsp;<% }) %></td></tr>
+            <tr><td>상태 (status)</td><td><% appConfig.assetStatuses.forEach(t => { %><span class="badge" style="margin-right:4px;"><%= t.value %></span> <%= t.label %>&nbsp;&nbsp;<% }) %></td></tr>
+            <tr><td>IP유형 (ip_type)</td><td><% appConfig.ipTypes.forEach(t => { %><span class="badge" style="margin-right:4px;"><%= t.value %></span> <%= t.label %>&nbsp;&nbsp;<% }) %></td></tr>
+            <tr><td>접속유형 (credential_type)</td><td><% appConfig.credentialTypes.forEach(t => { %><span class="badge" style="margin-right:4px;"><%= t.value %></span> <%= t.label %>&nbsp;&nbsp;<% }) %></td></tr>
+            <tr><td>모듈유형 (module_type)</td><td><% appConfig.moduleTypes.forEach(t => { %><span class="badge" style="margin-right:4px;"><%= t.value %></span> <%= t.label %>&nbsp;&nbsp;<% }) %></td></tr>
+            <tr><td>위치유형 (location_type)</td><td><% appConfig.locationTypes.forEach(t => { %><span class="badge" style="margin-right:4px;"><%= t.value %></span> <%= t.label %>&nbsp;&nbsp;<% }) %></td></tr>
+            <tr><td>블레이드 (blade_slot)</td><td><span class="badge">left</span> 왼쪽 &nbsp; <span class="badge">right</span> 오른쪽 &nbsp; (비워두면 full-width)</td></tr>
+            <tr><td>U위치 계산</td><td>rack_unit_start = (U시작-1)*3 + 구멍, rack_unit_size = U크기*3 + 추가칸</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<%- include('../partials/footer', { extraJs: null }) %>

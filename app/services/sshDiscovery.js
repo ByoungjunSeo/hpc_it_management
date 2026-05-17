@@ -1,4 +1,5 @@
 const { Client } = require('ssh2');
+const { execFile } = require('child_process');
 const appConfig = require('../config/app');
 const hardwareParser = require('./hardwareParser');
 
@@ -70,7 +71,7 @@ SMARTCTL_D=$(command -v smartctl 2>/dev/null)
 if [ -n "$SMARTCTL_D" ]; then
   for dev in $(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk"{print $1}'); do
     INFO=$(sudo $SMARTCTL_D -i "/dev/$dev" 2>/dev/null || $SMARTCTL_D -i "/dev/$dev" 2>/dev/null)
-    MODEL=$(echo "$INFO" | grep -E '^(Device Model|Product):' | head -1 | sed 's/^[^:]*:\s*//')
+    MODEL=$(echo "$INFO" | grep -E '^(Device Model|Product|Model Number):' | head -1 | sed 's/^[^:]*:\s*//')
     VENDOR=$(echo "$INFO" | grep -E '^Vendor:' | head -1 | sed 's/^[^:]*:\s*//')
     if [ -n "$MODEL" ]; then
       if [ -n "$VENDOR" ] && echo "$MODEL" | grep -qiv "^$VENDOR"; then
@@ -83,7 +84,7 @@ if [ -n "$SMARTCTL_D" ]; then
 fi
 echo "===DISK_DETAIL_END==="
 echo "===NETWORK_START==="
-lspci -D 2>/dev/null | grep -i ethernet | while IFS= read -r line; do
+lspci -D 2>/dev/null | grep -iE 'ethernet|infiniband' | while IFS= read -r line; do
   PCI=$(echo "$line" | awk '{print $1}')
   SDEV=$(lspci -vmms "$PCI" 2>/dev/null | awk -F':\t' '/^SDevice:/{print $2}')
   if echo "$SDEV" | grep -qE '^Device [0-9a-fA-F]{4}$'; then
@@ -209,10 +210,36 @@ if [ -n "$SMARTCTL" ]; then
   echo "===SMARTCTL_END==="
 fi
 echo "===RAID_PD_END==="
+echo "===NVME_START==="
+NVME_CLI=$(command -v nvme 2>/dev/null)
+if [ -z "$NVME_CLI" ]; then
+  if command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nvme-cli >/dev/null 2>&1
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y nvme-cli >/dev/null 2>&1
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y nvme-cli >/dev/null 2>&1
+  fi
+  NVME_CLI=$(command -v nvme 2>/dev/null)
+fi
+if [ -n "$NVME_CLI" ]; then
+  sudo $NVME_CLI list 2>/dev/null || $NVME_CLI list 2>/dev/null
+fi
+echo "===NVME_LSPCI==="
+lspci 2>/dev/null | grep -i "Non-Volatile memory"
+echo "===NVME_END==="
 echo "===GPU_START==="
 lspci 2>/dev/null | grep -iE 'VGA compatible|3D controller|Display controller'
 nvidia-smi -L 2>/dev/null
 echo "===GPU_END==="
+echo "===NPU_START==="
+lspci 2>/dev/null | grep -iE 'rebellions|furiosa|npu|neural|processing accelerator|AI accelerator|ATOM|RNGD|WARBOY' | while IFS= read -r line; do
+  PCI=$(echo "$line" | awk '{print $1}')
+  echo "===NPU_DEV:$PCI==="
+  echo "$line"
+  lspci -vv -s "$PCI" 2>/dev/null
+done
+echo "===NPU_END==="
 echo "===FREE_START==="
 free -h 2>/dev/null
 echo "===FREE_END==="
@@ -393,4 +420,204 @@ async function discoverRange(startIp, endIp, options = {}) {
   return results;
 }
 
-module.exports = { connectAndDiscover, discoverRange, generateIpRange };
+// ── IPMI PSU detection via BMC ──
+
+function runIpmiCommand(bmcIp, bmcUser, bmcPass, args, timeout = 8000) {
+  return new Promise((resolve) => {
+    const fullArgs = ['-I', 'lanplus', '-H', bmcIp, '-U', bmcUser, '-P', bmcPass, ...args];
+    execFile('ipmitool', fullArgs, { timeout }, (err, stdout) => {
+      resolve(err ? '' : (stdout || ''));
+    });
+  });
+}
+
+// Extract rated wattage from PSU model name
+// e.g. TDPS2400HB→2400, DPS-800AB→800, PWS-2K04A→2000, PWS-1K28P→1280
+function extractWattFromModel(model) {
+  if (!model) return 0;
+  // "2K04" style → 2040W, "1K28" → 1280W
+  const kMatch = model.match(/(\d)K(\d{2})/i);
+  if (kMatch) return parseInt(kMatch[1]) * 1000 + parseInt(kMatch[2]) * 10;
+  // 3-4 digit number likely to be wattage (200~3600W range)
+  const nums = model.match(/(\d{3,4})/g);
+  if (nums) {
+    for (const n of nums) {
+      const v = parseInt(n);
+      if (v >= 200 && v <= 3600) return v;
+    }
+  }
+  return 0;
+}
+
+async function detectPsuViaIpmi(bmcIp, bmcUser, bmcPass) {
+  try {
+    // 4 IPMI commands sequentially (each 8s timeout)
+    const sdrOutput = await runIpmiCommand(bmcIp, bmcUser, bmcPass, ['sdr', 'type', 'Power Supply']);
+    const sensorOutput = await runIpmiCommand(bmcIp, bmcUser, bmcPass, ['sensor', 'list']);
+    const dcmiOutput = await runIpmiCommand(bmcIp, bmcUser, bmcPass, ['dcmi', 'power', 'reading']);
+    const fruOutput = await runIpmiCommand(bmcIp, bmcUser, bmcPass, ['fru', 'print']);
+
+    // 1) PSU count from SDR ("Presence detected" lines)
+    let psuCount = 0;
+    const presenceLines = sdrOutput.split('\n').filter(l => /Presence detected/i.test(l));
+    psuCount = presenceLines.length;
+
+    // 2) PSU info from sensor list
+    const sensorLines = sensorOutput.split('\n');
+
+    // Helper: extract PSU slot number from sensor name
+    // PSU1, PS2 → number; PSU_A, PSU_B → A=1, B=2, ...
+    function psuSlotNum(name) {
+      const numMatch = name.match(/^(?:PSU|PS)[\s_]*(\d+)/i);
+      if (numMatch) return parseInt(numMatch[1]);
+      const letterMatch = name.match(/^(?:PSU|PS)[\s_]*([A-Z])/i);
+      if (letterMatch) return letterMatch[1].toUpperCase().charCodeAt(0) - 64; // A=1, B=2
+      return 0;
+    }
+
+    // Match various PSU power sensor names:
+    //   "PSU1 Input PWR", "PSU1 In Power", "PSU_A_PowerIn", "PSU_B_PowerOut" etc.
+    const psuPwrLines = sensorLines.filter(l => {
+      const t = l.trim();
+      return /^(PSU|PS)[\s_]*(\d+|[A-Z])[\s_].*(In|Input|Out|Output)[\s_]*(Power|PWR)/i.test(t) ||
+             /^(PSU|PS)[\s_]*(\d+|[A-Z])[\s_]*(Power|PWR)[\s_]*(In|Out)/i.test(t);
+    });
+
+    // Unique PSU slot numbers from sensor output (fallback count)
+    const psuNumbers = new Set();
+    for (const line of sensorLines) {
+      const n = psuSlotNum(line.trim());
+      if (n > 0) psuNumbers.add(n);
+    }
+    if (psuCount === 0 && psuNumbers.size > 0) {
+      psuCount = psuNumbers.size;
+    }
+
+    // Also check FRU for PSU count (PSU1_FRU, PSU2_FRU, etc.)
+    const fruPsuIds = new Set();
+    const fruEntries = fruOutput.split('FRU Device Description');
+    for (const entry of fruEntries) {
+      const pm = entry.match(/:\s*PSU\s*(\d+)/i);
+      if (pm) fruPsuIds.add(parseInt(pm[1]));
+    }
+    if (psuCount === 0 && fruPsuIds.size > 0) {
+      psuCount = fruPsuIds.size;
+    }
+
+    if (psuCount === 0) return [];
+
+    // 3) Watt per PSU from sensor
+    const psuRatedWatts = {};   // rated capacity (upper thresholds)
+    const psuCurrentWatts = {}; // current reading (value field)
+    for (const line of psuPwrLines) {
+      const num = psuSlotNum(line.trim());
+      if (num === 0) continue;
+      const fields = line.split('|').map(f => f.trim());
+      // Fields: name | value | unit | status | lnr | lcr | lnc | unc | ucr | unr
+
+      // Rated capacity: Upper Critical (8) > Upper Non-Critical (7)
+      if (fields.length >= 9) {
+        const ucr = parseFloat(fields[8]);
+        const unc = parseFloat(fields[7]);
+        const rated = (!isNaN(ucr) && ucr > 0) ? ucr : (!isNaN(unc) && unc > 0) ? unc : 0;
+        if (rated > 0 && (!psuRatedWatts[num] || rated > psuRatedWatts[num])) {
+          psuRatedWatts[num] = rated;
+        }
+      }
+
+      // Current reading: value field (index 1), prefer Input over Output
+      const current = parseFloat(fields[1]);
+      if (!isNaN(current) && current > 0) {
+        const isInput = /In/i.test(fields[0]);
+        if (isInput || !psuCurrentWatts[num]) {
+          psuCurrentWatts[num] = current;
+        }
+      }
+    }
+
+    // System total power from sensor (SYS_POWER, Total_Power, total_power, etc.)
+    let sysPower = 0;
+    for (const line of sensorLines) {
+      if (/^(SYS_POWER|total_power|Total.?Power|System.?Power)/i.test(line.trim())) {
+        const fields = line.split('|').map(f => f.trim());
+        const val = parseFloat(fields[1]);
+        if (!isNaN(val) && val > 0) sysPower = val;
+      }
+    }
+
+    // 4) DCMI power
+    let dcmiMax = 0, dcmiCurrent = 0;
+    const dcmiMaxMatch = dcmiOutput.match(/Maximum during sampling period:\s*(\d+)\s*Watts/i);
+    if (dcmiMaxMatch) dcmiMax = parseInt(dcmiMaxMatch[1]);
+    const dcmiCurMatch = dcmiOutput.match(/Instantaneous power reading:\s*(\d+)\s*Watts/i);
+    if (dcmiCurMatch) dcmiCurrent = parseInt(dcmiCurMatch[1]);
+
+    // 5) PSU FRU data (model, manufacturer, rated wattage from model name)
+    const psuFru = {}; // { 1: { model, manufacturer, watt }, 2: ... }
+    for (const entry of fruEntries) {
+      // Match PSU FRU entries: "PSU1_FRU (ID 89)" or "PSU 1 (ID 2)"
+      const psuMatch = entry.match(/:\s*PSU\s*(\d+)/i);
+      if (!psuMatch) continue;
+      const num = parseInt(psuMatch[1]);
+      const info = {};
+      entry.split('\n').forEach(line => {
+        const parts = line.split(':');
+        if (parts.length >= 2) {
+          const key = parts[0].trim();
+          const val = parts.slice(1).join(':').trim();
+          if (key && val) info[key] = val;
+        }
+      });
+      const fruModel = (info['Product Name'] || info['Product Part Number'] || '').trim();
+      const fruMfg = (info['Product Manufacturer'] || '').trim();
+      if (fruModel && !/^0+$/.test(fruModel)) {
+        const watt = extractWattFromModel(fruModel);
+        psuFru[num] = { model: fruModel, manufacturer: fruMfg, watt };
+      }
+    }
+
+    // Best current power reading for notes
+    const totalCurrentPower = dcmiCurrent || sysPower ||
+      Object.values(psuCurrentWatts).reduce((a, b) => a + b, 0);
+
+    // Build PSU modules, consolidate by model + capacity
+    const consolidated = {};
+    for (let i = 1; i <= psuCount; i++) {
+      const fru = psuFru[i] || {};
+      const model = fru.model || 'PSU';
+      const manufacturer = fru.manufacturer || '';
+      const watt = psuRatedWatts[i] || fru.watt || 0;
+      if (watt === 0) continue;
+      const capacity = watt + 'W';
+      const key = model + '|' + capacity;
+
+      if (consolidated[key]) {
+        consolidated[key].count++;
+        consolidated[key].slots.push(i);
+      } else {
+        consolidated[key] = { model, manufacturer, capacity, count: 1, slots: [i] };
+      }
+    }
+
+    const modules = [];
+    for (const entry of Object.values(consolidated)) {
+      const noteParts = ['IPMI 자동감지'];
+      if (totalCurrentPower > 0) noteParts.push(`현재 총 ${totalCurrentPower}W`);
+
+      modules.push({
+        module_type: 'psu',
+        model: entry.model,
+        manufacturer: entry.manufacturer,
+        capacity: entry.capacity,
+        count: entry.count,
+        slot_info: entry.slots.map(s => 'PSU' + s).join(', '),
+        notes: noteParts.join(', ')
+      });
+    }
+    return modules;
+  } catch (err) {
+    return [];
+  }
+}
+
+module.exports = { connectAndDiscover, discoverRange, generateIpRange, detectPsuViaIpmi };

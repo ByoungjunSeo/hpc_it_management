@@ -221,7 +221,9 @@
                     <td><%= m.manufacturer || m.label || '-' %></td>
                     <td><%= m.model || '-' %></td>
                     <td><%= m.capacity || m.specification || '-' %></td>
-                    <td style="text-align:right; font-weight:600; font-size:16px;"><%= m.storage_quantity %></td>
+                    <td style="text-align:right;">
+                        <span class="storage-qty-display" data-id="<%= m.id %>" data-code="<%= m.item_code %>" style="font-weight:600; font-size:16px; cursor:pointer; padding:2px 8px; border-radius:4px; border:1px solid transparent;" title="클릭하여 수정" onclick="editStorageQty(this)"><%= m.storage_quantity %></span>
+                    </td>
                 </tr>
                 <% }) %>
             </tbody>
@@ -230,6 +232,54 @@
     <% }) %>
 </div>
 </div>
+
+<script>
+function editStorageQty(el) {
+  if (el.querySelector('input')) return;
+  var currentVal = parseInt(el.textContent.trim());
+  var id = el.dataset.id;
+  var code = el.dataset.code;
+  var input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.value = currentVal;
+  input.style.cssText = 'width:70px; text-align:right; font-size:14px; font-weight:600; padding:2px 6px; border:2px solid #3b82f6; border-radius:4px; outline:none;';
+  el.textContent = '';
+  el.style.border = 'none';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+
+  function save() {
+    var newVal = parseInt(input.value);
+    if (isNaN(newVal) || newVal < 0) { el.textContent = currentVal; return; }
+    if (newVal === currentVal) { el.textContent = currentVal; return; }
+    el.textContent = '...';
+    fetch('/module-inventory/api/inventory/' + id + '/update-storage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storage_quantity: newVal })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.success) {
+        el.textContent = data.storage_quantity;
+        el.style.background = '#dcfce7';
+        setTimeout(function() { el.style.background = ''; }, 1500);
+      } else {
+        alert(data.error || '수정 실패');
+        el.textContent = currentVal;
+      }
+    })
+    .catch(function() { alert('서버 오류'); el.textContent = currentVal; });
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { el.textContent = currentVal; }
+  });
+}
+</script>
 <% } %>
 
 <!-- Add Rack Modal -->

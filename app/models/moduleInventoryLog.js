@@ -79,6 +79,26 @@ const ModuleInventoryLog = {
     params.push(limit);
 
     return getDb().prepare(sql).all(...params);
+  },
+
+  countByEventType() {
+    const rows = getDb().prepare(`
+      SELECT event_type, COUNT(*) as count FROM module_inventory_logs GROUP BY event_type
+    `).all();
+    const result = { total: 0 };
+    rows.forEach(r => {
+      result[r.event_type] = r.count;
+      result.total += r.count;
+    });
+    return result;
+  },
+
+  getItemCodes() {
+    return getDb().prepare(`
+      SELECT DISTINCT item_code FROM module_inventory_logs
+      WHERE item_code IS NOT NULL AND item_code != ''
+      ORDER BY item_code
+    `).all().map(r => r.item_code);
   }
 };
 

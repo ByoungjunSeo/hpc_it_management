@@ -1,0 +1,419 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>구축 요청서</h1>
+    <a href="/requests" class="btn btn-outline">목록으로</a>
+</div>
+
+<div style="max-width:900px;">
+    <!-- 양식 붙여넣기 -->
+    <div class="card" style="border:2px solid #f59e0b;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <h3 style="margin:0;color:#d97706;">양식 붙여넣기</h3>
+            <span style="font-size:12px;color:#64748b;">업체가 작성해서 보낸 구축 요청서를 붙여넣으면 자동으로 입력됩니다</span>
+        </div>
+        <textarea id="pasteArea" class="form-control" rows="4" style="font-size:13px;" placeholder="업체가 작성한 구축 요청서 텍스트를 여기에 붙여넣으세요..."></textarea>
+        <div style="margin-top:8px;text-align:right;">
+            <button type="button" class="btn" style="background:#d97706;color:#fff;" onclick="parseSetupText()">자동 입력 &rarr;</button>
+        </div>
+    </div>
+
+    <!-- 대화형 입력 -->
+    <div class="card" style="border:2px solid #2563eb;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <h3 style="margin:0;color:#2563eb;">대화형 입력</h3>
+            <span style="font-size:12px;color:#64748b;">요청사항을 자유롭게 입력하면 아래 양식이 자동으로 채워집니다</span>
+        </div>
+        <textarea id="freeText" class="form-control" rows="5" style="font-size:14px;line-height:1.7;" placeholder="예: 서버 A-01에 Ubuntu 22.04 설치하고, IP는 10.100.230.15로 설정해주세요. 장비실에 남는 메모리 DDR4 64GB 4장을 서버 A-01에 추가로 장착해주세요. GPU A100 2장은 서버 B-03에서 빼서 A-01에 옮겨주세요."></textarea>
+        <div style="margin-top:8px;text-align:right;">
+            <button type="button" class="btn btn-primary" onclick="parseText()">자동 분석 &rarr;</button>
+        </div>
+    </div>
+
+    <!-- 기본 정보 -->
+    <div class="card">
+        <h3 style="margin-bottom:12px;">기본 정보</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+            <div class="form-group">
+                <label>요청일</label>
+                <input type="date" id="reqDate" class="form-control" value="<%= new Date().toISOString().slice(0,10) %>">
+            </div>
+            <div class="form-group">
+                <label>요청자</label>
+                <input type="text" id="requester" class="form-control" placeholder="예: 김관리자">
+            </div>
+            <div class="form-group">
+                <label>희망 완료일</label>
+                <input type="date" id="deadline" class="form-control">
+            </div>
+        </div>
+    </div>
+
+    <!-- 작업 항목 -->
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;">작업 항목</h3>
+            <button type="button" class="btn btn-primary btn-sm" onclick="addTask()">+ 작업 추가</button>
+        </div>
+        <div id="tasksContainer"></div>
+        <div id="noTasks" style="text-align:center;color:#94a3b8;padding:20px;font-size:14px;">
+            위 대화형 입력을 사용하거나, '+ 작업 추가' 버튼으로 작업을 추가하세요.
+        </div>
+    </div>
+
+    <!-- 추가 요청 -->
+    <div class="card">
+        <h3 style="margin-bottom:12px;">추가 요청사항</h3>
+        <textarea id="extraNotes" class="form-control" rows="3" placeholder="추가 요청사항이 있으면 입력해주세요."></textarea>
+    </div>
+
+    <!-- 미리보기 & 복사 -->
+    <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0;">미리보기</h3>
+            <div>
+                <button type="button" class="btn btn-sm btn-outline" onclick="clearSetupForm()">양식 초기화</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="generatePreview()">미리보기 생성</button>
+                <button type="button" class="btn btn-sm" style="background:#16a34a;color:#fff;margin-left:4px;" onclick="copyPreview()">복사하기</button>
+            </div>
+        </div>
+        <textarea id="previewArea" class="form-control" rows="22" style="font-family:'D2Coding',monospace;font-size:13px;line-height:1.5;background:#f8fafc;white-space:pre;overflow-x:auto;" readonly placeholder="양식을 작성한 후 '미리보기 생성' 버튼을 클릭하세요."></textarea>
+        <p id="copyMsg" style="display:none;color:#16a34a;font-size:13px;margin-top:6px;font-weight:600;">클립보드에 복사되었습니다!</p>
+    </div>
+</div>
+
+<style>
+.task-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 10px;
+    position: relative;
+}
+.task-card .task-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.task-card .task-num {
+    font-weight: 700;
+    font-size: 13px;
+    color: #2563eb;
+}
+.task-card .task-fields {
+    display: grid;
+    grid-template-columns: 150px 1fr 1fr;
+    gap: 8px;
+}
+.task-card .task-fields-2 {
+    display: grid;
+    grid-template-columns: 80px 1fr;
+    gap: 8px;
+    margin-top: 8px;
+}
+.task-card select, .task-card input {
+    font-size: 13px;
+    padding: 6px 8px;
+}
+@media (max-width:700px) {
+    .task-card .task-fields { grid-template-columns: 1fr; }
+    .task-card .task-fields-2 { grid-template-columns: 1fr; }
+}
+</style>
+
+<script>
+const TASK_TYPES = [
+  { value: 'os_install', label: 'OS 설치' },
+  { value: 'ip_config', label: 'IP 설정' },
+  { value: 'hw_install', label: '하드웨어 장착' },
+  { value: 'hw_move', label: '하드웨어 이동' },
+  { value: 'hw_replace', label: '하드웨어 교체' },
+  { value: 'cable', label: '케이블 작업' },
+  { value: 'rack_mount', label: '랙 마운트' },
+  { value: 'other', label: '기타' }
+];
+
+let taskCount = 0;
+
+function addTask(data) {
+  taskCount++;
+  const id = taskCount;
+  const d = data || {};
+  const container = document.getElementById('tasksContainer');
+  document.getElementById('noTasks').style.display = 'none';
+
+  const typeOpts = TASK_TYPES.map(t =>
+    '<option value="' + t.value + '"' + (d.type === t.value ? ' selected' : '') + '>' + t.label + '</option>'
+  ).join('');
+
+  const card = document.createElement('div');
+  card.className = 'task-card';
+  card.id = 'task-' + id;
+  card.innerHTML =
+    '<div class="task-header">' +
+      '<span class="task-num">작업 #' + id + '</span>' +
+      '<button type="button" class="btn btn-sm btn-danger" onclick="removeTask(' + id + ')" style="padding:2px 8px;font-size:12px;">&times; 삭제</button>' +
+    '</div>' +
+    '<div class="task-fields">' +
+      '<select class="form-control task-type" onchange="onTypeChange(this,' + id + ')">' + typeOpts + '</select>' +
+      '<input type="text" class="form-control task-target" placeholder="대상 서버 (예: A-01)" value="' + esc(d.target || '') + '">' +
+      '<input type="text" class="form-control task-source" placeholder="출처 서버/장비실 (이동 시)" value="' + esc(d.source || '') + '">' +
+    '</div>' +
+    '<div class="task-fields-2">' +
+      '<input type="number" class="form-control task-qty" value="' + (d.quantity || 1) + '" min="1" placeholder="수량">' +
+      '<input type="text" class="form-control task-detail" placeholder="상세 내용 (예: Ubuntu 22.04, GPU A100, 메모리 64GB 등)" value="' + esc(d.detail || '') + '">' +
+    '</div>';
+
+  container.appendChild(card);
+  onTypeChange(card.querySelector('.task-type'), id);
+}
+
+function onTypeChange(sel, id) {
+  const card = document.getElementById('task-' + id);
+  const sourceInput = card.querySelector('.task-source');
+  const qtyInput = card.querySelector('.task-qty');
+  const detailInput = card.querySelector('.task-detail');
+
+  if (sel.value === 'hw_move') {
+    sourceInput.style.display = '';
+    sourceInput.placeholder = '출처 서버 (예: B-03)';
+    qtyInput.style.display = '';
+    detailInput.placeholder = '이동할 부품 (예: GPU A100)';
+  } else if (sel.value === 'hw_install') {
+    sourceInput.style.display = '';
+    sourceInput.placeholder = '출처 (예: 장비실 재고, 신규 입고)';
+    qtyInput.style.display = '';
+    detailInput.placeholder = '장착할 부품 (예: 메모리 DDR4 64GB)';
+  } else if (sel.value === 'hw_replace') {
+    sourceInput.style.display = '';
+    sourceInput.placeholder = '교체 전 부품 (선택)';
+    qtyInput.style.display = '';
+    detailInput.placeholder = '교체할 부품 (예: CPU Xeon Gold 6348)';
+  } else if (sel.value === 'os_install') {
+    sourceInput.style.display = 'none';
+    qtyInput.style.display = 'none';
+    detailInput.placeholder = 'OS 종류 및 버전 (예: Ubuntu 22.04 LTS)';
+  } else if (sel.value === 'ip_config') {
+    sourceInput.style.display = 'none';
+    qtyInput.style.display = 'none';
+    detailInput.placeholder = 'IP 주소 (예: 10.100.230.15)';
+  } else if (sel.value === 'cable') {
+    sourceInput.style.display = 'none';
+    qtyInput.style.display = '';
+    detailInput.placeholder = '케이블 작업 내용 (예: 10GbE 랜선 연결)';
+  } else if (sel.value === 'rack_mount') {
+    sourceInput.style.display = 'none';
+    qtyInput.style.display = 'none';
+    detailInput.placeholder = '랙 마운트 내용 (예: 랙 C열 3번, 2U 장착)';
+  } else {
+    sourceInput.style.display = 'none';
+    qtyInput.style.display = '';
+    detailInput.placeholder = '상세 내용';
+  }
+}
+
+function removeTask(id) {
+  const card = document.getElementById('task-' + id);
+  if (card) card.remove();
+  if (document.querySelectorAll('.task-card').length === 0) {
+    document.getElementById('noTasks').style.display = '';
+  }
+}
+
+function esc(s) {
+  return s.replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+function getTasks() {
+  const cards = document.querySelectorAll('.task-card');
+  const tasks = [];
+  cards.forEach(c => {
+    const typeVal = c.querySelector('.task-type').value;
+    const typeLabel = TASK_TYPES.find(t => t.value === typeVal)?.label || typeVal;
+    tasks.push({
+      type: typeVal,
+      typeLabel: typeLabel,
+      target: c.querySelector('.task-target').value.trim(),
+      source: c.querySelector('.task-source').value.trim(),
+      detail: c.querySelector('.task-detail').value.trim(),
+      qty: parseInt(c.querySelector('.task-qty').value) || 1
+    });
+  });
+  return tasks;
+}
+
+function parseText() {
+  const text = document.getElementById('freeText').value.trim();
+  if (!text) return alert('요청사항을 입력해주세요.');
+
+  fetch('/requests/parse-text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.tasks || data.tasks.length === 0) {
+      alert('인식된 작업이 없습니다. 좀 더 구체적으로 입력해주세요.\n\n예: "서버 A-01에 Ubuntu 22.04 설치, IP 10.100.230.15 설정"');
+      return;
+    }
+    // Clear existing tasks
+    document.getElementById('tasksContainer').innerHTML = '';
+    taskCount = 0;
+
+    // Add parsed tasks
+    data.tasks.forEach(t => addTask(t));
+  })
+  .catch(() => {
+    alert('분석 중 오류가 발생했습니다.');
+  });
+}
+
+function generatePreview() {
+  const date = document.getElementById('reqDate').value || '-';
+  const requester = document.getElementById('requester').value.trim() || '-';
+  const deadline = document.getElementById('deadline').value || '-';
+  const notes = document.getElementById('extraNotes').value.trim();
+  const tasks = getTasks();
+
+  const line = '═'.repeat(50);
+  let text = line + '\n';
+  text += '          TTA HPC/AIDC 구축 요청서\n';
+  text += line + '\n\n';
+
+  text += '▶ 요청일: ' + date + '\n';
+  text += '▶ 요청자: ' + requester + '\n';
+  text += '▶ 희망 완료일: ' + deadline + '\n\n';
+
+  text += '▶ 작업 항목\n';
+  if (tasks.length === 0) {
+    text += '  (작업 항목 없음)\n';
+  } else {
+    tasks.forEach((t, i) => {
+      text += '\n  ' + (i + 1) + '. [' + t.typeLabel + ']\n';
+      if (t.target) text += '     대상: 서버 ' + t.target + '\n';
+      if (t.source) text += '     출처: ' + t.source + '\n';
+      if (t.detail) {
+        let detailLine = '     내용: ' + t.detail;
+        if (['hw_install','hw_move','hw_replace','cable'].includes(t.type) && t.qty > 1) {
+          detailLine += ' x ' + t.qty;
+        }
+        text += detailLine + '\n';
+      }
+    });
+  }
+
+  if (notes) {
+    text += '\n▶ 추가 요청사항\n';
+    text += '  ' + notes.split('\n').join('\n  ') + '\n';
+  }
+
+  text += '\n' + line + '\n';
+
+  document.getElementById('previewArea').value = text;
+}
+
+function copyPreview() {
+  const area = document.getElementById('previewArea');
+  if (!area.value.trim()) {
+    generatePreview();
+  }
+  navigator.clipboard.writeText(area.value).then(() => {
+    showCopyMsg();
+  }).catch(() => {
+    area.select();
+    document.execCommand('copy');
+    showCopyMsg();
+  });
+}
+
+function showCopyMsg() {
+  const msg = document.getElementById('copyMsg');
+  msg.style.display = 'block';
+  setTimeout(() => { msg.style.display = 'none'; }, 2500);
+}
+
+function clearSetupForm() {
+  document.getElementById('reqDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('requester').value = '';
+  document.getElementById('deadline').value = '';
+  document.getElementById('extraNotes').value = '';
+  document.getElementById('freeText').value = '';
+  document.getElementById('pasteArea').value = '';
+  document.getElementById('previewArea').value = '';
+  document.getElementById('tasksContainer').innerHTML = '';
+  taskCount = 0;
+  document.getElementById('noTasks').style.display = '';
+}
+
+// --- 양식 붙여넣기 파서 ---
+function parseSetupText() {
+  const text = document.getElementById('pasteArea').value.trim();
+  if (!text) return alert('붙여넣을 텍스트를 입력해주세요.');
+
+  // Parse dates and requester
+  const dateMatch = text.match(/요청일[:\s]+(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) document.getElementById('reqDate').value = dateMatch[1];
+
+  const requesterMatch = text.match(/요청자[:\s]+(.+)/);
+  if (requesterMatch) document.getElementById('requester').value = requesterMatch[1].replace(/_/g, '').trim();
+
+  const deadlineMatch = text.match(/(?:희망\s*완료일|완료\s*예정일)[:\s]+(\d{4}-\d{2}-\d{2})/);
+  if (deadlineMatch) document.getElementById('deadline').value = deadlineMatch[1];
+
+  // Parse tasks
+  document.getElementById('tasksContainer').innerHTML = '';
+  taskCount = 0;
+
+  // Match task blocks: N. [Type]\n     대상: ...\n     출처: ...\n     내용: ...
+  const taskBlockRegex = /\d+\.\s*\[([^\]]+)\]\s*\n((?:\s+(?:대상|출처|내용)[:\s]+[^\n]+\n?)*)/g;
+  let m;
+  while ((m = taskBlockRegex.exec(text)) !== null) {
+    const typeLabel = m[1].trim();
+    const body = m[2];
+
+    const typeEntry = TASK_TYPES.find(t => t.label === typeLabel);
+    const typeVal = typeEntry ? typeEntry.value : 'other';
+
+    const targetMatch = body.match(/대상[:\s]+(?:서버\s*)?(.+)/);
+    const sourceMatch = body.match(/출처[:\s]+(.+)/);
+    const detailMatch = body.match(/내용[:\s]+(.+)/);
+
+    let detail = detailMatch ? detailMatch[1].trim() : '';
+    let qty = 1;
+    const qtyMatch = detail.match(/x\s*(\d+)\s*$/);
+    if (qtyMatch) {
+      qty = parseInt(qtyMatch[1]);
+      detail = detail.replace(/x\s*\d+\s*$/, '').trim();
+    }
+
+    addTask({
+      type: typeVal,
+      target: targetMatch ? targetMatch[1].trim() : '',
+      source: sourceMatch ? sourceMatch[1].trim() : '',
+      detail: detail,
+      quantity: qty
+    });
+  }
+
+  // If no tasks parsed from block format, try line format
+  if (document.querySelectorAll('.task-card').length === 0) {
+    // Fallback: use the NLP parser
+    parseText();
+    return;
+  }
+
+  // Parse notes
+  const notesMatch = text.match(/(?:추가\s*요청사항|추가\s*요청|비고)[^\n]*\n([\s\S]*?)(?:\n═|$)/);
+  if (notesMatch) {
+    const val = notesMatch[1].replace(/^\s+/gm, '').replace(/_/g, '').trim();
+    if (val) document.getElementById('extraNotes').value = val;
+  }
+
+  generatePreview();
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

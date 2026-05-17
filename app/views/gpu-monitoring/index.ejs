@@ -1,0 +1,491 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<% if (typeof error !== 'undefined' && error) { %>
+<div class="alert alert-error"><%= error %></div>
+<% } %>
+
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+  <h2>GPU 모니터링</h2>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-light); cursor:pointer;">
+      <input type="checkbox" id="autoRefresh"> 자동 갱신 (30초)
+    </label>
+    <button class="btn btn-primary" id="btnCollectAll" onclick="collectAll()">전체 수집</button>
+  </div>
+</div>
+
+<!-- Summary Donut Charts -->
+<div class="gpu-summary-panel">
+  <div class="gpu-summary-donuts">
+    <div class="donut-card">
+      <div class="donut-wrap">
+        <svg class="donut-svg" viewBox="0 0 120 120">
+          <circle class="donut-bg" cx="60" cy="60" r="50"/>
+          <circle class="donut-ring" id="donutTemp" cx="60" cy="60" r="50" stroke="var(--success)"/>
+        </svg>
+        <div class="donut-center">
+          <span class="donut-value" id="donutTempVal">-</span>
+          <span class="donut-unit">&deg;C</span>
+        </div>
+      </div>
+      <div class="donut-label">평균 온도</div>
+    </div>
+    <div class="donut-card">
+      <div class="donut-wrap">
+        <svg class="donut-svg" viewBox="0 0 120 120">
+          <circle class="donut-bg" cx="60" cy="60" r="50"/>
+          <circle class="donut-ring" id="donutUtil" cx="60" cy="60" r="50" stroke="var(--info)"/>
+        </svg>
+        <div class="donut-center">
+          <span class="donut-value" id="donutUtilVal">-</span>
+          <span class="donut-unit">%</span>
+        </div>
+      </div>
+      <div class="donut-label">GPU 사용률</div>
+    </div>
+    <div class="donut-card">
+      <div class="donut-wrap">
+        <svg class="donut-svg" viewBox="0 0 120 120">
+          <circle class="donut-bg" cx="60" cy="60" r="50"/>
+          <circle class="donut-ring" id="donutMem" cx="60" cy="60" r="50" stroke="var(--info)"/>
+        </svg>
+        <div class="donut-center">
+          <span class="donut-value" id="donutMemVal">-</span>
+          <span class="donut-unit">%</span>
+        </div>
+      </div>
+      <div class="donut-label">메모리 사용률</div>
+    </div>
+    <div class="donut-card">
+      <div class="donut-wrap">
+        <svg class="donut-svg" viewBox="0 0 120 120">
+          <circle class="donut-bg" cx="60" cy="60" r="50"/>
+          <circle class="donut-ring" id="donutPower" cx="60" cy="60" r="50" stroke="var(--success)"/>
+        </svg>
+        <div class="donut-center">
+          <span class="donut-value" id="donutPowerVal">-</span>
+          <span class="donut-unit">%</span>
+        </div>
+      </div>
+      <div class="donut-label">전력 사용률</div>
+      <div class="donut-desc">소비전력 / 전력한계</div>
+    </div>
+    <div class="donut-card donut-card-power-total">
+      <div class="donut-wrap">
+        <svg class="donut-svg" viewBox="0 0 120 120">
+          <circle class="donut-bg" cx="60" cy="60" r="50"/>
+          <circle class="donut-ring" id="donutPowerTotal" cx="60" cy="60" r="50" stroke="#7c3aed"/>
+        </svg>
+        <div class="donut-center">
+          <span class="donut-value donut-value-sm" id="donutPowerTotalVal">-</span>
+          <span class="donut-unit">kW</span>
+        </div>
+      </div>
+      <div class="donut-label">총 전력 소비</div>
+      <div class="donut-desc" id="powerTotalDesc">- W / - W</div>
+    </div>
+  </div>
+  <div class="gpu-summary-counters">
+    <div class="summary-counter">
+      <span class="counter-value" id="statTotal"><%= assets.reduce((s, a) => s + (a.gpu_modules ? a.gpu_modules.reduce((ss, g) => ss + (g.count || 1), 0) : 0), 0) %></span>
+      <span class="counter-label">전체 GPU</span>
+    </div>
+    <div class="summary-counter">
+      <span class="counter-value" id="statServers"><%= assets.length %></span>
+      <span class="counter-label">서버 수</span>
+    </div>
+    <div class="summary-counter counter-ok">
+      <span class="counter-value" id="statNormal">-</span>
+      <span class="counter-label">정상</span>
+    </div>
+    <div class="summary-counter counter-warn">
+      <span class="counter-value" id="statWarning">-</span>
+      <span class="counter-label">주의</span>
+    </div>
+    <div class="summary-counter counter-err">
+      <span class="counter-value" id="statError">-</span>
+      <span class="counter-label">오류</span>
+    </div>
+  </div>
+</div>
+
+<!-- Room Filter Tabs -->
+<% const roomNames = [...new Set(assets.map(a => a.room_name).filter(Boolean))]; %>
+<div class="gpu-room-tabs">
+  <button class="room-tab active" onclick="filterRoom('all', this)">전체</button>
+  <% roomNames.forEach(function(rn) { %>
+  <button class="room-tab" onclick="filterRoom('<%= rn %>', this)"><%= rn %></button>
+  <% }); %>
+</div>
+
+<!-- Progress Bar (hidden by default) -->
+<div class="gpu-progress-wrap" id="progressWrap" style="display:none;">
+  <div class="gpu-progress-bar">
+    <div class="gpu-progress-fill" id="progressFill" style="width:0%"></div>
+  </div>
+  <span class="gpu-progress-text" id="progressText">0 / 0</span>
+</div>
+
+<% if (assets.length === 0) { %>
+<div style="text-align:center; padding:60px 20px; color:var(--text-light);">
+  <p style="font-size:16px; margin-bottom:8px;">GPU가 등록된 서버가 없습니다.</p>
+  <p style="font-size:13px;">자산에 GPU 모듈을 등록하면 여기에 표시됩니다.</p>
+</div>
+<% } else { %>
+
+<!-- Server Card Grid -->
+<div class="gpu-grid" id="gpuGrid">
+  <% assets.forEach(function(asset) { %>
+  <div class="gpu-card" id="card-<%= asset.id %>" data-asset-id="<%= asset.id %>" data-room="<%= asset.room_name || '' %>">
+    <div class="gpu-card-header">
+      <div class="gpu-card-info">
+        <div class="gpu-card-title"><%= asset.model_name || asset.asset_number || 'Server #' + asset.id %></div>
+        <div class="gpu-card-meta">
+          <span><%= asset.management_number || asset.asset_number || '' %></span>
+          <% if (asset.room_name) { %><span><%= asset.room_name %></span><% } %>
+          <% if (asset.rack_name) { %><span><%= asset.rack_name %><% if (asset.rack_unit_start) { %> U<%= asset.rack_unit_start %><% } %></span><% } %>
+        </div>
+      </div>
+      <div class="gpu-card-actions">
+        <span class="gpu-badge"><%= asset.gpu_modules ? asset.gpu_modules.reduce((s, g) => s + (g.count || 1), 0) : 0 %> GPU</span>
+        <button class="btn btn-sm btn-outline gpu-collect-btn" onclick="collectSingle(<%= asset.id %>)" data-asset-id="<%= asset.id %>">수집</button>
+      </div>
+    </div>
+
+    <!-- Registered GPU list -->
+    <div class="gpu-card-registered">
+      <% if (asset.gpu_modules && asset.gpu_modules.length > 0) { %>
+        <% asset.gpu_modules.forEach(function(gm) { %>
+        <div class="gpu-reg-item">
+          <span class="gpu-reg-model"><%= gm.model || gm.manufacturer || 'GPU' %></span>
+          <% if (gm.count && gm.count > 1) { %><span class="gpu-reg-count">x<%= gm.count %></span><% } %>
+          <% if (gm.capacity) { %><span class="gpu-reg-cap"><%= gm.capacity %></span><% } %>
+        </div>
+        <% }); %>
+      <% } %>
+    </div>
+
+    <!-- Metrics area (populated by JS after collection) -->
+    <div class="gpu-card-metrics" id="metrics-<%= asset.id %>">
+      <div class="gpu-card-placeholder">수집 버튼을 클릭하세요</div>
+    </div>
+
+    <div class="gpu-card-footer" id="footer-<%= asset.id %>"></div>
+  </div>
+  <% }); %>
+</div>
+
+<% } %>
+
+<%- include('../partials/footer') %>
+
+<script>
+const assetIds = [<%= assets.map(a => a.id).join(',') %>];
+let autoRefreshTimer = null;
+let collecting = false;
+// Global store: assetId → { gpus: [...] }
+const collectedData = {};
+
+// ── Color thresholds ──
+function tempColor(val) {
+  if (val == null) return 'var(--text-light)';
+  if (val < 60) return 'var(--success)';
+  if (val <= 80) return 'var(--warning)';
+  return 'var(--danger)';
+}
+function tempClass(val) {
+  if (val == null) return '';
+  if (val < 60) return 'gauge-green';
+  if (val <= 80) return 'gauge-yellow';
+  return 'gauge-red';
+}
+function utilColor(val) {
+  if (val == null) return 'var(--text-light)';
+  if (val < 50) return 'var(--info)';
+  if (val <= 85) return 'var(--success)';
+  if (val <= 95) return 'var(--warning)';
+  return 'var(--danger)';
+}
+function utilClass(val) {
+  if (val == null) return '';
+  if (val < 50) return 'gauge-blue';
+  if (val <= 85) return 'gauge-green';
+  if (val <= 95) return 'gauge-yellow';
+  return 'gauge-red';
+}
+function powerClass(pct) {
+  if (pct == null) return '';
+  if (pct < 70) return 'gauge-green';
+  if (pct <= 90) return 'gauge-yellow';
+  return 'gauge-red';
+}
+
+function fmtVal(v, unit) {
+  if (v == null) return 'N/A';
+  return v.toFixed(1) + (unit || '');
+}
+
+function gaugeBar(label, value, max, colorClass, unit) {
+  const pct = (max && value != null) ? Math.min(100, (value / max) * 100) : (value != null ? value : 0);
+  const displayVal = value != null ? value.toFixed(1) + (unit || '') : 'N/A';
+  const maxDisplay = max ? ' / ' + max.toFixed(0) + (unit || '') : (unit === '%' ? '' : '');
+  return '<div class="gauge-row">' +
+    '<span class="gauge-label">' + label + '</span>' +
+    '<div class="gauge-track"><div class="gauge-fill ' + colorClass + '" style="width:' + pct + '%"></div></div>' +
+    '<span class="gauge-value">' + displayVal + maxDisplay + '</span>' +
+    '</div>';
+}
+
+// ── Render GPU metrics for one card ──
+function renderMetrics(assetId, data) {
+  const el = document.getElementById('metrics-' + assetId);
+  const footer = document.getElementById('footer-' + assetId);
+  const card = document.getElementById('card-' + assetId);
+
+  if (data.status !== 'success' || !data.gpus || data.gpus.length === 0) {
+    let errMsg = data.error || '데이터 없음';
+    if (data.status === 'auth_failed') errMsg = '인증 실패';
+    else if (data.status === 'unreachable') errMsg = '연결 불가';
+    else if (data.status === 'no_gpu_tool') errMsg = 'dcgmi/nvidia-smi 없음';
+    el.innerHTML = '<div class="gpu-card-error">' + errMsg + '</div>';
+    card.classList.add('gpu-card-status-error');
+    card.classList.remove('gpu-card-status-ok', 'gpu-card-status-warn');
+    footer.innerHTML = '<span class="gpu-time">' + new Date().toLocaleTimeString('ko-KR') + '</span><span class="gpu-tool-badge tool-error">오류</span>';
+    return;
+  }
+
+  let html = '';
+  let hasWarning = false;
+
+  data.gpus.forEach(function(gpu) {
+    const powerPct = (gpu.powerLimit && gpu.powerDraw != null) ? (gpu.powerDraw / gpu.powerLimit) * 100 : null;
+    const memPct = (gpu.memTotal && gpu.memUsed != null) ? (gpu.memUsed / gpu.memTotal) * 100 : null;
+
+    // Determine warning status
+    if ((gpu.temp != null && gpu.temp > 80) || (gpu.gpuUtil != null && gpu.gpuUtil > 95) || (powerPct != null && powerPct > 90)) {
+      hasWarning = true;
+    }
+
+    html += '<div class="gpu-metric-block">';
+    html += '<div class="gpu-metric-name">GPU ' + gpu.index + ': ' + (gpu.name || '') + '</div>';
+    html += gaugeBar('온도', gpu.temp, 100, tempClass(gpu.temp), '°C');
+    html += gaugeBar('GPU 사용률', gpu.gpuUtil, 100, utilClass(gpu.gpuUtil), '%');
+    if (gpu.memTotal > 0) {
+      html += gaugeBar('메모리', gpu.memUsed, gpu.memTotal, utilClass(memPct), ' MiB');
+    } else {
+      html += gaugeBar('메모리 사용률', gpu.memUtil, 100, utilClass(gpu.memUtil), '%');
+    }
+    if (gpu.powerLimit != null && gpu.powerLimit > 0) {
+      html += gaugeBar('전력', gpu.powerDraw, gpu.powerLimit, powerClass(powerPct), ' W');
+    }
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+
+  // Store for donut aggregation
+  collectedData[assetId] = { gpus: data.gpus };
+
+  card.classList.remove('gpu-card-status-error', 'gpu-card-status-ok', 'gpu-card-status-warn');
+  card.classList.add(hasWarning ? 'gpu-card-status-warn' : 'gpu-card-status-ok');
+
+  const toolLabel = data.tool === 'dcgmi' ? 'DCGM' : 'nvidia-smi';
+  footer.innerHTML = '<span class="gpu-time">' + new Date().toLocaleTimeString('ko-KR') + '</span>' +
+    '<span class="gpu-tool-badge tool-' + data.tool + '">' + toolLabel + '</span>';
+}
+
+// ── Collect single asset ──
+async function collectSingle(assetId) {
+  const btn = document.querySelector('.gpu-collect-btn[data-asset-id="' + assetId + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = '수집중...'; }
+
+  const el = document.getElementById('metrics-' + assetId);
+  el.innerHTML = '<div class="gpu-card-loading"><div class="spinner"></div> 수집 중...</div>';
+
+  try {
+    const resp = await fetch('/gpu-monitoring/api/collect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset_id: assetId })
+    });
+    const data = await resp.json();
+    renderMetrics(assetId, data);
+  } catch (err) {
+    renderMetrics(assetId, { status: 'error', error: err.message, gpus: [] });
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = '수집'; }
+  updateSummaryStats();
+}
+
+// ── Collect all (sequential with progress) ──
+async function collectAll() {
+  if (collecting) return;
+  collecting = true;
+
+  const visibleIds = getVisibleAssetIds();
+  if (visibleIds.length === 0) { collecting = false; return; }
+
+  const btnAll = document.getElementById('btnCollectAll');
+  btnAll.disabled = true;
+  btnAll.textContent = '수집 중...';
+
+  const progressWrap = document.getElementById('progressWrap');
+  const progressFill = document.getElementById('progressFill');
+  const progressText = document.getElementById('progressText');
+  progressWrap.style.display = 'flex';
+
+  for (let i = 0; i < visibleIds.length; i++) {
+    const pct = ((i + 1) / visibleIds.length * 100).toFixed(0);
+    progressFill.style.width = pct + '%';
+    progressText.textContent = (i + 1) + ' / ' + visibleIds.length;
+    await collectSingle(visibleIds[i]);
+  }
+
+  btnAll.disabled = false;
+  btnAll.textContent = '전체 수집';
+  collecting = false;
+
+  setTimeout(function() { progressWrap.style.display = 'none'; }, 2000);
+}
+
+// ── Room filter ──
+function filterRoom(room, tabEl) {
+  document.querySelectorAll('.room-tab').forEach(t => t.classList.remove('active'));
+  if (tabEl) tabEl.classList.add('active');
+
+  document.querySelectorAll('.gpu-card').forEach(function(card) {
+    if (room === 'all' || card.dataset.room === room) {
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  });
+}
+
+function getVisibleAssetIds() {
+  const ids = [];
+  document.querySelectorAll('.gpu-card').forEach(function(card) {
+    if (card.style.display !== 'none') {
+      ids.push(parseInt(card.dataset.assetId, 10));
+    }
+  });
+  return ids;
+}
+
+// ── Auto refresh ──
+document.getElementById('autoRefresh').addEventListener('change', function() {
+  if (this.checked) {
+    collectAll();
+    autoRefreshTimer = setInterval(function() {
+      if (!collecting) collectAll();
+    }, 30000);
+  } else {
+    if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  }
+});
+
+// ── Donut chart helper ──
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * 50; // r=50
+
+function setDonut(ringId, valId, pct, color) {
+  const ring = document.getElementById(ringId);
+  const valEl = document.getElementById(valId);
+  if (!ring || !valEl) return;
+  const clamped = Math.max(0, Math.min(100, pct));
+  const offset = DONUT_CIRCUMFERENCE * (1 - clamped / 100);
+  ring.style.strokeDashoffset = offset;
+  ring.setAttribute('stroke', color);
+  valEl.textContent = pct.toFixed(1);
+}
+
+function donutTempColor(v) {
+  if (v < 60) return 'var(--success)';
+  if (v <= 80) return 'var(--warning)';
+  return 'var(--danger)';
+}
+function donutUtilColor(v) {
+  if (v < 50) return 'var(--info)';
+  if (v <= 85) return 'var(--success)';
+  if (v <= 95) return 'var(--warning)';
+  return 'var(--danger)';
+}
+function donutPowerColor(v) {
+  if (v < 70) return 'var(--success)';
+  if (v <= 90) return 'var(--warning)';
+  return 'var(--danger)';
+}
+
+// ── Summary stats + donuts ──
+function updateSummaryStats() {
+  // Server status counters
+  let normal = 0, warning = 0, error = 0;
+  document.querySelectorAll('.gpu-card').forEach(function(card) {
+    if (card.classList.contains('gpu-card-status-ok')) normal++;
+    else if (card.classList.contains('gpu-card-status-warn')) warning++;
+    else if (card.classList.contains('gpu-card-status-error')) error++;
+  });
+  document.getElementById('statNormal').textContent = normal || '-';
+  document.getElementById('statWarning').textContent = warning || '-';
+  document.getElementById('statError').textContent = error || '-';
+
+  // Aggregate all collected GPU data for donuts
+  let temps = [], utils = [], memPcts = [], powerPcts = [];
+  let totalPowerDraw = 0, totalPowerLimit = 0;
+  Object.values(collectedData).forEach(function(d) {
+    if (!d.gpus) return;
+    d.gpus.forEach(function(g) {
+      if (g.temp != null) temps.push(g.temp);
+      if (g.gpuUtil != null) utils.push(g.gpuUtil);
+      if (g.memTotal > 0 && g.memUsed != null) {
+        memPcts.push((g.memUsed / g.memTotal) * 100);
+      } else if (g.memUtil != null) {
+        memPcts.push(g.memUtil);
+      }
+      if (g.powerLimit > 0 && g.powerDraw != null) {
+        powerPcts.push((g.powerDraw / g.powerLimit) * 100);
+        totalPowerDraw += g.powerDraw;
+        totalPowerLimit += g.powerLimit;
+      }
+    });
+  });
+
+  function avg(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
+
+  if (temps.length > 0) {
+    const v = avg(temps);
+    setDonut('donutTemp', 'donutTempVal', v, donutTempColor(v));
+  }
+  if (utils.length > 0) {
+    const v = avg(utils);
+    setDonut('donutUtil', 'donutUtilVal', v, donutUtilColor(v));
+  }
+  if (memPcts.length > 0) {
+    const v = avg(memPcts);
+    setDonut('donutMem', 'donutMemVal', v, donutUtilColor(v));
+  }
+  if (powerPcts.length > 0) {
+    const v = avg(powerPcts);
+    setDonut('donutPower', 'donutPowerVal', v, donutPowerColor(v));
+  }
+
+  // Total power donut (kW scale, ring shows usage ratio)
+  if (totalPowerLimit > 0) {
+    const pct = (totalPowerDraw / totalPowerLimit) * 100;
+    const kw = totalPowerDraw / 1000;
+    const ring = document.getElementById('donutPowerTotal');
+    const valEl = document.getElementById('donutPowerTotalVal');
+    const descEl = document.getElementById('powerTotalDesc');
+    if (ring && valEl) {
+      const clamped = Math.max(0, Math.min(100, pct));
+      ring.style.strokeDashoffset = DONUT_CIRCUMFERENCE * (1 - clamped / 100);
+      ring.setAttribute('stroke', donutPowerColor(pct));
+      valEl.textContent = kw.toFixed(1);
+    }
+    if (descEl) {
+      function fmtW(w) { return w >= 1000 ? (w / 1000).toFixed(1) + ' kW' : Math.round(w) + ' W'; }
+      descEl.textContent = fmtW(totalPowerDraw) + ' / ' + fmtW(totalPowerLimit);
+    }
+  }
+}
+</script>

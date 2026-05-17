@@ -214,8 +214,9 @@ function parseDisk(output, options = {}) {
 
 function detectNetworkSpeed(model) {
   // Detect speed from model name patterns
-  if (/200\s*G|CX7|ConnectX-7|E810-2C200/i.test(model)) return '200GbE';
-  if (/100\s*G|CX[56]|ConnectX-[56]|E810-C|BCM57508|NetXtreme-E/i.test(model)) return '100GbE';
+  if (/400\s*G|CX7|ConnectX-7/i.test(model)) return '400GbE';
+  if (/200\s*G|E810-2C200|ConnectX-6(?!\s*D)/i.test(model)) return '200Gb';
+  if (/100\s*G|CX[56]|ConnectX-[56]|ConnectX-6\s*D|E810-C|BCM57508|NetXtreme-E/i.test(model)) return '100GbE';
   if (/50\s*G|CX[456].*50|E810.*50/i.test(model)) return '50GbE';
   if (/40\s*G|XL710|ConnectX-3\s*Pro|BCM57840/i.test(model)) return '40GbE';
   if (/25\s*G|XXV710|SFP28|ConnectX-[45].*25|BCM57414/i.test(model)) return '25GbE';
@@ -238,7 +239,7 @@ function parseNetwork(output) {
 
   lines.forEach(line => {
     const cleanLine = line.startsWith('[ONBOARD]') ? line.replace(/^\[ONBOARD\]\s*/, '') : line;
-    const match = cleanLine.match(/^(\S+)\s+Ethernet controller:?\s*(.*)/i);
+    const match = cleanLine.match(/^(\S+)\s+(?:Ethernet|Infiniband) controller:?\s*(.*)/i);
     if (match) {
       const pciAddr = match[1];
       const model = match[2].trim();
@@ -672,6 +673,122 @@ function parseRaidPhysicalDisks(output) {
   return Object.values(consolidated);
 }
 
+function parseNvmeList(output) {
+  const section = parseSection(output, 'NVME');
+  if (!section) return [];
+
+  const lines = section.split('\n').filter(l => l.trim());
+  const modules = [];
+
+  // Find header line (contains "Model") and separator line (all dashes)
+  const headerIdx = lines.findIndex(l => /\bModel\b/i.test(l) && /\bNode\b/i.test(l));
+  const sepIdx = lines.findIndex(l => /^[-\s]+$/.test(l) && l.includes('-'));
+  if (sepIdx < 0) return [];
+
+  const sepLine = lines[sepIdx];
+  // Find column starts from dash groups
+  const cols = [];
+  let inDash = false, start = 0;
+  for (let i = 0; i <= sepLine.length; i++) {
+    if (i < sepLine.length && sepLine[i] === '-') {
+      if (!inDash) { start = i; inDash = true; }
+    } else {
+      if (inDash) { cols.push({ start, end: i }); inDash = false; }
+    }
+  }
+
+  // Detect column indices from header line (handles both 7-col and 8-col formats)
+  // 7-col: Node / SN / Model / Namespace / Usage / Format / FW Rev
+  // 8-col: Node / Generic / SN / Model / Namespace / Usage / Format / FW Rev
+  let modelColIdx = 2, usageColIdx = 4;
+  if (headerIdx >= 0) {
+    const header = lines[headerIdx];
+    for (let c = 0; c < cols.length; c++) {
+      const colText = header.substring(cols[c].start, cols[c].end).trim();
+      if (/^Model$/i.test(colText)) modelColIdx = c;
+      if (/^Usage$/i.test(colText)) usageColIdx = c;
+    }
+  }
+
+  // Parse data lines (after separator)
+  for (let i = sepIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.startsWith('/dev/nvme')) continue;
+
+    const getCol = (idx) => {
+      if (idx >= cols.length) return '';
+      const s = cols[idx].start;
+      const e = (idx + 1 < cols.length) ? cols[idx + 1].start : line.length;
+      return line.substring(s, e).trim();
+    };
+
+    const model = getCol(modelColIdx);
+    const usage = getCol(usageColIdx);
+
+    if (!model) continue;
+
+    // Extract capacity from usage field
+    const capMatch = usage.match(/([\d.]+)\s*(TB|GB|MB)/);
+    const capacity = capMatch ? capMatch[1] + ' ' + capMatch[2] : '';
+
+    // Extract manufacturer
+    const mfgMatch = model.match(/^(Samsung|Micron|Intel|WDC|Western Digital|SK[_ ]?hynix|Crucial|Kingston|KIOXIA|Seagate|TOSHIBA|DAPUSTOR|Lite-?On|ADATA|PNY|Transcend|Hitachi)[\s_\-]/i);
+
+    modules.push({
+      module_type: 'disk',
+      model: model,
+      manufacturer: mfgMatch ? mfgMatch[1] : '',
+      capacity: capacity,
+      count: 1,
+      specification: 'NVMe'
+    });
+  }
+
+  // Consolidate by model + capacity
+  const consolidated = {};
+  modules.forEach(m => {
+    const key = m.model + '|' + m.capacity;
+    if (consolidated[key]) consolidated[key].count++;
+    else consolidated[key] = { ...m };
+  });
+
+  // Fallback: if nvme list found nothing, detect NVMe controllers from lspci
+  if (Object.keys(consolidated).length === 0) {
+    const lspciMarker = section.indexOf('===NVME_LSPCI===');
+    if (lspciMarker >= 0) {
+      const lspciPart = section.substring(lspciMarker + '===NVME_LSPCI==='.length).trim();
+      const lspciLines = lspciPart.split('\n').filter(l => l.trim() && !l.startsWith('==='));
+      const lspciModules = [];
+      lspciLines.forEach(line => {
+        const match = line.match(/Non-Volatile memory controller:\s*(.*)/i);
+        if (match) {
+          const model = match[1].trim();
+          // Skip Intel VMD (not a real NVMe drive)
+          if (/Volume Management Device/i.test(model)) return;
+          const mfgMatch = model.match(/^(Samsung|Micron|Intel|WDC|Western Digital|SK[_ ]?hynix|KIOXIA|Seagate|TOSHIBA)[\s_]/i);
+          lspciModules.push({
+            module_type: 'disk',
+            model: model,
+            manufacturer: mfgMatch ? mfgMatch[1] : '',
+            capacity: '',
+            count: 1,
+            specification: 'NVMe (lspci)'
+          });
+        }
+      });
+      // Consolidate lspci NVMe entries
+      const lspciConsolidated = {};
+      lspciModules.forEach(m => {
+        if (lspciConsolidated[m.model]) lspciConsolidated[m.model].count++;
+        else lspciConsolidated[m.model] = { ...m };
+      });
+      return Object.values(lspciConsolidated);
+    }
+  }
+
+  return Object.values(consolidated);
+}
+
 function detectGpuMemory(model) {
   // Known GPU VRAM sizes
   const gpuMemMap = [
@@ -718,6 +835,10 @@ function parseGpu(output) {
   const section = parseSection(output, 'GPU');
   if (!section) return [];
 
+  // Detect if GRAID RAID card is present (uses NVIDIA GPU for compute)
+  const raidSection = parseSection(output, 'RAID');
+  const hasGraid = raidSection && /GRAID|SR-1010|SR-1100/i.test(raidSection);
+
   const modules = [];
 
   // Try lspci format first — more accurate chipset model names
@@ -725,6 +846,8 @@ function parseGpu(output) {
   const allLines = section.split('\n').filter(l => l.trim());
   allLines.forEach(line => {
     if (/ASPEED|Matrox|ServerEngines|iBMC|Hi171x|iLO|IPMI|BMC/i.test(line)) return;
+    // Skip low-tier NVIDIA GPUs when GRAID is present (GRAID compute GPU, not a real GPU)
+    if (hasGraid && /RTX\s*(A2000|A4000|T1000|T600)|GA106|GA104/i.test(line)) return;
     const match = line.match(/(?:VGA|3D|Display).*?:\s*(.*)/i);
     if (match) {
       const model = match[1].trim();
@@ -760,6 +883,82 @@ function parseGpu(output) {
   }
 
   // Consolidate
+  const consolidated = {};
+  modules.forEach(m => {
+    if (consolidated[m.model]) {
+      consolidated[m.model].count++;
+    } else {
+      consolidated[m.model] = { ...m };
+    }
+  });
+
+  return Object.values(consolidated);
+}
+
+function parseNpu(output) {
+  const section = parseSection(output, 'NPU');
+  if (!section) return [];
+
+  const modules = [];
+  // Split by device sections
+  const devices = section.split(/===NPU_DEV:[^=]+==='?/);
+
+  devices.forEach(dev => {
+    if (!dev.trim()) return;
+    const lines = dev.split('\n').filter(l => l.trim());
+    if (lines.length === 0) return;
+
+    // First line is the lspci summary line
+    // e.g. "01:00.0 Processing accelerator: FuriosaAI, Inc. WARBOY (rev 01)"
+    // or "03:00.0 Processing accelerator: Rebellions Inc. ATOM (rev 02)"
+    const summaryLine = lines[0];
+    const match = summaryLine.match(/(?:Processing accelerator|Co-processor|System peripheral|Unassigned class)[^:]*:\s*(.*)/i);
+    if (!match) return;
+
+    const fullModel = match[1].trim();
+
+    // Detect manufacturer
+    let manufacturer = '';
+    if (/furiosa/i.test(fullModel)) manufacturer = 'FuriosaAI';
+    else if (/rebellions/i.test(fullModel)) manufacturer = 'Rebellions';
+    else if (/sapeon/i.test(fullModel)) manufacturer = 'Sapeon';
+    else {
+      // Try to extract vendor from "Vendor Model" pattern
+      const vendorMatch = fullModel.match(/^(.+?(?:Inc\.?|Corp\.?|Ltd\.?|Co\.?))\s+/i);
+      if (vendorMatch) manufacturer = vendorMatch[1].replace(/[,.]?\s*(Inc|Corp|Ltd|Co)\.?$/i, '').trim();
+    }
+
+    // Parse lspci -vv output for additional details
+    let subsystem = '';
+    let numaNode = '';
+    const vvLines = lines.slice(1);
+    vvLines.forEach(line => {
+      const subMatch = line.match(/^\s*Subsystem:\s*(.+)/i);
+      if (subMatch) subsystem = subMatch[1].trim();
+      const numaMatch = line.match(/^\s*NUMA node:\s*(\d+)/i);
+      if (numaMatch) numaNode = numaMatch[1];
+    });
+
+    // Use subsystem for more specific model name if available
+    let model = fullModel;
+    if (subsystem && subsystem !== fullModel && !/Device [0-9a-fA-F]{4}/.test(subsystem)) {
+      model = subsystem;
+    }
+
+    const spec = [];
+    if (numaNode) spec.push('NUMA ' + numaNode);
+
+    modules.push({
+      module_type: 'npu',
+      model: model,
+      manufacturer: manufacturer,
+      capacity: '',
+      count: 1,
+      specification: spec.join(', ')
+    });
+  });
+
+  // Consolidate by model
   const consolidated = {};
   modules.forEach(m => {
     if (consolidated[m.model]) {
@@ -841,6 +1040,29 @@ function parseAll(output) {
     diskModules = parseDisk(output);
   }
 
+  // NVMe drives: add any not already found by lsblk/smartctl/RAID tools
+  const nvmeModules = parseNvmeList(output);
+  if (nvmeModules.length > 0) {
+    // Helper: check if two model strings refer to the same disk
+    const modelsMatch = (a, b) => {
+      const la = (a || '').toLowerCase(), lb = (b || '').toLowerCase();
+      if (!la || !lb) return false;
+      // Full string comparison
+      if (la === lb || la.includes(lb) || lb.includes(la)) return true;
+      // Token-based: model numbers (alphanumeric tokens with digits, length >= 6)
+      const isModelToken = (t) => /\d/.test(t) && t.length >= 6;
+      const tokA = la.split(/[\s\-_\/]+/).filter(isModelToken);
+      const tokB = lb.split(/[\s\-_\/]+/).filter(isModelToken);
+      return tokA.some(ta => tokB.some(tb => ta.includes(tb) || tb.includes(ta)));
+    };
+    nvmeModules.forEach(nvme => {
+      const isDuplicate = diskModules.some(d => modelsMatch(d.model, nvme.model));
+      if (!isDuplicate) {
+        diskModules.push(nvme);
+      }
+    });
+  }
+
   // Memory: try dmidecode first, then fallback
   let memoryModules = parseMemory(output);
   if (memoryModules.length === 0) {
@@ -858,7 +1080,8 @@ function parseAll(output) {
       ...diskModules,
       ...parseNetwork(output),
       ...raidModules,
-      ...parseGpu(output)
+      ...parseGpu(output),
+      ...parseNpu(output)
     ]
   };
 }
@@ -872,9 +1095,11 @@ module.exports = {
   parseSysfsDisks,
   parseSmartctlDisks,
   parseRaidPhysicalDisks,
+  parseNvmeList,
   parseNetwork,
   parseRaid,
   parseGpu,
+  parseNpu,
   parseHostname,
   parseFreeMemory,
   parseOsInfo,

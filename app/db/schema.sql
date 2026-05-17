@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS assets (
 CREATE TABLE IF NOT EXISTS computing_modules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     asset_id INTEGER NOT NULL,
-    module_type TEXT NOT NULL CHECK(module_type IN ('cpu', 'memory', 'disk', 'network', 'raid', 'gpu', 'psu')),
+    module_type TEXT NOT NULL CHECK(module_type IN ('cpu', 'memory', 'disk', 'network', 'raid', 'gpu', 'npu', 'psu')),
     model TEXT,
     manufacturer TEXT,
     capacity TEXT,
@@ -393,3 +393,16 @@ CREATE TABLE IF NOT EXISTS equipment_usage_logs (
 CREATE INDEX IF NOT EXISTS idx_equip_usage_mgmt ON equipment_usage_logs(management_number);
 CREATE INDEX IF NOT EXISTS idx_equip_usage_status ON equipment_usage_logs(status);
 CREATE INDEX IF NOT EXISTS idx_equip_usage_date ON equipment_usage_logs(usage_date);
+
+-- Photos (다형성 사진 첨부)
+CREATE TABLE IF NOT EXISTS photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    original_name TEXT,
+    description TEXT,
+    uploaded_at TEXT DEFAULT (datetime('now', 'localtime')),
+    uploaded_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_photos_entity ON photos(entity_type, entity_id);

@@ -326,8 +326,33 @@
             %>
             <select id="invRoomSelect" class="form-control" onchange="onInvRoomChange()">
                 <option value="">선택</option>
-                <% serverRooms.forEach(r => { %>
-                <option value="<%= r.name %>" data-room-id="<%= r.id %>" data-loc-type="<%= r.location_type %>" <%= l.room === r.name ? 'selected' : '' %>><%= r.name %> (<%= locTypeLabels[r.location_type] || r.location_type %>)</option>
+                <%
+                  const roomsByLocType = {};
+                  serverRooms.forEach(r => {
+                    const lt = r.location_type || 'other';
+                    if (!roomsByLocType[lt]) roomsByLocType[lt] = [];
+                    roomsByLocType[lt].push(r);
+                  });
+                  const locTypeOrder = ['server_room', 'storage', 'office'];
+                  locTypeOrder.forEach(lt => {
+                    if (!roomsByLocType[lt] || roomsByLocType[lt].length === 0) return;
+                %>
+                <optgroup label="<%= locTypeLabels[lt] || lt %>">
+                    <% roomsByLocType[lt].forEach(r => { %>
+                    <option value="<%= r.name %>" data-room-id="<%= r.id %>" data-loc-type="<%= r.location_type %>" <%= l.room === r.name ? 'selected' : '' %>><%= r.name %></option>
+                    <% }) %>
+                </optgroup>
+                <%
+                  });
+                  // 기타 유형
+                  Object.keys(roomsByLocType).filter(lt => !locTypeOrder.includes(lt)).forEach(lt => {
+                    if (roomsByLocType[lt].length === 0) return;
+                %>
+                <optgroup label="<%= locTypeLabels[lt] || lt %>">
+                    <% roomsByLocType[lt].forEach(r => { %>
+                    <option value="<%= r.name %>" data-room-id="<%= r.id %>" data-loc-type="<%= r.location_type %>" <%= l.room === r.name ? 'selected' : '' %>><%= r.name %></option>
+                    <% }) %>
+                </optgroup>
                 <% }) %>
                 <option value="__manual__" <%= (l.room && !serverRooms.some(r => r.name === l.room)) ? 'selected' : '' %>>직접 입력</option>
             </select>
@@ -551,6 +576,10 @@
 </div>
 
 </form>
+
+<% if (isEdit && log) { %>
+<%- include('../partials/photo-section', { entityType: 'equipment_usage', entityId: log.id, photos: typeof logPhotos !== 'undefined' ? logPhotos : [], editable: true }) %>
+<% } %>
 
 <!-- 가용 IP 조회 모달 -->
 <div id="invIpModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;">

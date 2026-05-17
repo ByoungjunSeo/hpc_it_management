@@ -1,0 +1,171 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<%
+  const modTypeMap = { cpu: 'CPU', memory: '메모리', disk: '디스크', network: 'NIC', raid: 'RAID', gpu: 'GPU', cable: '케이블' };
+  const modTypeKeys = ['cpu', 'memory', 'disk', 'network', 'raid', 'gpu'];
+  const ownerMap = { company: '자사', vendor: '업체' };
+
+  function uLabel(a) {
+    if (!a.rack_unit_start) return '-';
+    var u = Math.floor((a.rack_unit_start - 1) / 3) + 1;
+    var uEnd = Math.floor((a.rack_unit_start + (a.rack_unit_size || 3) - 2) / 3) + 1;
+    return 'U' + u + (uEnd > u ? '~U' + uEnd : '');
+  }
+
+  // Compute summary stats
+  const summary = {};
+  modTypeKeys.forEach(k => { summary[k] = 0; });
+  let totalServers = 0;
+  racks.forEach(rack => {
+    rack.assets.forEach(a => {
+      if (a.asset_type === 'server') totalServers++;
+      a.modules.forEach(m => {
+        if (summary[m.module_type] !== undefined) {
+          summary[m.module_type] += (m.count || 1);
+        }
+      });
+    });
+  });
+%>
+
+<div class="page-header">
+    <h1><%= room.name %> 모듈 현황</h1>
+    <div class="btn-group">
+        <a href="/rooms/<%= room.id %>" class="btn btn-secondary">랙 배치</a>
+        <a href="/rooms/<%= room.id %>/assets" class="btn btn-secondary">자산 목록</a>
+        <a href="/rooms" class="btn btn-secondary">서버실 목록</a>
+    </div>
+</div>
+
+<!-- Search + Summary -->
+<div class="card mb-2" style="padding:12px 16px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <input type="text" id="moduleSearch" class="form-control" placeholder="서버명, 모델, 담당자, 용도 검색..." style="max-width:320px;margin:0;" oninput="filterModules()">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:13px;margin-left:auto;">
+            <span><strong>장비:</strong> <span id="filteredCount"><%= totalServers %></span>대</span>
+            <span style="color:#cbd5e1;">|</span>
+            <% modTypeKeys.forEach(k => { %>
+                <% if (summary[k] > 0) { %>
+                <span><strong><%= modTypeMap[k] %>:</strong> <%= summary[k] %>개</span>
+                <% } %>
+            <% }) %>
+        </div>
+    </div>
+</div>
+
+<% if (racks.length === 0) { %>
+<div class="card text-center">
+    <p class="text-muted">등록된 랙이 없습니다.</p>
+</div>
+<% } %>
+
+<% racks.forEach(rack => { %>
+<% if (rack.assets.length === 0) return; %>
+<div class="card mb-2 module-rack-card">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <h3 style="margin:0;"><a href="/racks/<%= rack.id %>" style="color:inherit;text-decoration:none;"><%= rack.name %></a></h3>
+        <span class="text-muted" style="font-size:13px;">장비 <%= rack.assets.length %>대</span>
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>서버</th>
+                    <th>U위치</th>
+                    <th>소유</th>
+                    <th>담당자</th>
+                    <th>용도</th>
+                    <% modTypeKeys.forEach(k => { %>
+                    <th><%= modTypeMap[k] %></th>
+                    <% }) %>
+                </tr>
+            </thead>
+            <tbody>
+                <% rack.assets.forEach(a => { %>
+                <%
+                  const byType = {};
+                  modTypeKeys.forEach(k => { byType[k] = []; });
+                  a.modules.forEach(m => {
+                    if (byType[m.module_type]) byType[m.module_type].push(m);
+                  });
+                %>
+                <tr>
+                    <td>
+                        <a href="/assets/<%= a.id %>" style="font-weight:600;"><%= a.model_name || a.asset_number || '-' %></a>
+                        <% if (a.management_number) { %>
+                        <div style="font-size:11px;color:#64748b;">(<%= a.management_number %>)</div>
+                        <% } %>
+                    </td>
+                    <td><%= uLabel(a) %></td>
+                    <td>
+                        <% if (a.ownership === 'vendor') { %>
+                        <span class="badge" style="background:#f59e0b;color:#fff;">업체</span>
+                        <% } else { %>
+                        <span class="badge" style="background:#22c55e;color:#fff;">자사</span>
+                        <% } %>
+                    </td>
+                    <td><%= a.assigned_user || '-' %></td>
+                    <td><%= a.purpose || '-' %></td>
+                    <% modTypeKeys.forEach(k => { %>
+                    <td style="font-size:12px;">
+                        <% if (byType[k].length > 0) { %>
+                            <% byType[k].forEach(m => { %>
+                            <div style="white-space:nowrap;margin-bottom:2px;">
+                                <% if (m.owner === 'vendor') { %>
+                                <span class="mod-owner-badge vendor">업체</span>
+                                <% } else { %>
+                                <span class="mod-owner-badge company">자사</span>
+                                <% } %>
+                                <%= m.model || m.manufacturer || '-' %><%= m.capacity ? ' ' + m.capacity : '' %><%= (m.count || 1) > 1 ? ' x' + m.count : '' %>
+                            </div>
+                            <% }) %>
+                        <% } else { %>
+                        <span class="text-muted">-</span>
+                        <% } %>
+                    </td>
+                    <% }) %>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% }) %>
+
+<style>
+.card-header { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.card-header h3 { font-size: 15px; }
+.mod-owner-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-right: 3px;
+    vertical-align: middle;
+}
+.mod-owner-badge.company { background: #dcfce7; color: #166534; }
+.mod-owner-badge.vendor { background: #fef3c7; color: #92400e; }
+</style>
+
+<script>
+function filterModules() {
+    var q = document.getElementById('moduleSearch').value.trim().toLowerCase();
+    var visibleCount = 0;
+    document.querySelectorAll('.module-rack-card').forEach(function(card) {
+        var rows = card.querySelectorAll('tbody tr');
+        var rackVisible = 0;
+        rows.forEach(function(row) {
+            var text = row.textContent.toLowerCase();
+            var show = !q || text.indexOf(q) !== -1;
+            row.style.display = show ? '' : 'none';
+            if (show) rackVisible++;
+        });
+        card.style.display = rackVisible > 0 ? '' : 'none';
+        visibleCount += rackVisible;
+    });
+    document.getElementById('filteredCount').textContent = visibleCount;
+}
+</script>
+
+<%- include('../partials/footer', { extraJs: null }) %>

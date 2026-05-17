@@ -1,0 +1,88 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="chat-container">
+  <!-- Side panel: system info -->
+  <div class="chat-sidebar" id="chatSidebar">
+    <div class="chat-sidebar-inner">
+      <div class="chat-sidebar-header">
+        <h3>시스템 현황</h3>
+        <button class="chat-sidebar-toggle" id="sidebarToggle" title="패널 접기">&#9664;</button>
+      </div>
+      <div class="chat-sidebar-content">
+        <div class="stat-card">
+          <div class="stat-label">총 자산</div>
+          <div class="stat-value"><%= stats.totalAssets %>개</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">운영중</div>
+          <div class="stat-value"><%= stats.activeAssets %>개</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">랙</div>
+          <div class="stat-value"><%= stats.rackCount %>개</div>
+        </div>
+
+        <h4>유형별 자산</h4>
+        <% stats.byType.forEach(function(t) { %>
+        <div class="stat-row">
+          <span class="stat-row-label"><%= t.asset_type %></span>
+          <span class="stat-row-value"><%= t.cnt %></span>
+        </div>
+        <% }); %>
+
+        <h4>서버실</h4>
+        <% stats.rooms.forEach(function(r) { %>
+        <div class="stat-row">
+          <span class="stat-row-label"><%= r.name %></span>
+        </div>
+        <% }); %>
+
+        <h4>부품 종류</h4>
+        <% stats.moduleStats.forEach(function(m) { %>
+        <div class="stat-row">
+          <span class="stat-row-label"><%= m.module_type %></span>
+          <span class="stat-row-value"><%= m.cnt %>종</span>
+        </div>
+        <% }); %>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expand button (sibling of sidebar, shown when collapsed) -->
+  <button class="chat-sidebar-expand" id="sidebarExpand" title="패널 열기">&#9654;</button>
+
+  <!-- Main chat area -->
+  <div class="chat-main">
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-welcome">
+        <div class="chat-welcome-icon">&#129302;</div>
+        <h2>AI 어시스턴트</h2>
+        <p>IT 자산에 대해 무엇이든 물어보세요.</p>
+        <div class="chat-suggestions">
+          <button class="chat-suggestion" onclick="sendSuggestion(this)">서버실별 자산 수를 알려줘</button>
+          <button class="chat-suggestion" onclick="sendSuggestion(this)">운영중인 서버 목록을 SQL로 보여줘</button>
+          <button class="chat-suggestion" onclick="sendSuggestion(this)">자산 유형별 현황을 차트로 보여줘</button>
+          <button class="chat-suggestion" onclick="sendSuggestion(this)">자산 목록을 엑셀로 만들어줘</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-input-area">
+      <div class="chat-input-wrap">
+        <textarea id="chatInput" class="chat-input" placeholder="메시지를 입력하세요... (Shift+Enter: 줄바꿈)" rows="1"></textarea>
+        <button id="chatSendBtn" class="chat-send-btn" title="전송">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+      <div class="chat-input-hint">Qwen2.5-14B via Ollama &middot; 답변은 정확하지 않을 수 있습니다</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="/js/chat.js"></script>
+
+<%- include('../partials/footer') %>

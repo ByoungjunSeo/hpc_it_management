@@ -1,0 +1,204 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= room.name %> - 전력 분전반</h1>
+    <div class="btn-group">
+        <% if (tree.length === 0) { %>
+        <button class="btn btn-primary" onclick="openAddModal(null, 'main_panel')">+ 메인 분전반 추가</button>
+        <% } %>
+        <a href="/power-panel" class="btn btn-secondary">목록으로</a>
+    </div>
+</div>
+
+<%
+  var typeIcons = { main_panel: 'MP', sub_panel: 'SP', hvac: 'HC', pdu: 'PD', ups: 'UP' };
+  var typeLabels = {};
+  appConfig.powerNodeTypes.forEach(function(t) { typeLabels[t.value] = t.label; });
+  var childTypes = {
+    main_panel: ['sub_panel', 'hvac'],
+    sub_panel: ['pdu', 'ups'],
+    hvac: [],
+    pdu: [],
+    ups: []
+  };
+%>
+
+<% if (tree.length === 0) { %>
+<div class="power-empty">
+    <p>등록된 전력 노드가 없습니다.</p>
+    <p class="text-muted" style="font-size: 13px;">메인 분전반을 추가하여 전력 분배 계통도를 구성하세요.</p>
+</div>
+<% } else { %>
+
+<div class="power-tree">
+    <ul class="tree-root">
+        <% function renderNode(node) { %>
+        <li class="tree-item">
+            <div class="node-card type-<%= node.node_type %>">
+                <div class="node-type-icon <%= node.node_type %>">
+                    <span class="node-type-icon-label"><%= typeIcons[node.node_type] || '?' %></span>
+                </div>
+                <div class="node-info">
+                    <div class="node-name"><%= node.name %></div>
+                    <div class="node-meta">
+                        <span><%= typeLabels[node.node_type] || node.node_type %></span>
+                        <% if (node.capacity_kw) { %><span><%= node.capacity_kw %> kW</span><% } %>
+                        <% if (node.voltage) { %><span><%= node.voltage %></span><% } %>
+                        <% if (node.phase) { %><span><%= node.phase %></span><% } %>
+                        <% if (node.rating) { %><span><%= node.rating %></span><% } %>
+                        <% if (node.circuit_number) { %><span>회로: <%= node.circuit_number %></span><% } %>
+                        <% if (node.asset_model) { %><span>자산: <%= node.asset_number || node.asset_model %></span><% } %>
+                    </div>
+                </div>
+                <div class="node-actions">
+                    <% var ct = childTypes[node.node_type] || []; %>
+                    <% ct.forEach(function(ctype) { %>
+                    <button class="btn btn-sm btn-outline" onclick="openAddModal(<%= node.id %>, '<%= ctype %>')">+ <%= typeLabels[ctype] %></button>
+                    <% }) %>
+                    <button class="btn btn-sm btn-warning" onclick="openEditModal(<%= node.id %>)">수정</button>
+                    <button class="btn btn-sm btn-danger" onclick="confirmDelete(<%= node.id %>, '<%= node.name %>')">삭제</button>
+                </div>
+            </div>
+            <% if (node.children && node.children.length > 0) { %>
+            <ul class="tree-children">
+                <% node.children.forEach(function(child) { renderNode(child); }); %>
+            </ul>
+            <% } %>
+        </li>
+        <% } %>
+        <% tree.forEach(function(rootNode) { renderNode(rootNode); }); %>
+    </ul>
+</div>
+<% } %>
+
+<!-- Add/Edit Modal -->
+<div class="modal-overlay" id="nodeModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="modalTitle">노드 추가</h3>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <form id="nodeForm" method="POST">
+            <input type="hidden" name="parent_id" id="parentId">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>이름 *</label>
+                    <input type="text" name="name" id="nodeName" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>유형 *</label>
+                    <select name="node_type" id="nodeType" class="form-control" required>
+                        <% appConfig.powerNodeTypes.forEach(function(t) { %>
+                        <option value="<%= t.value %>"><%= t.label %></option>
+                        <% }) %>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>용량 (kW)</label>
+                    <input type="number" name="capacity_kw" id="nodeCapacity" class="form-control" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>정격</label>
+                    <input type="text" name="rating" id="nodeRating" class="form-control" placeholder="예: 100A">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>전압</label>
+                    <input type="text" name="voltage" id="nodeVoltage" class="form-control" placeholder="예: 380V">
+                </div>
+                <div class="form-group">
+                    <label>상</label>
+                    <input type="text" name="phase" id="nodePhase" class="form-control" placeholder="예: 3상4선">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>회로번호</label>
+                    <input type="text" name="circuit_number" id="nodeCircuit" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>연결 자산 (PDU/UPS)</label>
+                    <select name="asset_id" id="nodeAsset" class="form-control">
+                        <option value="">-- 선택 --</option>
+                        <% pduUpsAssets.forEach(function(a) { %>
+                        <option value="<%= a.id %>"><%= a.asset_number || a.model_name %> (<%= a.asset_type.toUpperCase() %>)</option>
+                        <% }) %>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>설명</label>
+                <textarea name="description" id="nodeDesc" class="form-control" rows="2"></textarea>
+            </div>
+            <input type="hidden" name="sort_order" id="nodeSortOrder" value="0">
+            <div class="btn-group" style="justify-content: flex-end; margin-top: 16px;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">취소</button>
+                <button type="submit" class="btn btn-primary">저장</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delete form (hidden) -->
+<form id="deleteForm" method="POST" style="display:none;"></form>
+
+<script>
+var nodesData = <%- JSON.stringify(nodes) %>;
+
+function openAddModal(parentId, nodeType) {
+    document.getElementById('modalTitle').textContent = '노드 추가';
+    document.getElementById('nodeForm').action = '/power-panel/<%= room.id %>/nodes';
+    document.getElementById('parentId').value = parentId || '';
+    document.getElementById('nodeName').value = '';
+    document.getElementById('nodeType').value = nodeType || 'main_panel';
+    document.getElementById('nodeCapacity').value = '';
+    document.getElementById('nodeRating').value = '';
+    document.getElementById('nodeVoltage').value = '';
+    document.getElementById('nodePhase').value = '';
+    document.getElementById('nodeCircuit').value = '';
+    document.getElementById('nodeAsset').value = '';
+    document.getElementById('nodeDesc').value = '';
+    document.getElementById('nodeSortOrder').value = '0';
+    document.getElementById('nodeModal').classList.add('active');
+}
+
+function openEditModal(nodeId) {
+    var node = nodesData.find(function(n) { return n.id === nodeId; });
+    if (!node) return;
+    document.getElementById('modalTitle').textContent = '노드 수정';
+    document.getElementById('nodeForm').action = '/power-panel/nodes/' + nodeId;
+    document.getElementById('parentId').value = node.parent_id || '';
+    document.getElementById('nodeName').value = node.name || '';
+    document.getElementById('nodeType').value = node.node_type;
+    document.getElementById('nodeCapacity').value = node.capacity_kw || '';
+    document.getElementById('nodeRating').value = node.rating || '';
+    document.getElementById('nodeVoltage').value = node.voltage || '';
+    document.getElementById('nodePhase').value = node.phase || '';
+    document.getElementById('nodeCircuit').value = node.circuit_number || '';
+    document.getElementById('nodeAsset').value = node.asset_id || '';
+    document.getElementById('nodeDesc').value = node.description || '';
+    document.getElementById('nodeSortOrder').value = node.sort_order || 0;
+    document.getElementById('nodeModal').classList.add('active');
+}
+
+function closeModal() {
+    document.getElementById('nodeModal').classList.remove('active');
+}
+
+function confirmDelete(nodeId, nodeName) {
+    if (confirm('"' + nodeName + '" 노드를 삭제하시겠습니까?\n하위 노드도 함께 삭제됩니다.')) {
+        var form = document.getElementById('deleteForm');
+        form.action = '/power-panel/nodes/' + nodeId + '/delete';
+        form.submit();
+    }
+}
+
+document.getElementById('nodeModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

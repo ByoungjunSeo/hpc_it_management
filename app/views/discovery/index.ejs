@@ -81,8 +81,8 @@
                 <% if (typeof assets !== 'undefined' && assets.length > 0) { %>
                 <% assets.forEach(function(asset) { %>
                 <% var _cat = (asset.management_number || '').replace(/-\d+$/, ''); %>
-                <tr id="asset-row-<%= asset.id %>" data-asset-id="<%= asset.id %>" data-category="<%= _cat %>">
-                    <td><input type="checkbox" class="asset-check" value="<%= asset.id %>"></td>
+                <tr id="asset-row-<%= asset.id %>" data-asset-id="<%= asset.id %>" data-category="<%= _cat %>"<% if (asset.children && asset.children.length > 0) { %> data-is-chassis="true"<% } %>>
+                    <td><input type="checkbox" class="asset-check" value="<%= asset.id %>"<% if (asset.children && asset.children.length > 0) { %> disabled title="샤시는 하위 노드를 스캔하세요"<% } %>></td>
                     <td>
                         <a href="/assets/<%= asset.id %>" target="_blank" style="font-weight:600;">
                             <%= asset.management_number || asset.asset_number || 'ID:' + asset.id %>
@@ -116,7 +116,7 @@
                                  if (!regGroup[m.module_type]) regGroup[m.module_type] = 0;
                                  regGroup[m.module_type] += (m.count || 1);
                                });
-                               var typeLabels = { cpu:'CPU', memory:'MEM', disk:'DISK', network:'NIC', raid:'RAID', gpu:'GPU' };
+                               var typeLabels = { cpu:'CPU', memory:'MEM', disk:'DISK', network:'NIC', raid:'RAID', gpu:'GPU', npu:'NPU' };
                             %>
                             <% Object.keys(regGroup).forEach(function(t) { %>
                                 <span class="badge badge-secondary" style="font-size:10px; margin:1px;"><%= typeLabels[t] || t %> <%= regGroup[t] %></span>
@@ -129,13 +129,21 @@
                         <span class="text-muted">-</span>
                     </td>
                     <td style="text-align:center;" id="match-status-<%= asset.id %>">
+                        <% if (asset.children && asset.children.length > 0) { %>
+                        <span class="badge badge-secondary" title="샤시 — 하위 노드 참조" style="opacity:0.6;">&#x1F4E6; 샤시</span>
+                        <% } else { %>
                         <span class="badge badge-secondary" title="대기">&#x23F3; 대기</span>
+                        <% } %>
                     </td>
                     <td>
+                        <% if (asset.children && asset.children.length > 0) { %>
+                        <span class="text-muted" style="font-size:11px;">하위 노드 스캔</span>
+                        <% } else { %>
                         <div class="btn-group">
                             <button class="btn btn-sm btn-outline" onclick="scanAsset(<%= asset.id %>)" id="scan-btn-<%= asset.id %>" title="스캔">&#x1F50D;</button>
                             <button class="btn btn-sm btn-outline" onclick="showDetail(<%= asset.id %>)" id="detail-btn-<%= asset.id %>" title="상세" style="display:none;">&#x1F4CB;</button>
                         </div>
+                        <% } %>
                     </td>
                 </tr>
                 <tr id="asset-detail-<%= asset.id %>" data-category="<%= _cat %>" style="display:none;">
@@ -177,7 +185,7 @@
                                  if (!childRegGroup[m.module_type]) childRegGroup[m.module_type] = 0;
                                  childRegGroup[m.module_type] += (m.count || 1);
                                });
-                               var typeLabels2 = { cpu:'CPU', memory:'MEM', disk:'DISK', network:'NIC', raid:'RAID', gpu:'GPU' };
+                               var typeLabels2 = { cpu:'CPU', memory:'MEM', disk:'DISK', network:'NIC', raid:'RAID', gpu:'GPU', npu:'NPU' };
                             %>
                             <% Object.keys(childRegGroup).forEach(function(t) { %>
                                 <span class="badge badge-secondary" style="font-size:10px; margin:1px;"><%= typeLabels2[t] || t %> <%= childRegGroup[t] %></span>
@@ -195,7 +203,7 @@
                     <td>
                         <div class="btn-group">
                             <button class="btn btn-sm btn-outline" onclick="scanAsset(<%= child.id %>)" id="scan-btn-<%= child.id %>" title="스캔">&#x1F50D;</button>
-                            <button class="btn btn-sm btn-outline" onclick="showDetail(<%= child.id %>)" id="detail-btn-<%= child.id %>" title="상세" style="display:none;">&#x1F4CB;</button>
+                            <button class="btn btn-sm btn-outline" onclick="showDetail(<%= child.id %>)" id="detail-btn-<%= child.id %>" title="상세">&#x1F4CB;</button>
                         </div>
                     </td>
                 </tr>
@@ -315,7 +323,7 @@ function escapeHtml(text) {
 }
 
 function moduleTypeBadge(type) {
-    var labels = { cpu: 'CPU', memory: 'MEM', disk: 'DISK', network: 'NIC', raid: 'RAID', gpu: 'GPU' };
+    var labels = { cpu: 'CPU', memory: 'MEM', disk: 'DISK', network: 'NIC', raid: 'RAID', gpu: 'GPU', npu: 'NPU' };
     return labels[type] || type;
 }
 
@@ -335,7 +343,7 @@ function moduleSummaryHtml(modules) {
 }
 
 function moduleTypeLabel(type) {
-    var labels = { cpu: 'CPU', memory: '메모리', disk: '디스크', network: '네트워크', raid: 'RAID', gpu: 'GPU' };
+    var labels = { cpu: 'CPU', memory: '메모리', disk: '디스크', network: '네트워크', raid: 'RAID', gpu: 'GPU', npu: 'NPU' };
     return labels[type] || type;
 }
 
@@ -449,20 +457,12 @@ function scanAsset(assetId) {
         if (data.status === 'success') {
             discoveredCell.innerHTML = moduleSummaryHtml(data.discovered_modules);
 
-            if (data.comparison) {
-                var comp = data.comparison;
-                if (comp.mismatched.length === 0 && comp.missing.length === 0 && comp.extra.length === 0) {
-                    statusCell.innerHTML = '<span class="badge badge-success" title="일치">&#x2705; 일치</span>';
-                } else {
-                    statusCell.innerHTML = '<span class="badge badge-warning" title="불일치">&#x26A0;&#xFE0F; 불일치</span>';
-                }
-            } else {
-                statusCell.innerHTML = '<span class="badge badge-success">&#x2705; 완료</span>';
-            }
+            // Status will be set by renderComparison via showDetail
+            statusCell.innerHTML = '<span class="badge badge-success">&#x2705; 완료</span>';
 
             // Show detail button
             document.getElementById('detail-btn-' + assetId).style.display = '';
-            // Auto-show detail
+            // Auto-show detail (renderComparison will update status badge)
             showDetail(assetId);
         } else if (data.status === 'auth_failed') {
             discoveredCell.innerHTML = '<span class="text-muted">-</span>';
@@ -530,6 +530,17 @@ function showDetail(assetId, forceRefresh) {
     }
 
     if (data.discovered_modules && data.discovered_modules.length > 0) {
+        // Check if memory is fallback-only
+        var discMem = data.discovered_modules.filter(function(m) { return m.module_type === 'memory'; });
+        var isFallbackMem = discMem.length > 0 && discMem.every(function(m) {
+            return (m.model && m.model.indexOf('상세정보 없음') >= 0) || m.specification === '/proc/meminfo';
+        });
+        if (isFallbackMem) {
+            html += '<div style="padding:8px 12px; margin-bottom:8px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; font-size:13px;">';
+            html += '<strong>&#x26A0; 메모리 상세정보 없음:</strong> dmidecode 권한 부족으로 DIMM 정보를 수집할 수 없습니다. ';
+            html += '갱신 시 <b>기존 등록된 메모리가 유지</b>됩니다. (root 계정 등록 후 재스캔 권장)';
+            html += '</div>';
+        }
         html += renderComparison(data, assetId);
     } else {
         html += '<p class="text-muted">수집된 모듈이 없습니다.</p>';
@@ -580,7 +591,7 @@ function buildUnifiedRows(data) {
     var rows = [];
     var usedDisc = {};
     var unmatchedReg = [];
-    var typeOrder = {cpu:0, memory:1, disk:2, network:3, raid:4, gpu:5};
+    var typeOrder = {cpu:0, memory:1, disk:2, network:3, raid:4, gpu:5, npu:6};
 
     reg.sort(function(a,b) { return (typeOrder[a.module_type]||99) - (typeOrder[b.module_type]||99); });
 
@@ -659,6 +670,86 @@ function formatModuleInfo(model, capacity, spec, manufacturer, moduleType) {
     return lines.join('<br>');
 }
 
+function formatRegisteredModuleInfo(mod) {
+    var lines = [];
+    if (mod.linked_item_code) {
+        var label = mod.linked_item_label || mod.model || '';
+        lines.push('<a href="javascript:void(0)" onclick="showInventoryDetail(\'' + escapeHtml(mod.linked_item_code) + '\')" style="font-size:12px; font-weight:600; color:var(--primary, #0066cc); text-decoration:underline; cursor:pointer;">' + escapeHtml(mod.linked_item_code) + '</a> <span style="font-size:11px; color:#555;">(' + escapeHtml(label) + ')</span>');
+    } else {
+        lines.push('<span class="badge badge-secondary" style="font-size:10px; background:#e0e0e0; color:#666;">코드없음</span> <strong style="font-size:12px;">' + escapeHtml(mod.model || '-') + '</strong>');
+    }
+    if (mod.manufacturer) {
+        lines.push('<span style="color:#555; font-size:11px;">제조사: <b>' + escapeHtml(mod.manufacturer) + '</b></span>');
+    }
+    if (mod.capacity) {
+        lines.push('<span style="color:#555; font-size:11px;">용량: <b>' + escapeHtml(mod.capacity) + '</b></span>');
+    }
+    return lines.join('<br>');
+}
+
+function showInventoryDetail(itemCode) {
+    fetch('/discovery/inventory-detail/' + encodeURIComponent(itemCode))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { alert('조회 오류: ' + data.error); return; }
+        var item = data.item;
+        var usage = data.usage || [];
+
+        var old = document.getElementById('inventoryDetailModal');
+        if (old) old.remove();
+
+        var overlay = document.createElement('div');
+        overlay.id = 'inventoryDetailModal';
+        overlay.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:center; justify-content:center;';
+
+        var modal = document.createElement('div');
+        modal.style.cssText = 'background:var(--bg-primary, #fff); border-radius:8px; padding:24px; max-width:650px; width:95%; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+
+        var html = '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">';
+        html += '<h3 style="margin:0;"><code style="color:var(--primary);">' + escapeHtml(item.item_code) + '</code> 상세 정보</h3>';
+        html += '<button class="btn btn-sm btn-outline" onclick="document.getElementById(\'inventoryDetailModal\').remove()">&times;</button>';
+        html += '</div>';
+
+        html += '<table style="width:100%; font-size:13px; border-collapse:collapse; margin-bottom:16px;">';
+        html += '<tbody>';
+        html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px; font-weight:600; width:100px; color:var(--text-secondary);">유형</td><td style="padding:6px 8px;"><span class="badge badge-secondary">' + moduleTypeLabel(item.module_type) + '</span></td></tr>';
+        html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px; font-weight:600; color:var(--text-secondary);">라벨</td><td style="padding:6px 8px;">' + escapeHtml(item.label || '-') + '</td></tr>';
+        html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px; font-weight:600; color:var(--text-secondary);">모델</td><td style="padding:6px 8px;">' + escapeHtml(item.model || '-') + '</td></tr>';
+        html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px; font-weight:600; color:var(--text-secondary);">제조사</td><td style="padding:6px 8px;">' + escapeHtml(item.manufacturer || '-') + '</td></tr>';
+        html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px; font-weight:600; color:var(--text-secondary);">용량</td><td style="padding:6px 8px;">' + escapeHtml(item.capacity || '-') + '</td></tr>';
+        if (item.specification) {
+            html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px; font-weight:600; color:var(--text-secondary);">사양</td><td style="padding:6px 8px;">' + escapeHtml(item.specification) + '</td></tr>';
+        }
+        html += '<tr style="border-bottom:1px solid var(--border);"><td style="padding:6px 8px; font-weight:600; color:var(--text-secondary);">수량</td><td style="padding:6px 8px;">';
+        html += '총 <b>' + item.total_quantity + '</b> / 사용중 <b>' + item.in_use_quantity + '</b> / 여유 <b>' + item.spare_quantity + '</b> / 보관 <b>' + item.storage_quantity + '</b>';
+        html += '</td></tr>';
+        html += '</tbody></table>';
+
+        if (usage.length > 0) {
+            html += '<h4 style="margin:0 0 8px; font-size:13px;">사용중인 자산 (' + usage.length + '건)</h4>';
+            html += '<table style="width:100%; font-size:12px; border-collapse:collapse;">';
+            html += '<thead><tr style="border-bottom:2px solid var(--border);"><th style="padding:4px 6px;">관리번호</th><th style="padding:4px 6px;">모델</th><th style="padding:4px 6px;">수량</th><th style="padding:4px 6px;">위치</th></tr></thead><tbody>';
+            usage.forEach(function(u) {
+                html += '<tr style="border-bottom:1px solid var(--border);">';
+                html += '<td style="padding:4px 6px;"><a href="/assets" target="_blank">' + escapeHtml(u.management_number || '-') + '</a></td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml(u.model_name || '-') + '</td>';
+                html += '<td style="padding:4px 6px; text-align:center;">' + (u.count || 1) + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml(u.location || '-') + '</td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+        } else {
+            html += '<p class="text-muted" style="font-size:13px;">사용중인 자산이 없습니다.</p>';
+        }
+
+        modal.innerHTML = html;
+        overlay.appendChild(modal);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+        document.body.appendChild(overlay);
+    })
+    .catch(function(err) { alert('조회 오류: ' + err.message); });
+}
+
 function renderComparison(data, assetId) {
     var vendors = data.vendors || [];
     var defaultOwner = (data.asset_ownership === 'vendor') ? 'vendor' : 'company';
@@ -708,7 +799,7 @@ function renderComparison(data, assetId) {
             } else {
                 regOwnerBadge = '<span class="badge badge-success" style="font-size:10px;">자사</span>';
             }
-            html += '<td style="border-right:2px solid var(--border); line-height:1.5;">' + formatModuleInfo(row.reg.model, row.reg.capacity, row.reg.specification, row.reg.manufacturer, row.type) + ' ' + regOwnerBadge + '</td>';
+            html += '<td style="border-right:2px solid var(--border); line-height:1.5;">' + formatRegisteredModuleInfo(row.reg) + ' ' + regOwnerBadge + '</td>';
             html += '<td style="text-align:center;">' + (row.reg.count || 1) + '</td>';
             var ib = row.reg.is_onboard ? '<span class="badge badge-secondary" style="font-size:10px;">온보드</span>' : '<span class="badge badge-info" style="font-size:10px;">애드온</span>';
             html += '<td style="text-align:center;">' + ib + '</td>';
@@ -747,6 +838,20 @@ function renderComparison(data, assetId) {
     if (extraCount > 0) summary.push('<span class="badge badge-info">&#x1F195; 미등록 ' + extraCount + '</span>');
     if (summary.length > 0) {
         html += '<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">' + summary.join('') + '</div>';
+    }
+
+    // Sync status badge with client-side comparison result
+    var statusCell = document.getElementById('match-status-' + assetId);
+    if (statusCell) {
+        if (mismatchCount === 0 && missingCount === 0 && extraCount === 0) {
+            statusCell.innerHTML = '<span class="badge badge-success" title="일치">&#x2705; 일치</span>';
+        } else {
+            var parts = [];
+            if (mismatchCount > 0) parts.push('불일치 ' + mismatchCount);
+            if (missingCount > 0) parts.push('누락 ' + missingCount);
+            if (extraCount > 0) parts.push('미등록 ' + extraCount);
+            statusCell.innerHTML = '<span class="badge badge-warning" title="' + parts.join(', ') + '">&#x26A0;&#xFE0F; 불일치</span>';
+        }
     }
 
     return html;
@@ -952,24 +1057,392 @@ function applyAsset(assetId) {
     .then(function(r) { return r.json(); })
     .then(function(result) {
         if (result.success) {
-            alert('모듈이 갱신되었습니다. (소유자 정보 및 이력 포함)');
             // Update the registered modules column with type badges
             var regModCell = document.getElementById('registered-modules-' + assetId);
             if (regModCell) {
                 regModCell.innerHTML = moduleSummaryHtml(data.discovered_modules).replace(/badge-info/g, 'badge-secondary');
             }
-            // Update status to matched
+            // Update status to applied
             var statusCell = document.getElementById('match-status-' + assetId);
             if (statusCell) {
-                statusCell.innerHTML = '<span class="badge badge-success">&#x2705; 일치</span>';
+                statusCell.innerHTML = '<span class="badge badge-success">&#x2705; 갱신됨</span>';
             }
             // Close detail
             document.getElementById('asset-detail-' + assetId).style.display = 'none';
+
+            // Check for unmatched modules
+            if (result.unmatched_modules && result.unmatched_modules.length > 0) {
+                showUnmatchedModulesModal(result.unmatched_modules, assetId, (scanResults[assetId] || {}).asset_number || '');
+            } else {
+                alert('모듈이 갱신되었습니다. (소유자 정보 및 이력 포함)');
+            }
         } else {
             alert('오류: ' + (result.error || '알 수 없는 오류'));
         }
     })
     .catch(function(err) { alert('오류: ' + err.message); });
+}
+
+// ── Unmatched Modules Modal (with link / register / skip options) ──
+function showUnmatchedModulesModal(unmatchedModules, assetId, assetCode) {
+    // Remove existing modal if any
+    var old = document.getElementById('unmatchedModal');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'unmatchedModal';
+    overlay.style.cssText = 'position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:9999; display:flex; align-items:center; justify-content:center;';
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg-primary, #fff); border-radius:8px; padding:24px; max-width:750px; width:95%; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+
+    var html = '<h3 style="margin:0 0 8px;">모듈 인벤토리 미매칭 항목' + (assetCode ? ' — ' + escapeHtml(assetCode) : '') + '</h3>';
+    html += '<p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">';
+    html += '아래 모듈은 인벤토리에 정확히 일치하는 항목이 없습니다.<br>';
+    html += '각 항목별로 처리 방법을 선택해주세요.</p>';
+
+    // Store modules globally for modal use
+    window._unmatchedItems = unmatchedModules;
+    window._unmatchedAssetId = assetId;
+
+    // Fetch next code info for each unique module_type
+    var typeSet = {};
+    unmatchedModules.forEach(function(m) { typeSet[m.module_type] = true; });
+
+    unmatchedModules.forEach(function(m, idx) {
+        var hasCandidates = m.candidates && m.candidates.length > 0;
+
+        html += '<div style="border:1px solid var(--border); border-radius:6px; padding:12px; margin-bottom:12px;">';
+        // Header: type badge + model info
+        html += '<div style="margin-bottom:8px; font-weight:600; font-size:13px;">';
+        html += '<span class="badge badge-secondary">' + moduleTypeLabel(m.module_type) + '</span> ';
+        html += escapeHtml(m.manufacturer || '') + (m.manufacturer ? ' / ' : '') + escapeHtml(m.model || '-');
+        if (m.capacity) html += ' <span class="text-muted">(' + escapeHtml(m.capacity) + ')</span>';
+        html += ' <span class="text-muted" style="font-size:12px;">' + (m.count || 1) + '개</span>';
+        html += '</div>';
+
+        // Option 1: Link to existing inventory item
+        var linkDisabled = hasCandidates ? '' : ' disabled';
+        var linkChecked = '';
+        var candidateCount = hasCandidates ? m.candidates.length : 0;
+        var listSize = Math.min(Math.max(candidateCount, 2), 6);
+        html += '<label style="display:flex; align-items:flex-start; gap:8px; margin-bottom:6px; font-size:13px; cursor:pointer;">';
+        html += '<input type="radio" name="unmatched-action-' + idx + '" value="link" ' + linkChecked + linkDisabled + ' onchange="onUnmatchedActionChange(' + idx + ')" style="margin-top:3px;">';
+        html += '<span style="white-space:nowrap; margin-top:2px;">기존 코드에 연결:</span>';
+        html += '</label>';
+        html += '<div id="unmatched-link-wrap-' + idx + '" style="margin-left:28px; margin-bottom:6px; display:none;">';
+        html += '<select id="unmatched-link-' + idx + '" class="form-control" size="' + listSize + '" style="font-size:12px; padding:2px 6px; width:100%; border:1px solid var(--border); border-radius:4px;"' + (hasCandidates ? '' : ' disabled') + '>';
+        if (hasCandidates) {
+            m.candidates.forEach(function(c) {
+                var optLabel = c.item_code + ' \u2014 ' + (c.model || c.label || '?');
+                if (c.manufacturer) optLabel += ' (' + c.manufacturer + ')';
+                if (c.capacity) optLabel += ' [' + c.capacity + ']';
+                html += '<option value="' + escapeHtml(c.item_code) + '">' + escapeHtml(optLabel) + '</option>';
+            });
+        } else {
+            html += '<option value="">후보 없음</option>';
+        }
+        html += '</select>';
+        html += '</div>';
+
+        // Option 2: Register new
+        html += '<label style="display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px; cursor:pointer;">';
+        html += '<input type="radio" name="unmatched-action-' + idx + '" value="register" onchange="onUnmatchedActionChange(' + idx + ')">';
+        html += '<span>새로 등록:</span>';
+        html += '<input type="text" id="unmatched-code-' + idx + '" class="form-control" style="font-size:12px; padding:2px 6px; width:140px;" placeholder="로딩중..." disabled>';
+        html += '<button type="button" id="ai-spec-btn-' + idx + '" class="btn btn-sm btn-outline" style="font-size:11px; padding:2px 10px; white-space:nowrap;" onclick="aiSpecLookup(' + idx + ')" disabled>';
+        html += '\uD83D\uDD0D AI 스펙 조회</button>';
+        html += '</label>';
+
+        // AI spec extra fields (hidden until register is selected)
+        html += '<div id="unmatched-spec-wrap-' + idx + '" style="margin-left:28px; margin-bottom:6px; display:none;">';
+        html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:12px;">';
+        html += '<div><label style="color:var(--text-secondary);">제조사:</label>';
+        html += '<input type="text" id="unmatched-manufacturer-' + idx + '" class="form-control" style="font-size:12px; padding:2px 6px; width:100%;" placeholder="제조사" value="' + escapeHtml(m.manufacturer || '') + '"></div>';
+        html += '<div><label style="color:var(--text-secondary);">용량:</label>';
+        html += '<input type="text" id="unmatched-capacity-' + idx + '" class="form-control" style="font-size:12px; padding:2px 6px; width:100%;" placeholder="용량" value="' + escapeHtml(m.capacity || '') + '"></div>';
+        html += '<div><label style="color:var(--text-secondary);">사양:</label>';
+        html += '<input type="text" id="unmatched-specification-' + idx + '" class="form-control" style="font-size:12px; padding:2px 6px; width:100%;" placeholder="사양"></div>';
+        html += '<div><label style="color:var(--text-secondary);">라벨:</label>';
+        html += '<input type="text" id="unmatched-label-' + idx + '" class="form-control" style="font-size:12px; padding:2px 6px; width:100%;" placeholder="관리용 라벨"></div>';
+        html += '</div>';
+        html += '<div id="ai-spec-status-' + idx + '" style="margin-top:4px; font-size:11px;"></div>';
+        html += '</div>';
+
+        // Option 3: Skip (default)
+        html += '<label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">';
+        html += '<input type="radio" name="unmatched-action-' + idx + '" value="skip" checked onchange="onUnmatchedActionChange(' + idx + ')">';
+        html += '<span>건너뛰기</span>';
+        html += '</label>';
+
+        html += '</div>';
+    });
+
+    html += '<div style="margin-top:16px; display:flex; justify-content:flex-end; gap:8px;">';
+    html += '<button class="btn btn-outline" onclick="closeUnmatchedModal()">취소</button>';
+    html += '<button class="btn btn-primary" onclick="submitUnmatchedModules()">적용</button>';
+    html += '</div>';
+
+    modal.innerHTML = html;
+    overlay.appendChild(modal);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeUnmatchedModal(); });
+    document.body.appendChild(overlay);
+
+    // Fetch suggested item codes for each module type
+    var typeKeys = Object.keys(typeSet);
+    var codeInfoMap = {};
+    var fetchPromises = typeKeys.map(function(t) {
+        return fetch('/discovery/next-item-code/' + t)
+            .then(function(r) { return r.json(); })
+            .then(function(info) { codeInfoMap[t] = info; })
+            .catch(function() { codeInfoMap[t] = { prefix: '', nextSuffix: 'A' }; });
+    });
+
+    Promise.all(fetchPromises).then(function() {
+        var suffixCounters = {};
+        unmatchedModules.forEach(function(m, idx) {
+            var info = codeInfoMap[m.module_type];
+            if (!info) return;
+            var input = document.getElementById('unmatched-code-' + idx);
+            if (!input) return;
+
+            if (!suffixCounters[m.module_type]) {
+                suffixCounters[m.module_type] = info.nextSuffix ? info.nextSuffix.charCodeAt(0) : 65;
+            }
+            var suffix = String.fromCharCode(suffixCounters[m.module_type]);
+            suffixCounters[m.module_type]++;
+
+            var suggestedCode;
+            if (m.module_type === 'cpu' || m.module_type === 'raid') {
+                suggestedCode = info.prefix + suffix;
+            } else {
+                var mid = (m.capacity || '').replace(/\s+/g, '').replace(/[^0-9A-Za-z.GgTtMm]/g, '');
+                if (!mid) mid = '?';
+                suggestedCode = info.prefix + mid + '-' + suffix;
+            }
+            input.value = suggestedCode;
+            input.placeholder = info.format || '';
+            input.title = '형식: ' + (info.format || '') + ' (예: ' + (info.example || '') + ')';
+        });
+    });
+}
+
+function onUnmatchedActionChange(idx) {
+    var radios = document.querySelectorAll('input[name="unmatched-action-' + idx + '"]');
+    var selectedValue = '';
+    for (var i = 0; i < radios.length; i++) {
+        if (radios[i].checked) { selectedValue = radios[i].value; break; }
+    }
+    var codeInput = document.getElementById('unmatched-code-' + idx);
+    var linkSelect = document.getElementById('unmatched-link-' + idx);
+    var linkWrap = document.getElementById('unmatched-link-wrap-' + idx);
+    var specWrap = document.getElementById('unmatched-spec-wrap-' + idx);
+    var aiBtn = document.getElementById('ai-spec-btn-' + idx);
+    if (codeInput) codeInput.disabled = (selectedValue !== 'register');
+    if (linkSelect) linkSelect.disabled = (selectedValue !== 'link');
+    if (linkWrap) linkWrap.style.display = (selectedValue === 'link') ? '' : 'none';
+    if (specWrap) specWrap.style.display = (selectedValue === 'register') ? '' : 'none';
+    if (aiBtn) aiBtn.disabled = (selectedValue !== 'register');
+}
+
+function closeUnmatchedModal() {
+    var modal = document.getElementById('unmatchedModal');
+    if (modal) modal.remove();
+    window._unmatchedItems = null;
+    window._unmatchedAssetId = null;
+}
+
+function aiSpecLookup(idx) {
+    var items = window._unmatchedItems;
+    if (!items || !items[idx]) return;
+
+    var m = items[idx];
+    var btn = document.getElementById('ai-spec-btn-' + idx);
+    var statusDiv = document.getElementById('ai-spec-status-' + idx);
+
+    // Set loading state
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span style="display:inline-block; width:12px; height:12px; border:2px solid var(--text-secondary); border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite;"></span> 조회중...';
+    }
+    if (statusDiv) statusDiv.innerHTML = '<span style="color:var(--text-secondary);">AI 스펙을 조회하고 있습니다...</span>';
+
+    // Add spin animation if not present
+    if (!document.getElementById('ai-spin-style')) {
+        var style = document.createElement('style');
+        style.id = 'ai-spin-style';
+        style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+        document.head.appendChild(style);
+    }
+
+    fetch('/discovery/ai-spec-lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            module_type: m.module_type,
+            model: m.model,
+            manufacturer: m.manufacturer,
+            capacity: m.capacity
+        })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        // Restore button
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '\uD83D\uDD0D AI 스펙 조회';
+        }
+
+        if (result.error && !result.manufacturer) {
+            if (statusDiv) statusDiv.innerHTML = '<span style="color:#e53e3e;">\u274C ' + escapeHtml(result.error) + '</span>';
+            return;
+        }
+
+        // Fill fields
+        var mfgInput = document.getElementById('unmatched-manufacturer-' + idx);
+        var capInput = document.getElementById('unmatched-capacity-' + idx);
+        var specInput = document.getElementById('unmatched-specification-' + idx);
+        var labelInput = document.getElementById('unmatched-label-' + idx);
+
+        if (mfgInput && result.manufacturer) mfgInput.value = result.manufacturer;
+        if (capInput && result.capacity) capInput.value = result.capacity;
+        if (specInput && result.specification) specInput.value = result.specification;
+        if (labelInput && result.label) labelInput.value = result.label;
+
+        // Show confidence badge
+        var confidence = typeof result.confidence === 'number' ? result.confidence : 0;
+        var sourceLabel = result.source === 'ai+web' ? 'AI+웹' : 'AI';
+        var badgeColor, badgeText;
+        if (confidence >= 0.8) {
+            badgeColor = '#38a169'; badgeText = '높음';
+        } else if (confidence >= 0.5) {
+            badgeColor = '#d69e2e'; badgeText = '보통';
+        } else {
+            badgeColor = '#e53e3e'; badgeText = '낮음';
+        }
+        if (statusDiv) {
+            statusDiv.innerHTML = '<span style="color:' + badgeColor + '; font-weight:600;">\u2705 신뢰도: ' + badgeText + '</span>' +
+                ' <span style="color:var(--text-secondary);">(' + sourceLabel + ', ' + (confidence * 100).toFixed(0) + '%)</span>';
+        }
+    })
+    .catch(function(err) {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '\uD83D\uDD0D AI 스펙 조회';
+        }
+        if (statusDiv) statusDiv.innerHTML = '<span style="color:#e53e3e;">\u274C 조회 실패: ' + escapeHtml(err.message) + '</span>';
+    });
+}
+
+function submitUnmatchedModules() {
+    var items = window._unmatchedItems;
+    if (!items) return;
+
+    var toLink = [];
+    var toRegister = [];
+
+    for (var idx = 0; idx < items.length; idx++) {
+        var radios = document.querySelectorAll('input[name="unmatched-action-' + idx + '"]');
+        var action = 'skip';
+        for (var r = 0; r < radios.length; r++) {
+            if (radios[r].checked) { action = radios[r].value; break; }
+        }
+
+        if (action === 'link') {
+            var linkSelect = document.getElementById('unmatched-link-' + idx);
+            var selectedCode = linkSelect ? linkSelect.value : '';
+            if (!selectedCode) {
+                alert('연결할 항목을 선택해주세요: ' + (items[idx].model || items[idx].module_type));
+                return;
+            }
+            toLink.push({
+                item_code: selectedCode,
+                computing_module_id: items[idx].id
+            });
+        } else if (action === 'register') {
+            var codeInput = document.getElementById('unmatched-code-' + idx);
+            var itemCode = codeInput ? codeInput.value.trim() : '';
+            if (!itemCode) {
+                alert('품목코드를 입력해주세요: ' + (items[idx].model || items[idx].module_type));
+                if (codeInput) codeInput.focus();
+                return;
+            }
+            var mfgInput = document.getElementById('unmatched-manufacturer-' + idx);
+            var capInput = document.getElementById('unmatched-capacity-' + idx);
+            var specInput = document.getElementById('unmatched-specification-' + idx);
+            var labelInput = document.getElementById('unmatched-label-' + idx);
+            toRegister.push({
+                item_code: itemCode,
+                module_type: items[idx].module_type,
+                model: items[idx].model,
+                manufacturer: (mfgInput ? mfgInput.value.trim() : '') || items[idx].manufacturer,
+                capacity: (capInput ? capInput.value.trim() : '') || items[idx].capacity,
+                specification: specInput ? specInput.value.trim() : '',
+                label: labelInput ? labelInput.value.trim() : '',
+                count: items[idx].count || 1,
+                computing_module_id: items[idx].id
+            });
+        }
+        // skip → do nothing
+    }
+
+    if (toLink.length === 0 && toRegister.length === 0) {
+        closeUnmatchedModal();
+        return;
+    }
+
+    // Check for duplicate item codes in register list
+    if (toRegister.length > 0) {
+        var codes = toRegister.map(function(r) { return r.item_code; });
+        var uniqueCodes = {};
+        for (var c = 0; c < codes.length; c++) {
+            if (uniqueCodes[codes[c]]) {
+                alert('중복된 품목코드가 있습니다: ' + codes[c]);
+                return;
+            }
+            uniqueCodes[codes[c]] = true;
+        }
+    }
+
+    // Execute link and register requests
+    var promises = [];
+    if (toLink.length > 0) {
+        promises.push(
+            fetch('/discovery/link-inventory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: toLink })
+            }).then(function(r) { return r.json(); })
+        );
+    }
+    if (toRegister.length > 0) {
+        promises.push(
+            fetch('/discovery/register-inventory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: toRegister })
+            }).then(function(r) { return r.json(); })
+        );
+    }
+
+    Promise.all(promises).then(function(results) {
+        var msgs = [];
+        results.forEach(function(res) {
+            if (res.linked && res.linked.length > 0) {
+                msgs.push('기존 연결: ' + res.linked.length + '개 (' + res.linked.join(', ') + ')');
+            }
+            if (res.registered && res.registered.length > 0) {
+                msgs.push('새로 등록: ' + res.registered.length + '개 (' + res.registered.join(', ') + ')');
+            }
+            if (res.error) {
+                msgs.push('오류: ' + res.error);
+            }
+        });
+        alert(msgs.length > 0 ? msgs.join('\n') : '처리 완료');
+        closeUnmatchedModal();
+    }).catch(function(err) {
+        alert('오류: ' + err.message);
+    });
 }
 
 // ── Scan Selected Assets ──
@@ -996,6 +1469,8 @@ function scanAllAssets() {
     for (var i = 0; i < rows.length; i++) {
         // Only scan visible (filtered) assets
         if (rows[i].style.display === 'none') continue;
+        // Skip chassis (parent with child nodes)
+        if (rows[i].getAttribute('data-is-chassis') === 'true') continue;
         assetIds.push(parseInt(rows[i].getAttribute('data-asset-id')));
     }
     if (assetIds.length === 0) {
@@ -1136,12 +1611,24 @@ function updateAssetRow(data) {
     if (data.status === 'success') {
         discoveredCell.innerHTML = moduleSummaryHtml(data.discovered_modules);
 
-        if (data.comparison) {
-            var comp = data.comparison;
-            if (comp.mismatched.length === 0 && comp.missing.length === 0 && comp.extra.length === 0) {
-                statusCell.innerHTML = '<span class="badge badge-success" title="일치">&#x2705; 일치</span>';
+        // Use client-side comparison for status (consistent with detail panel)
+        if (data.registered_modules && data.discovered_modules) {
+            var rows = buildUnifiedRows(data);
+            var hasMismatch = false;
+            var statusParts = [];
+            var mm = 0, ms = 0, ex = 0;
+            rows.forEach(function(r) {
+                if (r.status === 'mismatched') mm++;
+                else if (r.status === 'missing') ms++;
+                else if (r.status === 'extra') ex++;
+            });
+            if (mm > 0) { hasMismatch = true; statusParts.push('불일치 ' + mm); }
+            if (ms > 0) { hasMismatch = true; statusParts.push('누락 ' + ms); }
+            if (ex > 0) { hasMismatch = true; statusParts.push('미등록 ' + ex); }
+            if (hasMismatch) {
+                statusCell.innerHTML = '<span class="badge badge-warning" title="' + statusParts.join(', ') + '">&#x26A0;&#xFE0F; 불일치</span>';
             } else {
-                statusCell.innerHTML = '<span class="badge badge-warning" title="불일치">&#x26A0;&#xFE0F; 불일치</span>';
+                statusCell.innerHTML = '<span class="badge badge-success" title="일치">&#x2705; 일치</span>';
             }
         } else {
             statusCell.innerHTML = '<span class="badge badge-success">&#x2705; 완료</span>';

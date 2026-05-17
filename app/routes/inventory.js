@@ -13,6 +13,7 @@ const ComputingModule = require('../models/computingModule');
 const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
+const Photo = require('../models/photo');
 const { getDb } = require('../config/database');
 
 // Helper: generate vendor management number based on vendor name (업체명-NNN)
@@ -196,32 +197,65 @@ function mapCredsToCols(body) {
 
 // Inventory list
 router.get('/', (req, res) => {
-  const filters = {
-    status: req.query.status,
-    room: req.query.room,
-    user_name: req.query.user_name,
-    ownership: req.query.ownership,
-    date_from: req.query.date_from,
-    date_to: req.query.date_to,
-    search: req.query.search
-  };
-  const logs = EquipmentUsageLog.findAll(filters);
-  const counts = EquipmentUsageLog.countByStatus();
-  const rooms = EquipmentUsageLog.getRooms();
-  const users = EquipmentUsageLog.getUsers();
+  const tab = req.query.tab || 'equipment';
 
-  res.render('inventory/index', {
-    title: '입출고 관리',
-    currentPath: '/inventory',
-    extraCss: null,
-    extraJs: null,
-    logs,
-    counts,
-    rooms,
-    users,
-    filters,
-    appConfig
-  });
+  if (tab === 'module') {
+    // Module tab: load from module_inventory_logs
+    const moduleFilters = {
+      event_type: req.query.event_type,
+      item_code: req.query.item_code,
+      date_from: req.query.date_from,
+      date_to: req.query.date_to,
+      search: req.query.search
+    };
+    const moduleLogs = ModuleInventoryLog.findAll(moduleFilters, 500);
+    const moduleCounts = ModuleInventoryLog.countByEventType();
+    const itemCodes = ModuleInventoryLog.getItemCodes();
+    const eventTypes = ['incoming', 'installed', 'removed', 'outgoing', 'adjust'];
+
+    res.render('inventory/index', {
+      title: '입출고 관리',
+      currentPath: '/inventory',
+      extraCss: null,
+      extraJs: null,
+      tab,
+      moduleLogs,
+      moduleCounts,
+      itemCodes,
+      eventTypes,
+      moduleFilters,
+      appConfig
+    });
+  } else {
+    // Equipment tab: equipment_usage_logs excluding modules
+    const filters = {
+      status: req.query.status,
+      room: req.query.room,
+      user_name: req.query.user_name,
+      ownership: req.query.ownership,
+      date_from: req.query.date_from,
+      date_to: req.query.date_to,
+      search: req.query.search
+    };
+    const logs = EquipmentUsageLog.findAllEquipment(filters);
+    const counts = EquipmentUsageLog.countByStatusEquipment();
+    const rooms = EquipmentUsageLog.getRoomsEquipment();
+    const users = EquipmentUsageLog.getUsersEquipment();
+
+    res.render('inventory/index', {
+      title: '입출고 관리',
+      currentPath: '/inventory',
+      extraCss: null,
+      extraJs: null,
+      tab,
+      logs,
+      counts,
+      rooms,
+      users,
+      filters,
+      appConfig
+    });
+  }
 });
 
 // === Incoming Registration (입고 등록) ===
@@ -243,7 +277,8 @@ router.get('/incoming', (req, res) => {
 });
 
 // POST /incoming - create incoming record
-router.post('/incoming', requireMaintenance, (req, res) => {
+const upload = require('../middleware/upload');
+router.post('/incoming', requireMaintenance, upload.array('photos', 10), (req, res) => {
   try {
     const assetType = req.body.asset_type;
     const moduleTypeValues = appConfig.moduleTypes.map(t => t.value);
@@ -260,14 +295,37 @@ router.post('/incoming', requireMaintenance, (req, res) => {
 
     if (isModule) {
       // Module incoming: upsert into module_inventory
-      const itemCode = req.body.management_number;
+      let itemCode = (req.body.management_number || '').trim();
       const quantity = parseInt(req.body.quantity) || 1;
+
+      // 업체 부품인데 부품코드가 비어있으면 자동 생성
+      if (!itemCode && req.body.ownership === 'vendor' && vendorId) {
+        const vendor = Vendor.findById(vendorId);
+        if (vendor) {
+          const typeLabels = { cpu: 'CPU', memory: '메모리', disk: '스토리지', network: '네트워크', raid: 'RAID', gpu: 'GPU', cable: '케이블', psu: 'PSU' };
+          const typeName = typeLabels[assetType] || assetType;
+          const prefix = vendor.vendor_name + '-' + typeName + '-';
+          const oldPrefix = vendor.vendor_name + '-부품-' + typeName + '-';
+          const db = getDb();
+          const rows = db.prepare("SELECT item_code FROM module_inventory WHERE item_code LIKE ? OR item_code LIKE ?").all(prefix + '%', oldPrefix + '%');
+          let maxNum = 0;
+          for (const row of rows) {
+            const suffix = row.item_code.startsWith(oldPrefix) ? oldPrefix : prefix;
+            const num = parseInt(row.item_code.substring(suffix.length));
+            if (!isNaN(num) && num > maxNum) maxNum = num;
+          }
+          itemCode = prefix + String(maxNum + 1).padStart(3, '0');
+        }
+      }
       const incomingAssetNumber = req.body.asset_number || null;
 
       // Check if existing
       const existing = ModuleInventory.findByCode(itemCode);
       const beforeTotal = existing ? existing.total_quantity : 0;
       const beforeSpare = existing ? existing.spare_quantity : 0;
+
+      const moduleOwner = req.body.ownership || 'company';
+      const moduleVendorId = vendorId || null;
 
       if (existing) {
         // Increase total and spare quantities
@@ -283,7 +341,9 @@ router.post('/incoming', requireMaintenance, (req, res) => {
           in_use_quantity: existing.in_use_quantity,
           spare_quantity: existing.spare_quantity + quantity,
           storage_quantity: existing.storage_quantity + quantity,
-          asset_number: incomingAssetNumber
+          asset_number: incomingAssetNumber,
+          owner: moduleOwner,
+          owner_vendor_id: moduleVendorId
         });
       } else {
         // New module inventory entry
@@ -299,7 +359,9 @@ router.post('/incoming', requireMaintenance, (req, res) => {
           in_use_quantity: 0,
           spare_quantity: quantity,
           storage_quantity: quantity,
-          asset_number: incomingAssetNumber
+          asset_number: incomingAssetNumber,
+          owner: moduleOwner,
+          owner_vendor_id: moduleVendorId
         });
       }
 
@@ -464,10 +526,42 @@ router.post('/incoming', requireMaintenance, (req, res) => {
       }
     }
 
+    // Save uploaded photos
+    if (req.files && req.files.length > 0) {
+      const uploadedBy = req.session.displayName || req.session.username || null;
+      const baseMgmtForPhoto = typeof baseMgmt !== 'undefined' ? baseMgmt : req.body.management_number;
+      if (!isModule && baseMgmtForPhoto) {
+        const photoAsset = Asset.findByManagementNumber(baseMgmtForPhoto);
+        if (photoAsset) {
+          Photo.bulkCreate('asset', photoAsset.id, req.files, uploadedBy);
+        }
+      } else if (isModule) {
+        // For modules, attach to first asset that uses this item_code, or store as module photo
+        const itemCodeForPhoto = typeof itemCode !== 'undefined' ? itemCode : req.body.management_number;
+        const moduleAssets = getDb().prepare(
+          "SELECT asset_id FROM computing_modules WHERE specification = ? LIMIT 1"
+        ).get(itemCodeForPhoto);
+        if (moduleAssets) {
+          Photo.bulkCreate('asset', moduleAssets.asset_id, req.files, uploadedBy);
+        } else {
+          // No asset linked yet — store as module photo with item_code as entity_id
+          Photo.bulkCreate('module', 0, req.files, uploadedBy);
+        }
+      }
+    }
+
     const nodeCount = parseInt(req.body.node_count) || 1;
+    let incomingAssetLink = '';
+    const baseMgmtFinal = typeof baseMgmt !== 'undefined' ? baseMgmt : req.body.management_number;
+    if (!isModule && baseMgmtFinal) {
+      const incomingAsset = Asset.findByManagementNumber(baseMgmtFinal);
+      if (incomingAsset) {
+        incomingAssetLink = ' <a href="/assets/' + incomingAsset.id + '">자산 상세 &rarr;</a>';
+      }
+    }
     const flashMsg = nodeCount > 1 && !isModule
-      ? '입고 등록이 완료되었습니다. (' + nodeCount + '개 노드 생성)'
-      : '입고 등록이 완료되었습니다.';
+      ? '입고 등록이 완료되었습니다. (' + nodeCount + '개 노드 생성)' + incomingAssetLink
+      : '입고 등록이 완료되었습니다.' + incomingAssetLink;
     req.flash('success', flashMsg);
     res.redirect(req.body.returnTo || '/inventory');
   } catch (err) {
@@ -959,6 +1053,12 @@ router.get('/equipment/:mgmt', (req, res) => {
     }
   });
 
+  // 자산에 연결된 computing_modules 조회
+  const linkedAsset = Asset.findByManagementNumber(mgmt);
+  const computingModules = linkedAsset ? ComputingModule.findByAsset(linkedAsset.id) : [];
+  const moduleTransferLogs = linkedAsset ? ModuleInventoryLog.findByAsset(linkedAsset.id) : [];
+  const detailPhotos = linkedAsset ? Photo.findByAssetWithUsageLogs(linkedAsset.id, mgmt) : [];
+
   res.render('inventory/equipment-detail', {
     title: mgmt + ' 장비 상세',
     currentPath: '/inventory',
@@ -968,6 +1068,10 @@ router.get('/equipment/:mgmt', (req, res) => {
     latest,
     history,
     componentSpecs,
+    computingModules,
+    linkedAsset,
+    moduleTransferLogs,
+    detailPhotos,
     appConfig
   });
 });
@@ -996,6 +1100,7 @@ router.get('/:id/edit', (req, res) => {
     }
   }
 
+  const logPhotos = Photo.findByEntity('equipment_usage', log.id);
   res.render('inventory/form', {
     title: '수정',
     currentPath: '/inventory',
@@ -1003,6 +1108,7 @@ router.get('/:id/edit', (req, res) => {
     extraJs: null,
     log,
     isEdit: true,
+    logPhotos,
     componentTypes,
     serverRooms,
     racks,
@@ -1117,8 +1223,9 @@ router.post('/:id', requireMaintenance, (req, res) => {
             speed: spArr[i] || ''
           });
         }
+        AssetIp.deleteByAsset(asset.id);
         if (assetIps.length > 0) {
-          AssetIp.replaceAll(asset.id, assetIps);
+          AssetIp.bulkCreate(asset.id, assetIps);
         }
 
         // Sync credentials → asset_credentials table
@@ -1137,8 +1244,9 @@ router.post('/:id', requireMaintenance, (req, res) => {
             password: cpArr[i] || ''
           });
         }
+        AssetCredential.deleteByAsset(asset.id);
         if (assetCreds.length > 0) {
-          AssetCredential.replaceAll(asset.id, assetCreds);
+          AssetCredential.bulkCreate(asset.id, assetCreds);
         }
       }
     }
@@ -1185,6 +1293,7 @@ router.post('/:id/return', requireMaintenance, (req, res) => {
 // Delete
 router.post('/:id/delete', requireMaintenance, (req, res) => {
   try {
+    Photo.deleteByEntity('equipment_usage', parseInt(req.params.id));
     EquipmentUsageLog.delete(req.params.id);
     AuditLog.log(req, { action: 'delete', targetType: 'equipment_usage', targetId: req.params.id });
     req.flash('success', '기록이 삭제되었습니다.');

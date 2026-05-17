@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; color: #1e293b; line-height: 1.6; min-height: 100vh; }
+        .top-bar { background: #1e293b; color: white; padding: 16px 24px; text-align: center; }
+        .top-bar h1 { font-size: 20px; font-weight: 700; }
+        .top-bar p { font-size: 13px; opacity: 0.7; margin-top: 4px; }
+        .wrap { max-width: 680px; margin: 24px auto; padding: 0 16px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); padding: 24px; margin-bottom: 20px; }
+        .card h2 { font-size: 16px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; color: #475569; }
+        .form-group label .req { color: #dc2626; }
+        .form-control { width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 14px; transition: border-color 0.2s; }
+        .form-control:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+        select.form-control { appearance: auto; }
+        textarea.form-control { min-height: 80px; resize: vertical; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+        .btn { display: inline-block; padding: 10px 24px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; transition: all 0.2s; }
+        .btn-primary { background: #2563eb; color: white; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-lg { padding: 12px 32px; font-size: 16px; }
+        .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+        .alert-error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .alert-success { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+        .success-box { text-align: center; padding: 40px 24px; }
+        .success-box .icon { font-size: 48px; margin-bottom: 16px; }
+        .success-box h2 { color: #16a34a; margin-bottom: 8px; }
+        .success-box p { color: #64748b; }
+        .invalid-box { text-align: center; padding: 40px 24px; }
+        .invalid-box .icon { font-size: 48px; margin-bottom: 16px; }
+        .invalid-box h2 { color: #dc2626; margin-bottom: 8px; }
+        .status-badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-approved { background: #d1fae5; color: #065f46; }
+        .status-rejected { background: #fee2e2; color: #991b1b; }
+        @media (max-width: 600px) { .form-row, .form-row-3 { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <h1>TTA 서버 입고 신청서</h1>
+        <p>한국정보통신기술협회 HPC/AIDC 서버실 장비 입고 신청</p>
+    </div>
+
+    <div class="wrap">
+        <% if (invalid) { %>
+        <div class="card">
+            <div class="invalid-box">
+                <div class="icon">&#x26A0;&#xFE0F;</div>
+                <h2>유효하지 않은 링크</h2>
+                <p>이 링크는 존재하지 않거나 만료되었습니다.<br>관리자에게 새 링크를 요청해 주세요.</p>
+            </div>
+        </div>
+
+        <% } else if (submitted) { %>
+        <div class="card">
+            <div class="success-box">
+                <div class="icon">&#x2705;</div>
+                <h2>신청이 완료되었습니다</h2>
+                <p>입고 신청서가 정상적으로 제출되었습니다.<br>관리자 검토 후 연락드리겠습니다.</p>
+                <% if (request) { %>
+                <div style="margin-top:20px;text-align:left;background:#f8fafc;padding:16px;border-radius:6px;font-size:13px;">
+                    <p><strong>업체:</strong> <%= request.company_name %></p>
+                    <p><strong>담당자:</strong> <%= request.contact_name %></p>
+                    <p><strong>장비:</strong> <%= request.model_name || request.equipment_type %> x<%= request.quantity || 1 %></p>
+                    <p><strong>상태:</strong> <span class="status-badge status-<%= request.status || 'pending' %>"><%= request.status === 'pending' ? '검토중' : request.status === 'approved' ? '승인' : '반려' %></span></p>
+                </div>
+                <% } %>
+            </div>
+        </div>
+
+        <% } else { %>
+
+        <% if (error) { %>
+        <div class="alert alert-error"><%= error %></div>
+        <% } %>
+
+        <form method="POST" action="<%= token ? '/intake/' + token : '/intake' %>">
+            <div class="card">
+                <h2>업체 정보</h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>업체명 <span class="req">*</span></label>
+                        <input type="text" name="company_name" class="form-control" required placeholder="예: (주)삼성전자" value="<%= request && request.company_name ? request.company_name : '' %>">
+                    </div>
+                    <div class="form-group">
+                        <label>담당자명 <span class="req">*</span></label>
+                        <input type="text" name="contact_name" class="form-control" required placeholder="예: 홍길동" value="<%= request && request.contact_name ? request.contact_name : '' %>">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>연락처</label>
+                        <input type="tel" name="contact_phone" class="form-control" placeholder="예: 010-1234-5678" value="<%= request && request.contact_phone ? request.contact_phone : '' %>">
+                    </div>
+                    <div class="form-group">
+                        <label>이메일</label>
+                        <input type="email" name="contact_email" class="form-control" placeholder="예: hong@company.com" value="<%= request && request.contact_email ? request.contact_email : '' %>">
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>장비 정보</h2>
+                <div class="form-row-3">
+                    <div class="form-group">
+                        <label>장비 유형</label>
+                        <select name="equipment_type" class="form-control">
+                            <option value="server" <%= request && request.equipment_type === 'server' ? 'selected' : '' %>>서버</option>
+                            <option value="storage" <%= request && request.equipment_type === 'storage' ? 'selected' : '' %>>스토리지</option>
+                            <option value="switch" <%= request && request.equipment_type === 'switch' ? 'selected' : '' %>>스위치</option>
+                            <option value="other" <%= request && request.equipment_type === 'other' ? 'selected' : '' %>>기타</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>수량</label>
+                        <input type="number" name="quantity" class="form-control" min="1" value="<%= request && request.quantity ? request.quantity : 1 %>">
+                    </div>
+                    <div class="form-group">
+                        <label>U 사이즈</label>
+                        <input type="number" name="rack_unit_size" class="form-control" min="1" value="<%= request && request.rack_unit_size ? request.rack_unit_size : 1 %>">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>모델명</label>
+                        <input type="text" name="model_name" class="form-control" placeholder="예: PowerEdge R740" value="<%= request && request.model_name ? request.model_name : '' %>">
+                    </div>
+                    <div class="form-group">
+                        <label>제조사</label>
+                        <input type="text" name="manufacturer" class="form-control" placeholder="예: Dell" value="<%= request && request.manufacturer ? request.manufacturer : '' %>">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>시리얼 번호</label>
+                    <input type="text" name="serial_number" class="form-control" placeholder="예: SN12345678" value="<%= request && request.serial_number ? request.serial_number : '' %>">
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>입고 요구사항</h2>
+                <div class="form-group">
+                    <label>용도 / 목적</label>
+                    <input type="text" name="purpose" class="form-control" placeholder="예: AI 학습용 서버 실증 테스트" value="<%= request && request.purpose ? request.purpose : '' %>">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>입고 예정일</label>
+                        <input type="date" name="expected_start" class="form-control" value="<%= request && request.expected_start ? request.expected_start : '' %>">
+                    </div>
+                    <div class="form-group">
+                        <label>반출 예정일</label>
+                        <input type="date" name="expected_end" class="form-control" value="<%= request && request.expected_end ? request.expected_end : '' %>">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>전력 요구사항</label>
+                        <input type="text" name="power_requirement" class="form-control" placeholder="예: 220V 30A, 이중전원" value="<%= request && request.power_requirement ? request.power_requirement : '' %>">
+                    </div>
+                    <div class="form-group">
+                        <label>네트워크 요구사항</label>
+                        <input type="text" name="network_requirement" class="form-control" placeholder="예: 10GbE x2, 공인IP 필요" value="<%= request && request.network_requirement ? request.network_requirement : '' %>">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>비고</label>
+                    <textarea name="notes" class="form-control" placeholder="추가 요청사항이 있으면 입력해 주세요."><%= request && request.notes ? request.notes : '' %></textarea>
+                </div>
+            </div>
+
+            <div style="text-align:center;padding:8px 0 32px;">
+                <button type="submit" class="btn btn-primary btn-lg" style="width:100%;max-width:400px;">입고 신청서 제출</button>
+            </div>
+        </form>
+        <% } %>
+    </div>
+</body>
+</html>

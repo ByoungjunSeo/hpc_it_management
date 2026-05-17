@@ -1,0 +1,499 @@
+/* GPU Monitoring Dashboard */
+
+/* ── Summary Panel with Donut Charts ── */
+.gpu-summary-panel {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  background: var(--bg-white);
+  border-radius: var(--radius);
+  padding: 20px 28px;
+  box-shadow: var(--shadow);
+  margin-bottom: 20px;
+}
+
+.gpu-summary-donuts {
+  display: flex;
+  gap: 28px;
+  flex: 1;
+}
+
+.donut-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.donut-wrap {
+  position: relative;
+  width: 110px;
+  height: 110px;
+}
+
+.donut-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.donut-bg {
+  fill: none;
+  stroke: #f1f5f9;
+  stroke-width: 10;
+}
+
+.donut-ring {
+  fill: none;
+  stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: 314.16; /* 2 * PI * 50 */
+  stroke-dashoffset: 314.16; /* starts at 0% */
+  transition: stroke-dashoffset 0.6s ease, stroke 0.4s ease;
+}
+
+.donut-center {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.donut-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1;
+}
+
+.donut-unit {
+  font-size: 11px;
+  color: var(--text-light);
+  margin-top: 2px;
+}
+
+.donut-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-light);
+  text-align: center;
+}
+
+.donut-desc {
+  font-size: 10px;
+  color: var(--text-light);
+  text-align: center;
+  opacity: 0.7;
+  margin-top: -2px;
+}
+
+.donut-value-sm {
+  font-size: 18px;
+}
+
+.donut-card-power-total {
+  border-left: 1px solid var(--border);
+  padding-left: 28px;
+}
+
+/* Counters beside donuts */
+.gpu-summary-counters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 100px;
+  border-left: 1px solid var(--border);
+  padding-left: 24px;
+}
+
+.summary-counter {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.counter-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 28px;
+  text-align: right;
+}
+
+.counter-label {
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.counter-ok .counter-value { color: var(--success); }
+.counter-warn .counter-value { color: var(--warning); }
+.counter-err .counter-value { color: var(--danger); }
+
+@media (max-width: 900px) {
+  .gpu-summary-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .gpu-summary-donuts {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .gpu-summary-counters {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding-left: 0;
+    padding-top: 16px;
+    flex-direction: row;
+    justify-content: center;
+    gap: 20px;
+  }
+  .summary-counter {
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .counter-value { text-align: center; }
+}
+
+/* Room Filter Tabs */
+.gpu-room-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.room-tab {
+  padding: 6px 16px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--bg-white);
+  color: var(--text-light);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.room-tab:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.room-tab.active {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+/* Progress Bar */
+.gpu-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.gpu-progress-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.gpu-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+
+.gpu-progress-text {
+  font-size: 13px;
+  color: var(--text-light);
+  white-space: nowrap;
+}
+
+/* Card Grid */
+.gpu-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .gpu-grid { grid-template-columns: 1fr; }
+}
+
+/* Card */
+.gpu-card {
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: box-shadow 0.2s, border-color 0.2s;
+  border-left: 4px solid var(--border);
+}
+
+.gpu-card:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.gpu-card-status-ok {
+  border-left-color: var(--success);
+}
+
+.gpu-card-status-warn {
+  border-left-color: var(--warning);
+}
+
+.gpu-card-status-error {
+  border-left-color: var(--danger);
+}
+
+/* Card Header */
+.gpu-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.gpu-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.gpu-card-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gpu-card-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--text-light);
+  flex-wrap: wrap;
+}
+
+.gpu-card-meta span:not(:last-child)::after {
+  content: '|';
+  margin-left: 8px;
+  color: var(--border);
+}
+
+.gpu-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.gpu-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #dbeafe;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Registered GPU list */
+.gpu-card-registered {
+  padding: 8px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gpu-reg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-light);
+  background: var(--bg-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+}
+
+.gpu-reg-model {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.gpu-reg-count {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.gpu-reg-cap {
+  color: var(--text-light);
+}
+
+/* Metrics Area */
+.gpu-card-metrics {
+  padding: 12px 16px;
+  min-height: 60px;
+}
+
+.gpu-card-placeholder {
+  text-align: center;
+  padding: 16px 0;
+  color: var(--text-light);
+  font-size: 13px;
+}
+
+.gpu-card-loading {
+  text-align: center;
+  padding: 16px 0;
+  color: var(--primary);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.gpu-card-error {
+  text-align: center;
+  padding: 12px;
+  color: var(--danger);
+  font-size: 13px;
+  background: #fef2f2;
+  border-radius: var(--radius-sm);
+}
+
+/* Spinner */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* GPU Metric Block */
+.gpu-metric-block {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.gpu-metric-block:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.gpu-metric-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+/* Gauge Row */
+.gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.gauge-label {
+  font-size: 11px;
+  color: var(--text-light);
+  width: 70px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.gauge-track {
+  flex: 1;
+  height: 10px;
+  background: #f1f5f9;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.gauge-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.4s ease;
+}
+
+.gauge-green { background: var(--success); }
+.gauge-yellow { background: var(--warning); }
+.gauge-red { background: var(--danger); }
+.gauge-blue { background: var(--info); }
+
+.gauge-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  width: 90px;
+  flex-shrink: 0;
+  text-align: left;
+}
+
+/* Card Footer */
+.gpu-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 16px;
+  background: #f8fafc;
+  min-height: 28px;
+  font-size: 11px;
+}
+
+.gpu-time {
+  color: var(--text-light);
+}
+
+.gpu-tool-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.tool-dcgmi {
+  background: #dbeafe;
+  color: var(--primary);
+}
+
+.tool-nvidia-smi {
+  background: #dcfce7;
+  color: var(--success);
+}
+
+.tool-error {
+  background: #fef2f2;
+  color: var(--danger);
+}

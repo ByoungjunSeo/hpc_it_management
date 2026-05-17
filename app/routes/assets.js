@@ -14,6 +14,10 @@ const AuditLog = require('../models/auditLog');
 const EquipmentUsageLog = require('../models/equipmentUsageLog');
 const ModuleInventory = require('../models/moduleInventory');
 const ModuleInventoryLog = require('../models/moduleInventoryLog');
+const ModuleTransferLog = require('../models/moduleTransferLog');
+const { getDb } = require('../config/database');
+const Photo = require('../models/photo');
+const moduleInventoryRouter = require('./moduleInventory');
 // Asset list
 router.get('/', (req, res) => {
   const filters = {
@@ -231,6 +235,16 @@ router.get('/api/available-ips', (req, res) => {
   }
 });
 
+// API: get racks by room for restore modal
+router.get('/api/racks-by-room/:roomId', (req, res) => {
+  try {
+    const racks = Rack.findByRoom(req.params.roomId);
+    res.json(racks.map(r => ({ id: r.id, name: r.name })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Asset detail JSON API
 router.get('/:id/json', (req, res) => {
   const asset = Asset.findById(req.params.id);
@@ -257,6 +271,7 @@ router.get('/:id', (req, res) => {
   const equipmentLogs = asset.management_number ? EquipmentUsageLog.getHistory(asset.management_number) : [];
   // Get module change logs for this asset
   const moduleChangeLogs = ModuleInventoryLog.findByAsset(asset.id);
+  const moduleTransferLogs = ModuleTransferLog.findByAsset(asset.id);
 
   // Auto-sync: if no computing_modules but latest usage log has hardware_json, create modules
   if (modules.length === 0 && equipmentLogs.length > 0) {
@@ -306,6 +321,9 @@ router.get('/:id', (req, res) => {
     }
   });
 
+  // Get rooms for restore modal
+  const rooms = ServerRoom.findAll();
+
   // Get linked rack for immersion_tank
   const linkedRack = (asset.asset_type === 'immersion_tank') ? Rack.findByLinkedAsset(asset.id) : null;
   let linkedRackAssetCount = 0;
@@ -330,6 +348,8 @@ router.get('/:id', (req, res) => {
     ).all(asset.id);
   }
 
+  const assetPhotos = Photo.findByAssetWithUsageLogs(asset.id, asset.management_number);
+
   res.render('assets/detail', {
     title: asset.model_name || '자산 상세',
     currentPath: '/assets',
@@ -341,12 +361,374 @@ router.get('/:id', (req, res) => {
     assetCredentials,
     equipmentLogs,
     moduleChangeLogs,
+    moduleTransferLogs,
     linkedRack,
     linkedRackAssetCount,
     parentAsset,
     childInfraAssets,
+    rooms,
+    assetPhotos,
     appConfig
   });
+});
+
+// Fault/Repair batch processing
+router.post('/:id/fault-repair', requireMaintenance, (req, res) => {
+  try {
+    const asset = Asset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: '자산을 찾을 수 없습니다.' });
+
+    const { reason, notes, target_status, modules } = req.body;
+    if (!modules || !Array.isArray(modules)) {
+      return res.status(400).json({ error: '모듈 정보가 필요합니다.' });
+    }
+
+    const db = getDb();
+    const assetLabel = asset.management_number || asset.model_name || String(asset.id);
+    const userId = req.user ? req.user.id : null;
+    const username = req.user ? (req.user.display_name || req.user.username) : null;
+    const transferLogs = [];
+    const affectedAssetIds = new Set();
+    affectedAssetIds.add(asset.id);
+
+    const tx = db.transaction(() => {
+      for (const m of modules) {
+        if (!m.id || m.action === 'keep') continue;
+
+        const mod = ComputingModule.findById(m.id);
+        if (!mod || mod.asset_id !== asset.id) continue;
+
+        const itemCode = mod.specification || null;
+
+        if (m.action === 'storage') {
+          // Return to storage: increase storage_quantity (company + vendor)
+          if (itemCode) {
+            const inv = ModuleInventory.findByCode(itemCode);
+            if (inv) {
+              const qty = parseInt(mod.count) || 1;
+              db.prepare(`
+                UPDATE module_inventory
+                SET storage_quantity = storage_quantity + ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE item_code = ?
+              `).run(qty, itemCode);
+
+              ModuleInventoryLog.create({
+                item_code: itemCode,
+                event_type: 'removed',
+                quantity_change: qty,
+                asset_id: asset.id,
+                asset_label: assetLabel,
+                user_id: userId,
+                username: username,
+                notes: (reason || '장애/수리') + ' → 장비실 보관'
+              });
+            }
+          }
+          ComputingModule.delete(m.id);
+          transferLogs.push({
+            module_type: mod.module_type,
+            model: mod.model,
+            capacity: mod.capacity,
+            count: mod.count,
+            owner: mod.owner,
+            owner_vendor_id: mod.owner_vendor_id,
+            from_asset_id: asset.id,
+            from_asset_label: assetLabel,
+            to_asset_id: null,
+            to_asset_label: '장비실',
+            reason: reason || '장애/수리',
+            user_id: userId,
+            username: username,
+            notes: notes || null
+          });
+
+        } else if (m.action === 'transfer' && m.to_asset_id) {
+          // Transfer to another asset
+          const toAsset = Asset.findById(m.to_asset_id);
+          if (!toAsset) continue;
+          const toLabel = toAsset.management_number || toAsset.model_name || String(m.to_asset_id);
+
+          ComputingModule.update(m.id, {
+            asset_id: parseInt(m.to_asset_id),
+            module_type: mod.module_type,
+            model: mod.model,
+            manufacturer: mod.manufacturer,
+            capacity: mod.capacity,
+            count: mod.count,
+            specification: mod.specification,
+            slot_info: mod.slot_info,
+            notes: mod.notes,
+            owner: mod.owner,
+            owner_vendor_id: mod.owner_vendor_id,
+            is_onboard: mod.is_onboard || 0
+          });
+          affectedAssetIds.add(parseInt(m.to_asset_id));
+
+          transferLogs.push({
+            module_type: mod.module_type,
+            model: mod.model,
+            capacity: mod.capacity,
+            count: mod.count,
+            owner: mod.owner,
+            owner_vendor_id: mod.owner_vendor_id,
+            from_asset_id: asset.id,
+            from_asset_label: assetLabel,
+            to_asset_id: parseInt(m.to_asset_id),
+            to_asset_label: toLabel,
+            reason: reason || '장애/수리',
+            user_id: userId,
+            username: username,
+            notes: notes || null
+          });
+
+          if (itemCode && (!mod.owner || mod.owner === 'company')) {
+            ModuleInventoryLog.create({
+              item_code: itemCode,
+              event_type: 'removed',
+              quantity_change: parseInt(mod.count) || 1,
+              asset_id: asset.id,
+              asset_label: assetLabel,
+              user_id: userId,
+              username: username,
+              notes: '장애이동: ' + assetLabel + ' → ' + toLabel
+            });
+            ModuleInventoryLog.create({
+              item_code: itemCode,
+              event_type: 'installed',
+              quantity_change: -(parseInt(mod.count) || 1),
+              asset_id: parseInt(m.to_asset_id),
+              asset_label: toLabel,
+              user_id: userId,
+              username: username,
+              notes: '장애이동: ' + assetLabel + ' → ' + toLabel
+            });
+          }
+
+        } else if (m.action === 'vendor_send') {
+          // Send to vendor: delete module
+          ComputingModule.delete(m.id);
+          transferLogs.push({
+            module_type: mod.module_type,
+            model: mod.model,
+            capacity: mod.capacity,
+            count: mod.count,
+            owner: mod.owner,
+            owner_vendor_id: mod.owner_vendor_id,
+            from_asset_id: asset.id,
+            from_asset_label: assetLabel,
+            to_asset_id: null,
+            to_asset_label: '업체반출',
+            reason: reason || '장애/수리',
+            user_id: userId,
+            username: username,
+            notes: notes || null
+          });
+        }
+      }
+
+      // Bulk create transfer logs
+      if (transferLogs.length > 0) {
+        ModuleTransferLog.bulkCreate(transferLogs);
+      }
+
+      // Update asset status
+      if (target_status) {
+        db.prepare('UPDATE assets SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(target_status, asset.id);
+      }
+
+      // Recalculate inventory and sync usage logs
+      ModuleInventory.recalculateInUse();
+      for (const aid of affectedAssetIds) {
+        moduleInventoryRouter.syncModulesToUsageLog(aid);
+      }
+    });
+
+    tx();
+
+    AuditLog.log(req, {
+      action: 'fault_repair',
+      targetType: 'asset',
+      targetId: asset.id,
+      targetLabel: assetLabel,
+      details: { reason, notes, target_status, module_count: modules.length }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Fault repair error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Individual module action (storage / vendor_return)
+router.post('/:id/module-action', requireMaintenance, (req, res) => {
+  try {
+    const asset = Asset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: '자산을 찾을 수 없습니다.' });
+
+    const { module_id, action, reason } = req.body;
+    if (!module_id || !['storage', 'vendor_return'].includes(action)) {
+      return res.status(400).json({ error: '잘못된 요청입니다.' });
+    }
+
+    const mod = ComputingModule.findById(module_id);
+    if (!mod || mod.asset_id !== asset.id) {
+      return res.status(404).json({ error: '모듈을 찾을 수 없습니다.' });
+    }
+
+    const db = getDb();
+    const assetLabel = asset.management_number || asset.model_name || String(asset.id);
+    const userId = req.user ? req.user.id : null;
+    const username = req.user ? (req.user.display_name || req.user.username) : null;
+    const itemCode = mod.specification || null;
+    const qty = parseInt(mod.count) || 1;
+
+    const tx = db.transaction(() => {
+      if (action === 'storage') {
+        // Return to storage: increase storage_quantity (company + vendor)
+        if (itemCode) {
+          const inv = ModuleInventory.findByCode(itemCode);
+          if (inv) {
+            db.prepare(`
+              UPDATE module_inventory
+              SET storage_quantity = storage_quantity + ?,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE item_code = ?
+            `).run(qty, itemCode);
+
+            ModuleInventoryLog.create({
+              item_code: itemCode,
+              event_type: 'removed',
+              quantity_change: qty,
+              asset_id: asset.id,
+              asset_label: assetLabel,
+              user_id: userId,
+              username: username,
+              notes: (reason || '개별처리') + ' → 장비실 보관'
+            });
+          }
+        }
+
+        ComputingModule.delete(module_id);
+        ModuleTransferLog.bulkCreate([{
+          module_type: mod.module_type,
+          model: mod.model,
+          capacity: mod.capacity,
+          count: mod.count,
+          owner: mod.owner,
+          owner_vendor_id: mod.owner_vendor_id,
+          from_asset_id: asset.id,
+          from_asset_label: assetLabel,
+          to_asset_id: null,
+          to_asset_label: '장비실',
+          reason: reason || '장비실 이동',
+          user_id: userId,
+          username: username,
+          notes: null
+        }]);
+
+      } else if (action === 'vendor_return') {
+        // Vendor return: delete module, log outgoing
+        if (itemCode) {
+          ModuleInventoryLog.create({
+            item_code: itemCode,
+            event_type: 'outgoing',
+            quantity_change: qty,
+            asset_id: asset.id,
+            asset_label: assetLabel,
+            user_id: userId,
+            username: username,
+            notes: (reason || '업체 반납') + ' → 업체반출'
+          });
+        }
+
+        ComputingModule.delete(module_id);
+        ModuleTransferLog.bulkCreate([{
+          module_type: mod.module_type,
+          model: mod.model,
+          capacity: mod.capacity,
+          count: mod.count,
+          owner: mod.owner,
+          owner_vendor_id: mod.owner_vendor_id,
+          from_asset_id: asset.id,
+          from_asset_label: assetLabel,
+          to_asset_id: null,
+          to_asset_label: '업체반출',
+          reason: reason || '업체 반납',
+          user_id: userId,
+          username: username,
+          notes: null
+        }]);
+      }
+
+      // Recalculate inventory and sync usage logs
+      ModuleInventory.recalculateInUse();
+      moduleInventoryRouter.syncModulesToUsageLog(asset.id);
+    });
+
+    tx();
+
+    AuditLog.log(req, {
+      action: 'module_action',
+      targetType: 'asset',
+      targetId: asset.id,
+      targetLabel: assetLabel,
+      details: { module_id, action, module_type: mod.module_type, model: mod.model }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Module action error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Restore from maintenance (수리완료/복귀)
+router.post('/:id/restore', requireMaintenance, (req, res) => {
+  try {
+    const asset = Asset.findById(req.params.id);
+    if (!asset) {
+      req.flash('error', '자산을 찾을 수 없습니다.');
+      return res.redirect('/assets');
+    }
+    const db = getDb();
+    const { room_id, rack_id, rack_unit_start } = req.body;
+
+    let sql = "UPDATE assets SET status = 'active'";
+    const params = [];
+    if (room_id) {
+      sql += ', room_id = ?';
+      params.push(room_id);
+    }
+    if (rack_id) {
+      sql += ', rack_id = ?';
+      params.push(rack_id);
+    }
+    if (rack_unit_start) {
+      sql += ', rack_unit_start = ?';
+      params.push(parseInt(rack_unit_start));
+    }
+    sql += ', updated_at = CURRENT_TIMESTAMP WHERE id = ?';
+    params.push(asset.id);
+    db.prepare(sql).run(...params);
+
+    const assetLabel = asset.management_number || asset.model_name || String(asset.id);
+    AuditLog.log(req, {
+      action: 'restore',
+      targetType: 'asset',
+      targetId: asset.id,
+      targetLabel: assetLabel,
+      details: { previous_status: asset.status, room_id, rack_id, rack_unit_start }
+    });
+
+    req.flash('success', assetLabel + ' 수리완료 — 운영중으로 복귀했습니다.');
+    res.redirect('/assets/' + asset.id);
+  } catch (err) {
+    req.flash('error', '복귀 처리 중 오류: ' + err.message);
+    res.redirect('/assets/' + req.params.id);
+  }
 });
 
 // Edit asset form
@@ -361,8 +743,10 @@ router.get('/:id/edit', (req, res) => {
   const vendors = Vendor.findAll();
   const assetIps = AssetIp.findByAsset(asset.id);
   const assetCredentials = AssetCredential.findByAsset(asset.id);
+  const modules = ComputingModule.findByAsset(asset.id);
   const linkedRack = (asset.asset_type === 'immersion_tank') ? Rack.findByLinkedAsset(asset.id) : null;
   const allAssets = Asset.findAll();
+  const assetPhotos = Photo.findByAssetWithUsageLogs(asset.id, asset.management_number);
   res.render('assets/form', {
     title: '자산 수정',
     currentPath: '/assets',
@@ -371,12 +755,14 @@ router.get('/:id/edit', (req, res) => {
     asset,
     assetIps,
     assetCredentials,
+    modules,
     rooms,
     racks,
     vendors,
     assets: allAssets,
     prefill: null,
     linkedRack,
+    assetPhotos,
     appConfig,
     returnTo: req.query.returnTo || req.get('Referer') || ''
   });
@@ -471,8 +857,7 @@ router.post('/:id', requireMaintenance, (req, res) => {
       }
     }
 
-    // Re-create IPs: delete then bulk create
-    AssetIp.deleteByAsset(req.params.id);
+    // Re-create IPs: delete then bulk create (only if form contains IP fields)
     const ipAddresses = req.body['ip_addresses[]'] || req.body.ip_addresses || [];
     const ipRealTypes = req.body['ip_real_types[]'] || req.body.ip_real_types || [];
     const ipCustomDescs = req.body['ip_custom_descs[]'] || req.body.ip_custom_descs || [];
@@ -485,16 +870,30 @@ router.post('/:id', requireMaintenance, (req, res) => {
       interface_type: (Array.isArray(ipInterfaceTypes) ? ipInterfaceTypes : [ipInterfaceTypes])[i] || '',
       speed: (Array.isArray(ipSpeedValues) ? ipSpeedValues : [ipSpeedValues])[i] || ''
     })).filter(ip => ip.ip_address && ip.ip_address.trim());
-    if (ips.length > 0) {
-      AssetIp.bulkCreate(req.params.id, ips);
+    // Only delete+recreate IPs if the form actually submitted IP fields
+    // This prevents data loss when a form without IP section is submitted
+    const hasIpFieldsInForm = req.body.hasOwnProperty('ip_addresses[]') || req.body.hasOwnProperty('ip_addresses') || req.body.hasOwnProperty('_ip_section_present');
+    if (hasIpFieldsInForm) {
+      AssetIp.deleteByAsset(req.params.id);
+      if (ips.length > 0) {
+        AssetIp.bulkCreate(req.params.id, ips);
+      }
+      // Sync IPs to ip_addresses table
+      const ipAddrsForSync = ips.map(ip => ip.ip_address);
+      IpAddress.syncAssetIps(req.params.id, ipAddrsForSync);
+    } else {
+      // Form didn't include IP section — preserve existing IPs
+      const existingIps = AssetIp.findByAsset(req.params.id);
+      ips.push(...existingIps.map(eip => ({
+        ip_address: eip.ip_address,
+        ip_type: eip.ip_type || 'management',
+        description: eip.description || '',
+        interface_type: eip.interface_type || '',
+        speed: eip.speed || ''
+      })));
     }
 
-    // Sync IPs to ip_addresses table
-    const ipAddrsForSync = ips.map(ip => ip.ip_address);
-    IpAddress.syncAssetIps(req.params.id, ipAddrsForSync);
-
-    // Re-create credentials: delete then bulk create
-    AssetCredential.deleteByAsset(req.params.id);
+    // Re-create credentials: delete then bulk create (only if form contains credential fields)
     const credUsernames = req.body['cred_usernames[]'] || req.body.cred_usernames || [];
     const credPasswords = req.body['cred_passwords[]'] || req.body.cred_passwords || [];
     const credTypes = req.body['cred_types[]'] || req.body.cred_types || [];
@@ -505,8 +904,12 @@ router.post('/:id', requireMaintenance, (req, res) => {
       credential_type: (Array.isArray(credTypes) ? credTypes : [credTypes])[i] || 'root',
       description: (Array.isArray(credDescs) ? credDescs : [credDescs])[i] || ''
     })).filter(c => c.username && c.username.trim());
-    if (creds.length > 0) {
-      AssetCredential.bulkCreate(req.params.id, creds);
+    const hasCredFieldsInForm = req.body.hasOwnProperty('cred_usernames[]') || req.body.hasOwnProperty('cred_usernames') || req.body.hasOwnProperty('_cred_section_present');
+    if (hasCredFieldsInForm) {
+      AssetCredential.deleteByAsset(req.params.id);
+      if (creds.length > 0) {
+        AssetCredential.bulkCreate(req.params.id, creds);
+      }
     }
 
     const afterAsset = Asset.findById(req.params.id);
@@ -575,7 +978,7 @@ router.post('/:id', requireMaintenance, (req, res) => {
         });
         const ips_json = ipsJsonItems.length > 0 ? JSON.stringify(ipsJsonItems) : null;
 
-        // 6) 새 "사용중" 레코드 생성
+        // 6) �� "사용중" 레코드 생성
         EquipmentUsageLog.create({
           usage_date: today,
           asset_number: afterAsset.asset_number || null,
@@ -594,6 +997,9 @@ router.post('/:id', requireMaintenance, (req, res) => {
           unit: unit,
           status: '사용중'
         });
+
+        // 7) 컴���팅 모듈 → 입출고 하드웨어 컬럼 동기화
+        moduleInventoryRouter.syncModulesToUsageLog(req.params.id);
       } catch (syncErr) {
         console.error('입출고 동기화 오류:', syncErr);
       }
@@ -602,7 +1008,7 @@ router.post('/:id', requireMaintenance, (req, res) => {
 
     AuditLog.log(req, { action: 'update', targetType: 'asset', targetId: req.params.id, targetLabel: req.body.asset_number || req.body.model_name, details: { before: beforeAsset, after: afterAsset } });
     req.flash('success', '자산이 수정되었습니다.');
-    const returnTo = req.body.returnTo;
+    const returnTo = Array.isArray(req.body.returnTo) ? req.body.returnTo[0] : req.body.returnTo;
     res.redirect(returnTo || '/assets/' + req.params.id);
   } catch (err) {
     console.error('자산 수정 오류:', err.message);
@@ -631,6 +1037,7 @@ router.post('/:id/delete', requireMaintenance, (req, res) => {
         Rack.delete(linkedRack.id);
       }
     }
+    Photo.deleteByEntity('asset', parseInt(req.params.id));
     Asset.delete(req.params.id);
     AuditLog.log(req, { action: 'delete', targetType: 'asset', targetId: req.params.id, targetLabel: asset ? (asset.asset_number || asset.model_name) : req.params.id });
     req.flash('success', '자산이 삭제되었습니다.');
