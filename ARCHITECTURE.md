@@ -378,3 +378,53 @@ equipment_usage_logs (management_number로 assets와 연결, FK 없음)
 3. **운영 DB(`app/data/it_assets.db`)는 읽기 전용으로만 접근**
 4. **각 단계 끝날 때마다 git 커밋**
 5. **한 단계가 완료되고 검증되기 전까지 다음 단계로 넘어가지 않음**
+
+---
+
+## 인프라 변경 이력
+
+### 2026-05-18: Docker 데이터 디렉토리 이동
+
+| 항목 | 내용 |
+|------|------|
+| **작업일** | 2026-05-18 |
+| **작업 내용** | Docker 데이터 디렉토리를 `/var/lib/docker` → `/mlcommons_cm/docker-data`로 이동 |
+| **사유** | 루트 파티션 공간 부족 (98% 사용), 운영 서버에서 v2/ Docker 기반 작업 준비 |
+| **결과** | 루트 파티션 14GB → 452GB 여유 회복 (사용률 98% → 10%) |
+| **백업 위치** | `/etc/docker/daemon.json.bak` (이동 전 원본 설정) |
+| **운영 영향** | 없음 (Node.js PID 1990801 무중단 가동 유지) |
+
+**변경된 파일**: `/etc/docker/daemon.json`
+
+```json
+{
+    "data-root": "/mlcommons_cm/docker-data",
+    "runtimes": {
+        "nvidia": {
+            "path": "nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+```
+
+**롤백 절차** (원래 위치로 복구 필요 시):
+
+```bash
+# 1. Docker 중지
+sudo systemctl stop docker docker.socket
+
+# 2. 데이터를 원래 위치로 복사
+sudo mkdir -p /var/lib/docker
+sudo rsync -aHAXxS /mlcommons_cm/docker-data/ /var/lib/docker/
+
+# 3. daemon.json 원복
+sudo cp /etc/docker/daemon.json.bak /etc/docker/daemon.json
+
+# 4. Docker 재시작
+sudo systemctl start docker
+
+# 5. 검증
+docker info | grep "Docker Root Dir"
+# → /var/lib/docker
+```
