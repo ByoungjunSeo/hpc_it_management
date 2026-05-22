@@ -68,6 +68,7 @@
                 <tr>
                     <th style="width:40px;"><input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)"></th>
                     <th>관리번호</th>
+                    <th>자산번호</th>
                     <th>모델</th>
                     <th>위치</th>
                     <th>IP</th>
@@ -91,6 +92,7 @@
                         <span class="badge badge-info" style="font-size:10px; margin-left:4px;" title="하위 노드 <%= asset.children.length %>개">+<%= asset.children.length %></span>
                         <% } %>
                     </td>
+                    <td style="font-size:12px;"><%= asset.asset_number || '-' %></td>
                     <td><%= asset.model_name || '-' %><% if (asset.manufacturer) { %> <span class="text-muted" style="font-size:11px;">(<%= asset.manufacturer %>)</span><% } %></td>
                     <td style="font-size:12px;">
                         <% if (asset.room_name) { %><%= asset.room_name %><% } %>
@@ -147,7 +149,7 @@
                     </td>
                 </tr>
                 <tr id="asset-detail-<%= asset.id %>" data-category="<%= _cat %>" style="display:none;">
-                    <td colspan="9" style="padding:0;">
+                    <td colspan="10" style="padding:0;">
                         <div id="asset-detail-content-<%= asset.id %>" style="padding:16px; background:var(--bg-secondary, #f8f9fa);"></div>
                     </td>
                 </tr>
@@ -165,6 +167,7 @@
                         <span class="badge badge-secondary" style="font-size:9px; margin-left:4px;">슬롯 <%= child.blade_slot %></span>
                         <% } %>
                     </td>
+                    <td style="font-size:12px;"><%= child.asset_number || '-' %></td>
                     <td><%= child.model_name || '-' %></td>
                     <td style="font-size:12px;"><span class="text-muted">&#x2514; <%= asset.management_number || '' %></span></td>
                     <td style="font-size:12px;">
@@ -208,7 +211,7 @@
                     </td>
                 </tr>
                 <tr id="asset-detail-<%= child.id %>" data-category="<%= _childCat %>" style="display:none;">
-                    <td colspan="9" style="padding:0;">
+                    <td colspan="10" style="padding:0;">
                         <div id="asset-detail-content-<%= child.id %>" style="padding:16px; background:var(--bg-secondary, #f8f9fa);"></div>
                     </td>
                 </tr>
@@ -217,7 +220,7 @@
                 <% }); %>
                 <% } else { %>
                 <tr>
-                    <td colspan="9" style="text-align:center; padding:40px; color:var(--text-secondary);">
+                    <td colspan="10" style="text-align:center; padding:40px; color:var(--text-secondary);">
                         서버실에 등록된 자산이 없습니다.
                     </td>
                 </tr>

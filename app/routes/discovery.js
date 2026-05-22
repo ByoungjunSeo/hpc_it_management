@@ -63,7 +63,7 @@ function modelsMatch(a, b) {
 
 function compareModules(registered, discovered) {
   const result = { matched: [], mismatched: [], missing: [], extra: [] };
-  const types = ['cpu', 'memory', 'disk', 'network', 'raid', 'gpu', 'psu'];
+  const types = ['cpu', 'memory', 'disk', 'network', 'raid', 'gpu'];
 
   for (const type of types) {
     const regList = registered.filter(m => m.module_type === type).map(m => ({ ...m }));
@@ -292,26 +292,16 @@ router.post('/scan-asset', requireMaintenance, async (req, res) => {
     const bmcIp = assetIps.find(i => i.ip_type === 'bmc');
     const bmcCred = assetCreds.find(c => c.credential_type === 'bmc');
 
-    // SSH scan + IPMI PSU detection in parallel
-    const [scanResult, psuModules] = await Promise.all([
-      connectAndDiscover(conn.ip, {
-        user: conn.user || undefined,
-        password: conn.password || undefined,
-        port: conn.port || undefined
-      }),
-      (bmcIp && bmcCred)
-        ? detectPsuViaIpmi(bmcIp.ip_address, bmcCred.username, bmcCred.password)
-        : Promise.resolve([])
-    ]);
+    // SSH scan (PSU는 IPMI 감지 정확도 문제로 자산 매칭에서 제외)
+    const scanResult = await connectAndDiscover(conn.ip, {
+      user: conn.user || undefined,
+      password: conn.password || undefined,
+      port: conn.port || undefined
+    });
 
-    // Add IPMI PSU modules (only from BMC — capacity verified)
-    if (psuModules.length > 0) {
-      if (scanResult.modules) {
-        scanResult.modules = scanResult.modules.filter(m => m.module_type !== 'psu');
-        scanResult.modules.push(...psuModules);
-      } else {
-        scanResult.modules = psuModules;
-      }
+    // Remove PSU from scan results — PSU는 수동 관리
+    if (scanResult.modules) {
+      scanResult.modules = scanResult.modules.filter(m => m.module_type !== 'psu');
     }
 
     // Compare with registered modules — enrich with item_code info
@@ -383,7 +373,19 @@ router.post('/apply-asset', requireMaintenance, (req, res) => {
       const isFallbackMemory = discMemory.length > 0 && discMemory.every(m =>
         (m.model && m.model.includes('상세정보 없음')) || (m.specification === '/proc/meminfo')
       );
-      let modulesToApply = modules;
+      // PSU는 스캔에서 제외 → 기존 등록된 PSU 유지
+      const oldPsu = oldModules.filter(m => m.module_type === 'psu');
+      let modulesToApply = modules.filter(m => m.module_type !== 'psu');
+      if (oldPsu.length > 0) {
+        modulesToApply = modulesToApply.concat(
+          oldPsu.map(m => ({
+            module_type: m.module_type, model: m.model, manufacturer: m.manufacturer,
+            capacity: m.capacity, count: m.count || 1, specification: m.specification,
+            slot_info: m.slot_info, notes: m.notes, owner: m.owner || 'company',
+            owner_vendor_id: m.owner_vendor_id || null, is_onboard: m.is_onboard || 0
+          }))
+        );
+      }
       if (isFallbackMemory) {
         const oldMemory = oldModules.filter(m => m.module_type === 'memory');
         if (oldMemory.length > 0) {
@@ -487,11 +489,12 @@ router.post('/apply-asset', requireMaintenance, (req, res) => {
           // Step 5: Update specification
           db.prepare('UPDATE computing_modules SET specification = ? WHERE id = ?')
             .run(itemCode, mod.id);
+          mod.specification = itemCode;
           allItemCodes.add(itemCode);
 
         } else {
           // ── Company module: existing matching logic ──
-          const invItems = ModuleInventory.findAll(mod.module_type);
+          const invItems = ModuleInventory.findAll(mod.module_type, 'company');
           const modModel = (mod.model || '').toLowerCase().trim();
           const match = modModel ? invItems.find(mi => {
             const miModel = (mi.model || '').toLowerCase().trim();
@@ -505,6 +508,8 @@ router.post('/apply-asset', requireMaintenance, (req, res) => {
           if (match) {
             db.prepare('UPDATE computing_modules SET specification = ?, capacity = COALESCE(?, capacity) WHERE id = ?')
               .run(match.item_code, match.capacity || null, mod.id);
+            mod.specification = match.item_code;
+            if (match.capacity && !mod.capacity) mod.capacity = match.capacity;
           } else if (mod.model) {
             unmatchedModules.push({
               id: mod.id,
@@ -524,6 +529,100 @@ router.post('/apply-asset', requireMaintenance, (req, res) => {
           }
         }
       }
+
+      // ── spec 재매칭 케이스 식별 (같은 model인데 spec이 바뀐 모듈) ──
+      const specRelinks = [];
+      for (const newMod of newModules) {
+        if (!newMod.specification || (newMod.owner && newMod.owner !== 'company')) continue;
+        const newModel = (newMod.model || '').toLowerCase().trim();
+        const oldMatch = oldModules.find(om => {
+          if (om.specification === newMod.specification) return false;
+          if (om.owner && om.owner !== 'company') return false;
+          const oldModel = (om.model || '').toLowerCase().trim();
+          return oldModel && newModel && (oldModel === newModel);
+        });
+        if (oldMatch && oldMatch.specification && oldMatch.specification !== newMod.specification) {
+          specRelinks.push({
+            old_spec: oldMatch.specification,
+            new_spec: newMod.specification,
+            module_type: newMod.module_type,
+            model: newMod.model,
+            count: newMod.count || 1
+          });
+        }
+      }
+
+      // ── storage_quantity 조정 (recalculateInUse 전에 실행해야 total이 정확함) ──
+      // 자사(company) 모듈만 대상. specification(item_code) 기반 diff.
+      const oldSpecMap = {};
+      for (const m of oldModules) {
+        if (m.specification && (!m.owner || m.owner === 'company')) {
+          oldSpecMap[m.specification] = (oldSpecMap[m.specification] || 0) + (m.count || 1);
+        }
+      }
+      const newSpecMap = {};
+      for (const m of newModules) {
+        if (m.specification && (!m.owner || m.owner === 'company')) {
+          newSpecMap[m.specification] = (newSpecMap[m.specification] || 0) + (m.count || 1);
+        }
+      }
+      const allSpecs = new Set([...Object.keys(oldSpecMap), ...Object.keys(newSpecMap)]);
+      for (const spec of allSpecs) {
+        const oldQty = oldSpecMap[spec] || 0;
+        const newQty = newSpecMap[spec] || 0;
+        const delta = newQty - oldQty;
+        if (delta > 0) {
+          // 신규 설치 → storage 차감
+          const inv = ModuleInventory.findByCode(spec);
+          if (inv) {
+            const deduct = Math.min(delta, inv.storage_quantity);
+            if (deduct > 0) {
+              db.prepare('UPDATE module_inventory SET storage_quantity = storage_quantity - ?, updated_at = CURRENT_TIMESTAMP WHERE item_code = ?')
+                .run(deduct, spec);
+            }
+            if (deduct < delta) {
+              console.warn('[apply_scan] storage 부족: ' + spec + ' 필요:' + delta + ' 가용:' + inv.storage_quantity + ' 차감:' + deduct);
+            }
+          }
+        } else if (delta < 0) {
+          // 제거 → storage 복귀
+          db.prepare('UPDATE module_inventory SET storage_quantity = storage_quantity + ?, updated_at = CURRENT_TIMESTAMP WHERE item_code = ?')
+            .run(Math.abs(delta), spec);
+        }
+      }
+
+      // ── spec 재매칭 이력 기록 ──
+      for (const relink of specRelinks) {
+        const oldInv = ModuleInventory.findByCode(relink.old_spec);
+        const newInv = ModuleInventory.findByCode(relink.new_spec);
+        if (oldInv) {
+          ModuleInventoryLog.create({
+            item_code: relink.old_spec,
+            event_type: 'spec_relinked',
+            quantity_change: relink.count,
+            after_total: oldInv.total_quantity,
+            asset_id: asset_id,
+            asset_label: assetLabel,
+            user_id: userId,
+            username: username,
+            notes: 'apply_scan: spec 재연결 (해제) → ' + relink.new_spec
+          });
+        }
+        if (newInv) {
+          ModuleInventoryLog.create({
+            item_code: relink.new_spec,
+            event_type: 'spec_relinked',
+            quantity_change: -relink.count,
+            after_total: newInv.total_quantity,
+            asset_id: asset_id,
+            asset_label: assetLabel,
+            user_id: userId,
+            username: username,
+            notes: 'apply_scan: spec 재연결 (연결) ← ' + relink.old_spec
+          });
+        }
+      }
+
       ModuleInventory.recalculateInUse();
 
       // Build transfer logs from diff
@@ -603,6 +702,8 @@ router.post('/apply-asset', requireMaintenance, (req, res) => {
         let matchOwnerFilter = null;
         if (tl.owner === 'vendor') {
           matchOwnerFilter = 'vendor';
+        } else {
+          matchOwnerFilter = 'company';
         }
         const allItems = ModuleInventory.findAll(tl.module_type, matchOwnerFilter);
         let match;
@@ -614,16 +715,28 @@ router.post('/apply-asset', requireMaintenance, (req, res) => {
             mi.model.toLowerCase().trim() === tl.model.toLowerCase().trim()
           );
         } else {
-          match = allItems.find(mi =>
-            mi.model && tl.model &&
-            mi.model.toLowerCase().trim() === tl.model.toLowerCase().trim()
-          );
+          const tlModel = (tl.model || '').toLowerCase().trim();
+          match = tlModel ? allItems.find(mi => {
+            const miModel = (mi.model || '').toLowerCase().trim();
+            return miModel === tlModel;
+          }) || allItems.find(mi => {
+            const miModel = (mi.model || '').toLowerCase().trim();
+            return miModel && (miModel.includes(tlModel) || tlModel.includes(miModel));
+          }) : null;
         }
         if (match) {
           const eventType = tl.from_asset_id && !tl.to_asset_id ? 'removed' : 'installed';
+          const isCompanyTl = (!tl.owner || tl.owner === 'company');
+          let qtyChange = 0;
+          if (isCompanyTl) {
+            qtyChange = eventType === 'installed' ? -(tl.count || 1) : (tl.count || 1);
+          }
+          const invAfter = ModuleInventory.findByCode(match.item_code);
           ModuleInventoryLog.create({
             item_code: match.item_code,
             event_type: eventType,
+            quantity_change: qtyChange,
+            after_total: invAfter ? invAfter.total_quantity : null,
             asset_id: tl.to_asset_id || tl.from_asset_id || null,
             asset_label: tl.to_asset_label || tl.from_asset_label || null,
             from_asset_id: tl.from_asset_id || null,
@@ -634,6 +747,8 @@ router.post('/apply-asset', requireMaintenance, (req, res) => {
             username: username,
             notes: 'apply_scan'
           });
+        } else {
+          console.warn('[apply_scan] inventory 매칭 실패: module_type=' + tl.module_type + ' model=' + tl.model + ' asset=' + (tl.to_asset_label || tl.from_asset_label || ''));
         }
       }
     }
@@ -763,6 +878,8 @@ router.post('/link-inventory', requireMaintenance, (req, res) => {
 
     const db = getDb();
     const linked = [];
+    const userId = req.user ? req.user.id : null;
+    const username = req.user ? (req.user.display_name || req.user.username) : null;
 
     for (const item of items) {
       const { item_code, computing_module_id } = item;
@@ -772,8 +889,50 @@ router.post('/link-inventory', requireMaintenance, (req, res) => {
       const existing = ModuleInventory.findByCode(item_code);
       if (!existing) continue;
 
+      // computing_module row 조회 (count, owner, asset_id)
+      const cm = db.prepare('SELECT * FROM computing_modules WHERE id = ?').get(computing_module_id);
+      if (!cm) continue;
+
       // Link computing_module.specification to item_code
       db.prepare('UPDATE computing_modules SET specification = ? WHERE id = ?').run(item_code, computing_module_id);
+
+      // 자사(company) 모듈만 storage 차감 + inventory_log 기록
+      if (!cm.owner || cm.owner === 'company') {
+        const count = cm.count || 1;
+        const inv = ModuleInventory.findByCode(item_code);
+        if (inv) {
+          const deduct = Math.min(count, inv.storage_quantity);
+          if (deduct > 0) {
+            db.prepare('UPDATE module_inventory SET storage_quantity = storage_quantity - ?, updated_at = CURRENT_TIMESTAMP WHERE item_code = ?')
+              .run(deduct, item_code);
+          }
+          if (deduct < count) {
+            console.warn('[link-inventory] storage 부족: ' + item_code + ' 필요:' + count + ' 가용:' + inv.storage_quantity + ' 차감:' + deduct);
+          }
+
+          let assetLabel = null;
+          if (cm.asset_id) {
+            const asset = db.prepare('SELECT management_number, asset_number FROM assets WHERE id = ?').get(cm.asset_id);
+            assetLabel = asset ? (asset.management_number || asset.asset_number) : null;
+          }
+
+          const invAfter = ModuleInventory.findByCode(item_code);
+          ModuleInventoryLog.create({
+            item_code: item_code,
+            event_type: 'installed',
+            quantity_change: -count,
+            after_total: invAfter ? invAfter.total_quantity : null,
+            asset_id: cm.asset_id,
+            asset_label: assetLabel,
+            to_asset_id: cm.asset_id,
+            to_asset_label: assetLabel,
+            user_id: userId,
+            username: username,
+            notes: 'link-inventory: 수동 매핑'
+          });
+        }
+      }
+
       linked.push(item_code);
     }
 
