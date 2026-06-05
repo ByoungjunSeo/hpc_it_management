@@ -19,6 +19,9 @@ node-v*.tar.xz
 # Backup folder
 backup/
 
+# Generated checklist instances (keep template only)
+INVENTORY_CHECKLIST_20*.html
+
 # OS files
 .DS_Store
 Thumbs.db

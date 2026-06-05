@@ -1004,6 +1004,110 @@ git reset --hard <B-2-commit>
 - **참고**: 별도 plan 파일 (`~/.claude/plans/golden-skipping-scroll.md`)에 상세 설계 기록
 - **우선순위**: 다중 노드 서버 추가 입고 시 진행
 
+### 4. 장비실 재고 점검 기능 (v2 신규)
+
+- **배경**:
+  - v1의 apply_scan 버그로 `storage_quantity` 차감 누락이 누적됨 (`discovery.js:555-592` 타이밍 버그)
+  - `in_use_quantity`는 `recalculateInUse()`로 정합성 유지 가능하나, `storage_quantity`는 실물 대조 외에 보정 방법 없음
+  - 실물과 시스템 데이터 정합성을 주기적으로 확인·보정하는 운영 프로세스 필요
+  - 운영 정책: **2주마다** 정기 점검 (관리자 직접 창고 점검)
+  - v1에서는 종이 체크리스트(`INVENTORY_CHECKLIST_TEMPLATE.html`)로 임시 운영
+  - v2에서 시스템 기능으로 정식화
+
+- **기능 요구사항**:
+
+#### 4-1. 점검 세션 관리
+- 점검 시작 버튼 → 새 점검 세션 생성
+- 점검자: 현재 로그인 사용자 자동 기록
+- 시작 시각 자동 기록
+- 진행 중인 점검은 임시 저장 (브라우저 닫아도 유지)
+- 점검 완료 시 종료 시각 자동 기록 + 상태 `completed`로 전환
+
+#### 4-2. 점검 화면 UI
+- `module_type`별 그룹으로 모듈 목록 표시
+- 각 모듈마다 표시:
+  - `item_code`, `item_name` (label)
+  - 시스템 보관 수량 (현재 `storage_quantity`, 읽기 전용)
+  - 시스템 사용 중 수량 (현재 `in_use_quantity`, 참고용)
+  - **실물 수량 입력칸** (숫자 입력)
+  - **차이 자동 계산** (실물 - 시스템보관, 실시간 표시)
+  - 점검 완료 체크박스
+  - 비고/사유 입력칸
+- 모바일 최적화: 큰 버튼, 숫자 키패드(`inputmode="numeric"`), 한 손 조작 가능
+- 검색/필터: `item_code`, `module_type` 기준
+
+#### 4-3. 보정 처리
+- 차이가 있는 모듈 → 보정 요청 자동 생성 (`inventory_corrections` 레코드)
+- 관리자 승인 후 `storage_quantity` UPDATE + `total_quantity` 재계산
+- 보정 사유 필수 입력
+- 보정 이력 `module_inventory_logs`에 자동 기록 (`event_type = 'audit_correction'`)
+
+#### 4-4. 데이터 모델 (PostgreSQL 신규 테이블 3개)
+
+```sql
+-- 점검 세션
+CREATE TABLE inventory_audits (
+    id SERIAL PRIMARY KEY,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ended_at TIMESTAMPTZ,
+    auditor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'in_progress'
+        CHECK(status IN ('in_progress','completed','cancelled')),
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 점검 항목별 결과
+CREATE TABLE inventory_audit_items (
+    id SERIAL PRIMARY KEY,
+    audit_id INTEGER NOT NULL REFERENCES inventory_audits(id) ON DELETE CASCADE,
+    item_code TEXT NOT NULL,
+    module_type TEXT NOT NULL,
+    system_storage_qty INTEGER NOT NULL,
+    system_in_use_qty INTEGER NOT NULL,
+    actual_storage_qty INTEGER,
+    diff INTEGER,
+    reason TEXT,
+    checked_at TIMESTAMPTZ,
+    ok_flag BOOLEAN DEFAULT FALSE,
+    UNIQUE(audit_id, item_code)
+);
+CREATE INDEX idx_audit_items_audit ON inventory_audit_items(audit_id);
+
+-- 보정 이력
+CREATE TABLE inventory_corrections (
+    id SERIAL PRIMARY KEY,
+    audit_id INTEGER REFERENCES inventory_audits(id) ON DELETE SET NULL,
+    item_code TEXT NOT NULL,
+    before_qty INTEGER NOT NULL,
+    after_qty INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','approved','rejected')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_corrections_item ON inventory_corrections(item_code);
+```
+
+#### 4-5. 알림
+- 마지막 점검 완료(`inventory_audits.ended_at`) 후 **14일 경과 시** 대시보드에 알림 배지 표시
+- 보정 승인 대기(`inventory_corrections.status = 'pending'`) 건이 있으면 관리자 대시보드에 알림
+
+#### 4-6. 이력 조회
+- 과거 점검 기록 목록 (`/inventory-audit`)
+- 점검별 상세 결과 (`/inventory-audit/:id`)
+- `item_code`별 점검 이력 추이 (수량 변화 차트)
+
+#### 4-7. 보고서
+- 점검 결과 PDF/Excel 출력 (기존 Excel 출력 패턴 재사용)
+- v1 종이 체크리스트(`INVENTORY_CHECKLIST_TEMPLATE.html`)와 호환되는 컬럼 구조
+
+- **라우트 구성**: 3~4개 (`/inventory-audit`, `/inventory-audit/:id`, `/api/inventory-audit`, `/api/inventory-correction`)
+- **화면 구성**: 4~5개 (점검 목록, 점검 실행, 점검 상세, 보정 승인, 이력 차트)
+- **우선순위**: 중간 (v2 안정화 후 추가, B-3 이후 후속 작업)
+
 ---
 
 ## B-4: 통합 테스트

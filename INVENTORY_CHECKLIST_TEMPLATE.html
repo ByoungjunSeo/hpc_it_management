@@ -1,0 +1,2162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>장비실 재고 점검표</title>
+<style>
+/* ── 기본 스타일 ── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', '맑은 고딕', sans-serif;
+    font-size: 11px;
+    line-height: 1.4;
+    color: #1a1a1a;
+    padding: 20px;
+}
+
+/* ── 헤더 ── */
+.header {
+    border: 2px solid #333;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+}
+.header h1 {
+    font-size: 20px;
+    text-align: center;
+    margin-bottom: 12px;
+    letter-spacing: 4px;
+}
+.header-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 24px;
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+.header-info .field {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+.header-info .field label {
+    font-weight: 700;
+    white-space: nowrap;
+}
+.header-info .field .blank {
+    display: inline-block;
+    border-bottom: 1px solid #333;
+    min-width: 80px;
+    height: 18px;
+}
+.header-info .field .blank.wide { min-width: 140px; }
+.header-info .field .blank.narrow { min-width: 50px; }
+.header-notice {
+    font-size: 10.5px;
+    color: #444;
+    border-top: 1px solid #ccc;
+    padding-top: 8px;
+    margin-top: 8px;
+}
+.gen-info {
+    font-size: 9px;
+    color: #999;
+    text-align: right;
+    margin-top: 4px;
+}
+
+/* ── 그룹 ── */
+.group {
+    margin-bottom: 14px;
+    break-inside: avoid;
+}
+.group-header {
+    font-size: 13px;
+    font-weight: 700;
+    background: #2c3e50;
+    color: #fff;
+    padding: 6px 12px;
+    margin-bottom: 0;
+    border-radius: 3px 3px 0 0;
+}
+.group-header .item-count {
+    font-weight: 400;
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+/* ── 테이블 ── */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.5px;
+    table-layout: fixed;
+}
+thead { display: table-header-group; }
+thead tr {
+    background: #ecf0f1;
+}
+th {
+    font-weight: 700;
+    text-align: center;
+    padding: 5px 4px;
+    border: 1px solid #999;
+    font-size: 10px;
+    vertical-align: middle;
+    word-break: keep-all;
+}
+td {
+    padding: 4px 6px;
+    border: 1px solid #999;
+    vertical-align: middle;
+}
+
+/* ── 컬럼 너비 ── */
+.col-code  { width: 14%; }
+.col-model { width: 22%; }
+.col-num   { width: 7%; text-align: center; }
+.col-input { width: 9%; }
+.col-diff  { width: 7%; }
+.col-note  { width: 26%; }
+.col-check { width: 6%; text-align: center; }
+
+td.code { font-family: 'Consolas', 'D2Coding', monospace; font-size: 10px; word-break: break-all; }
+td.model { font-size: 9.5px; word-break: break-all; }
+td.num  { text-align: center; font-weight: 600; }
+td.input-cell { min-height: 28px; height: 28px; background: #fafafa; }
+td.note-cell  { }
+td.check-cell { text-align: center; font-size: 14px; }
+
+tr:nth-child(even) { background: #f9f9f9; }
+tr:hover { background: #eef5fc; }
+
+/* ── 하단 ── */
+.footer-section {
+    margin-top: 20px;
+    border: 1px solid #999;
+    padding: 14px 16px;
+    break-inside: avoid;
+}
+.footer-section h3 {
+    font-size: 12px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #ccc;
+    padding-bottom: 4px;
+}
+.memo-area {
+    border: 1px solid #ccc;
+    min-height: 80px;
+    margin-bottom: 14px;
+    padding: 6px;
+}
+.sig-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    margin-top: 12px;
+    font-size: 12px;
+}
+.sig-row .sig-field {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+}
+.sig-row .sig-field .sig-line {
+    display: inline-block;
+    border-bottom: 1px solid #333;
+    min-width: 120px;
+    height: 18px;
+}
+
+/* ── 인쇄 최적화 ── */
+@media print {
+    @page {
+        size: A4 portrait;
+        margin: 15mm 10mm;
+        @bottom-center {
+            content: counter(page) " / " counter(pages);
+            font-size: 9px;
+            color: #666;
+        }
+    }
+    body { padding: 0; font-size: 10px; }
+    .header { border-width: 1.5px; }
+    .group { break-inside: avoid; }
+    table { font-size: 9.5px; }
+    thead { display: table-header-group; }
+    tr { break-inside: avoid; }
+    td.input-cell { background: #fff !important; }
+    tr:nth-child(even) { background: #f5f5f5 !important; }
+    tr:hover { background: none !important; }
+    .no-print { display: none !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>장비실 재고 점검표</h1>
+    <div class="header-info">
+        <div class="field">
+            <label>점검 날짜:</label>
+            <span class="blank narrow"></span>년
+            <span class="blank narrow"></span>월
+            <span class="blank narrow"></span>일
+        </div>
+        <div class="field">
+            <label>점검자:</label>
+            <span class="blank wide"></span>
+        </div>
+        <div class="field">
+            <label>시작 시각:</label>
+            <span class="blank"></span>
+        </div>
+        <div class="field">
+            <label>종료 시각:</label>
+            <span class="blank"></span>
+        </div>
+    </div>
+    <div class="header-notice">
+        안내: 시스템 기록과 실물을 비교하여 차이가 있으면 비고란에 사유를 기록하세요.
+        "실물 보관"란에는 창고에 보관 중인 실물 수량만 기입합니다 (서버에 장착된 것은 제외).
+    </div>
+    <div class="gen-info">생성: 2026-06-05 10:58:49 | DB: it_assets.db</div>
+</div>
+
+<div class="group">
+<h2 class="group-header">메모리 <span class="item-count">(35건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">mem-16-A</td>
+<td class="model">삼성 M393A2K40BB2-CTD</td>
+<td class="num">25</td>
+<td class="num">58</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-16-B</td>
+<td class="model">삼성 M393A2G40EB1-CPB</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-16-C</td>
+<td class="model">삼성 M393A2G40DB0-CPB</td>
+<td class="num">0</td>
+<td class="num">28</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-16-D</td>
+<td class="model">Micron MTA18ASF2G72PZ-2G6D1SG</td>
+<td class="num">2</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-16-E</td>
+<td class="model">삼성 M393A2G40EB2-CTD(6Q|7Q|8Q)</td>
+<td class="num">6</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-16-F</td>
+<td class="model">002C069D002C 18ASF2G72PDZ-3G2E1</td>
+<td class="num">0</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-32-A</td>
+<td class="model">삼성 M378A4G43AB2-CWE</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-32-B</td>
+<td class="model">SKHynix HMA84GR7AFR4N-UH</td>
+<td class="num">48</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-32-C</td>
+<td class="model">SKHynix HMA84GR7CJR4N-XN</td>
+<td class="num">16</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-32-D</td>
+<td class="model">Micron MTA36ASF4G72PZ-3G2R1</td>
+<td class="num">8</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-32-E</td>
+<td class="model">삼성 M393A4K40EB3-CWEBY</td>
+<td class="num">3</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-32-F</td>
+<td class="model">삼성 M393A4K40CB2-CTD7Y</td>
+<td class="num">8</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-32-I</td>
+<td class="model">삼성 M321R4GA3EB0-CWMXJ</td>
+<td class="num">0</td>
+<td class="num">15</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-32-J</td>
+<td class="model">삼성 M321R4GA3PB0-CWMJJ</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-64-A</td>
+<td class="model">삼성 M386A8K40BM2-CTD</td>
+<td class="num">101</td>
+<td class="num">99</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-64-C</td>
+<td class="model">삼성 M393A8G40AB2-CWE(BY|CO)</td>
+<td class="num">36</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-64-D</td>
+<td class="model">SKHynix HMAA8GL7AMR4N-VK</td>
+<td class="num">0</td>
+<td class="num">12</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-64-E</td>
+<td class="model">삼성 M386A8K40DM2-CWE(ZY)</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-64-F</td>
+<td class="model">삼성 M321R8GA0BB0-CQKZJ</td>
+<td class="num">16</td>
+<td class="num">104</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-64-G</td>
+<td class="model">삼성 M393A8G40AB2-CVF(BY|CO)</td>
+<td class="num">32</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-64-H</td>
+<td class="model">SKHynix HMCG94AGBRA179N</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">mem-64-J</td>
+<td class="model">삼성 M321R8GAEB2-CWMKH</td>
+<td class="num">8</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-메모리-001</td>
+<td class="model">SK hynix HMCG88AHBRA478N</td>
+<td class="num">0</td>
+<td class="num">12</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-메모리-002</td>
+<td class="model">Samsung M321R8GA0BB0-CQKZJ</td>
+<td class="num">0</td>
+<td class="num">18</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-메모리-003</td>
+<td class="model">삼성 M321R8GA0BB0-CQKZJ</td>
+<td class="num">2</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">매니코어소프트-메모리-001</td>
+<td class="model">Samsung M321R8GA0PB0-CWMKJ</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-메모리-001</td>
+<td class="model">Samsung M321R4GA3EB0-CWMKJ</td>
+<td class="num">0</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-메모리-002</td>
+<td class="model">Samsung M321R4GA3PB0-CWMJJ</td>
+<td class="num">0</td>
+<td class="num">11</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-메모리-003</td>
+<td class="model">Samsung M321R4GA3PB0-CWMRF</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-메모리-004</td>
+<td class="model">Samsung M321R8GA0BB0-CQKZJ</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-메모리-005</td>
+<td class="model">Micron Technology MTC10F1084S1RC48BA1 JGCC</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-메모리-006</td>
+<td class="model">Samsung M321R4GA3BB6-CQKET</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-메모리-001</td>
+<td class="model">Samsung M321R8GA0EB2-CWMKH</td>
+<td class="num">0</td>
+<td class="num">16</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">코코링크-메모리-001</td>
+<td class="model">Micron Technology MTC40F2046S1RC56BD2 UPCC</td>
+<td class="num">0</td>
+<td class="num">24</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">태진티엔에스-메모리-001</td>
+<td class="model">00CE069D00CE M321R8GA0BB0-CQKZJ</td>
+<td class="num">0</td>
+<td class="num">16</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="group">
+<h2 class="group-header">CPU <span class="item-count">(22건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">CPU-A</td>
+<td class="model">Intel Intel(R) Xeon(R) Gold 6140 CPU @ 2.30GHz</td>
+<td class="num">0</td>
+<td class="num">50</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-B</td>
+<td class="model">Intel Intel(R) Xeon(R) CPU E5-2699 v4 @ 2.20GHz</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-C</td>
+<td class="model">Intel Intel(R) Xeon(R) CPU E5-2630 v3</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-D</td>
+<td class="model">Intel Intel(R) Core(TM) i7-10700K CPU</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-E</td>
+<td class="model">Intel 인텔® 제온® Platinum 8380 프로세서</td>
+<td class="num">1</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-H</td>
+<td class="model">intel 12th Gen Intel(R) Core(TM) i7-12700</td>
+<td class="num">0</td>
+<td class="num">5</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-I</td>
+<td class="model">intel Intel(R) Xeon(R) CPU E3-1270 v5</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-J</td>
+<td class="model">intel Intel(R) Xeon(R) Gold 6326 CPU</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-K</td>
+<td class="model">intel INTEL(R) XEON(R) PLATINUM 8558</td>
+<td class="num">0</td>
+<td class="num">16</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-L</td>
+<td class="model">intel Intel(R) Xeon(R) Gold 5416S CPU</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">CPU-M</td>
+<td class="model">Intel Intel(R) Xeon(R) Silver 4314 CPU @ 2.40GHz</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-CPU-001</td>
+<td class="model">Intel Intel(R) Xeon(R) 6520P</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-CPU-002</td>
+<td class="model">Intel Intel(R) Xeon(R) 6521P</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-CPU-003</td>
+<td class="model">GenuineIntel Intel(R) Xeon(R) 6530P</td>
+<td class="num">0</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-CPU-004</td>
+<td class="model">AMD AMD EPYC 9454 48-Core Emb Processor</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">매니코어소프트-CPU-001</td>
+<td class="model">AMD AMD EPYC 9124 16-Core Processor</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-CPU-001</td>
+<td class="model">Intel Intel(R) Xeon(R) Gold 6430</td>
+<td class="num">0</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-CPU-002</td>
+<td class="model">AMD AMD EPYC 9254 24-Core Processor</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-CPU-003</td>
+<td class="model">Intel INTEL(R) XEON(R) GOLD 6530</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-CPU-001</td>
+<td class="model">Intel Intel(R) Xeon(R) 6515P</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">코코링크-CPU-001</td>
+<td class="model">AMD AMD EPYC 9654 96-Core Processor</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">태진티엔에스-CPU-001</td>
+<td class="model">Intel Intel(R) Xeon(R) 6527P</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="group">
+<h2 class="group-header">GPU <span class="item-count">(9건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">GPU-16G-A</td>
+<td class="model">NVIDIA tesla T4</td>
+<td class="num">5</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">GPU-6G-A</td>
+<td class="model">NVIDIA NVIDIA Corporation GA106 [RTX A2000] (rev a1)</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">GPU-80G-A</td>
+<td class="model">NVIDIA NVIDIA Corporation GA100 [A100 PCIe 80GB] (rev a1)</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">GPU-94G-A</td>
+<td class="model">NVIDIA NVIDIA Corporation GH100 [H100L 94GB] (rev a1)</td>
+<td class="num">1</td>
+<td class="num">7</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">매니코어소프트-GPU-001</td>
+<td class="model">NVIDIA NVIDIA Corporation GB202GL [RTX PRO 6000 Blackwell Server Edition] (rev a1)</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-GPU-001</td>
+<td class="model">NVIDIA NVIDIA Corporation GB206 [GeForce RTX 5060 Ti] (rev a1)</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-GPU-002</td>
+<td class="model">NVIDIA NVIDIA Corporation GB203 [GeForce RTX 5080] (rev a1)</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-GPU-001</td>
+<td class="model">NVIDIA L40S</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">코코링크-GPU-001</td>
+<td class="model">NVIDIA NVIDIA Corporation Device 2bb5 (rev a1)</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="group">
+<h2 class="group-header">디스크(스토리지) <span class="item-count">(49건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">sto-1.0T-A</td>
+<td class="model">Intel Intel® SSD DC P4500 Series</td>
+<td class="num">4</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-1.0T-B</td>
+<td class="model">TOSHIBA HDWD110</td>
+<td class="num">0</td>
+<td class="num">5</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-1.0T-C</td>
+<td class="model">WD Green WD Green SN350 NVMe SSD</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-1.6T-A</td>
+<td class="model">Intel Intel® SSD DC P4610 Series</td>
+<td class="num">6</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-1.6T-B</td>
+<td class="model">Hitachi Hitachi Data Systems 1.6TB SSD SAS FMD HDD</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-1.92T-A</td>
+<td class="model">삼성 NVMe SAMSUNG MZQL21T9</td>
+<td class="num">0</td>
+<td class="num">10</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-14T-A</td>
+<td class="model">Hitachi Hitachi Data Systems 14TB SSD SAS FMD HDD</td>
+<td class="num">0</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-2.2T-A</td>
+<td class="model">PERC H755 Front</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-256G-A</td>
+<td class="model">ADATA IM2P33F8-256GD1</td>
+<td class="num">0</td>
+<td class="num">5</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-2T-A</td>
+<td class="model">SEAGATE Seagate Barracuda ST2000DM008 2 TB 3.5&quot; HDD</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.2T-A</td>
+<td class="model">삼성 SAMSUNG MZPLL3T2HAJQ-00005</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.2T-B</td>
+<td class="model">Micron 9300 MAX</td>
+<td class="num">12</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.84T-A</td>
+<td class="model">Micron Micron_5200_MTFDDAK3T8TDC</td>
+<td class="num">23</td>
+<td class="num">42</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.84T-B</td>
+<td class="model">Micron Micron 9200 PRO</td>
+<td class="num">3</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.84T-C</td>
+<td class="model">삼성 PM1733</td>
+<td class="num">3</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.84T-D</td>
+<td class="model">Micron Micron 7450 Pro</td>
+<td class="num">4</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.84T-E</td>
+<td class="model">삼성 PM883</td>
+<td class="num">6</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.84T-F</td>
+<td class="model">SEAGATE seagate NYTRO 2332 SSD</td>
+<td class="num">8</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-3.84T-G</td>
+<td class="model">삼성 Dell DC NVMe PM9A3 RI U.2 3.84TB(SN: S6JENC0Y312656)</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-30.72T-A</td>
+<td class="model">Dell Dell Ent NVMe P5316 RI 30.72TB(SN: PHAC418100RF30PGGN)</td>
+<td class="num">0</td>
+<td class="num">5</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-300G-A</td>
+<td class="model">SEAGATE SEAGATE ST300MM0048</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-480G-A</td>
+<td class="model">삼성 SM843T Data Center Series</td>
+<td class="num">13</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-480G-C</td>
+<td class="model">SKHynix ISE PE9010 GEN4 RI </td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-500G-A</td>
+<td class="model">HP HP EX900 M.2 NVMe (500GB)</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-600G-A</td>
+<td class="model">TOSHIBA TOSHIBA AL14SEB060N</td>
+<td class="num">0</td>
+<td class="num">52</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-600G-B</td>
+<td class="model">SEAGATE SEAGATE ST600MX0052</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-7.68T-A</td>
+<td class="model">Micron Micron 9300 Pro 7680 GB</td>
+<td class="num">5</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">sto-7.68T-B</td>
+<td class="model">Samsung PM9A3</td>
+<td class="num">0</td>
+<td class="num">12</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-001</td>
+<td class="model">DAPUSTOR DAPUSTOR DPRD3108T0T507T6000</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-002</td>
+<td class="model">Dell BOSS-N1</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-003</td>
+<td class="model">Dell DC NVMe CD8P E3.S 3.84TB</td>
+<td class="num">0</td>
+<td class="num">5</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-004</td>
+<td class="model">Dell NVMe ISE PE1010 RI E3.S 3.84TB</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-005</td>
+<td class="model">KIOXIA KIOXIA KCMYXRUG1T92</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-006</td>
+<td class="model">SAMSUNG SAMSUNG MZQL23T8HCLS-00A07</td>
+<td class="num">0</td>
+<td class="num">26</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-007</td>
+<td class="model">SAMSUNG SAMSUNG MZWLR3T8HCLS-00A07</td>
+<td class="num">0</td>
+<td class="num">21</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-008</td>
+<td class="model">XP7680SE70006</td>
+<td class="num">0</td>
+<td class="num">48</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-스토리지-009</td>
+<td class="model">Samsung Samsung SSD 980 PRO 1TB</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">매니코어소프트-스토리지-001</td>
+<td class="model">CT2000T500SSD8</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-스토리지-001</td>
+<td class="model">Samsung Samsung SSD 970 EVO Plus 500GB</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-스토리지-002</td>
+<td class="model">Samsung Samsung SSD 990 EVO Plus 1TB</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-스토리지-003</td>
+<td class="model">SAMSUNG SAMSUNG MZ7L3480HCHQ-00A07</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-스토리지-004</td>
+<td class="model">SAMSUNG SAMSUNG MZ7L3480</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-스토리지-005</td>
+<td class="model">Micron Micron_5200_MTFDDAK3T8TDC</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-스토리지-001</td>
+<td class="model">AVAGO AVAGO AsustekPIKE3108</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-스토리지-002</td>
+<td class="model">SAMSUNG SAMSUNG MZ7L3480HCHQ-00B7C</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-스토리지-003</td>
+<td class="model">SAMSUNG SAMSUNG MZ7L31T9HBLT-00A07</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-스토리지-004</td>
+<td class="model">SAMSUNG SAMSUNG MZQL23T8HCLS-00B7C</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">코코링크-스토리지-001</td>
+<td class="model">Samsung Samsung SSD 9100 PRO 4TB</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">태진티엔에스-스토리지-001</td>
+<td class="model">DELL DELL RAID</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="group">
+<h2 class="group-header">네트워크 <span class="item-count">(34건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">net-1-A</td>
+<td class="model">Intel Intel Corporation Ethernet Connection X722 (rev 09)</td>
+<td class="num">0</td>
+<td class="num">25</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-1-B</td>
+<td class="model">Intel intel corporation ethernet connection x722 for 1gbe (rev 09)</td>
+<td class="num">0</td>
+<td class="num">25</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-1-C</td>
+<td class="model">Intel Intel Corporation I350 Gigabit Network Connection (rev 01)</td>
+<td class="num">0</td>
+<td class="num">5</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-1-D</td>
+<td class="model">Intel Corporation I210 Gigabit Network Connection (rev 03)</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-1-E</td>
+<td class="model">Broadcom Inc. and subsidiaries NetXtreme BCM5720 Gigabit Ethernet PCIe</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-10-A</td>
+<td class="model">LR-LINK LREC6822XF-2SFP(MT27500)</td>
+<td class="num">1</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-10-B</td>
+<td class="model">LR-LINK LREC9812AF-2SFP+(BCM57810)</td>
+<td class="num">1</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-10-C</td>
+<td class="model">LR-LINK LREC9802BF-2SFP+(X520-2)</td>
+<td class="num">8</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-10-D</td>
+<td class="model">LR-LINK Intel Corporation Ethernet Controller X710 for 10GbE SFP+ (rev 02)</td>
+<td class="num">38</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-10-E</td>
+<td class="model">LR-LINK Intel Corporation Ethernet Controller X550 (rev 01)</td>
+<td class="num">17</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-10-F</td>
+<td class="model">Intel Intel Corporation 82599ES 10-Gigabit SFI/SFP+ Network Connection (rev 01)</td>
+<td class="num">0</td>
+<td class="num">10</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-10-G</td>
+<td class="model">Intel Intel Corporation Ethernet Controller X710 for 10GBASE-T (rev 02)</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-10-H</td>
+<td class="model">Broadcom Broadcom Limited BCM57840 NetXtreme II 10 Gigabit Ethernet (rev 11)</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-100-A</td>
+<td class="model">Mellanox CX556A(MT27800 Mellanox)</td>
+<td class="num">4</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-100-B</td>
+<td class="model">Mellanox CX556A(MT28800 Mellanox)</td>
+<td class="num">2</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-100-C</td>
+<td class="model">Mellanox CX555A(MT27800 Mellanox)</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-16-C</td>
+<td class="model">Qlogic QLE2694-SR</td>
+<td class="num">4</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-200-A</td>
+<td class="model">Mellanox CX653105A(MT28908 Mellanox)</td>
+<td class="num">1</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-200-B</td>
+<td class="model">NVIDIA CX653106A(MT28908 Mellanox)</td>
+<td class="num">2</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-25-A</td>
+<td class="model">Mellanox Mellanox Technologies MT27710 Family [ConnectX-4 Lx]</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">net-400-A</td>
+<td class="model">Mellanox CX75310AA(MT2910 Mellanox)</td>
+<td class="num">2</td>
+<td class="num">7</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-네트워크-001</td>
+<td class="model">Intel Corporation Device 57b0</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-네트워크-002</td>
+<td class="model">Intel Corporation Ethernet Controller X710 for 10GBASE-T (rev 02)</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-네트워크-003</td>
+<td class="model">Mellanox Technologies MT28908 Family [ConnectX-6]</td>
+<td class="num">4</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-네트워크-004</td>
+<td class="model">Mellanox Technologies MT2910 Family [ConnectX-7]</td>
+<td class="num">1</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-네트워크-005</td>
+<td class="model">Broadcom Inc. and subsidiaries BCM57416 NetXtreme-E Dual-Media 10G RDMA Ethernet Controller (rev 01)</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-네트워크-006</td>
+<td class="model">Intel Corporation I210 Gigabit Backplane Connection (rev 03)</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-네트워크-007</td>
+<td class="model">NVIDIA MCX75310AAS-NEAT</td>
+<td class="num">1</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">매니코어소프트-네트워크-001</td>
+<td class="model">Broadcom Inc. and subsidiaries BCM57416 NetXtreme-E Dual-Media 10G RDMA Ethernet Controller (rev 01)</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-네트워크-001</td>
+<td class="model">Intel Corporation I210 Gigabit Network Connection (rev 03)</td>
+<td class="num">0</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">유니와이드-네트워크-002</td>
+<td class="model">Intel Corporation Ethernet Controller X550 (rev 01)</td>
+<td class="num">0</td>
+<td class="num">3</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-네트워크-001</td>
+<td class="model">Broadcom Inc. and subsidiaries BCM57416 NetXtreme-E Dual-Media 10G RDMA Ethernet Controller (rev 01)</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">코코링크-네트워크-001</td>
+<td class="model">Intel Corporation I350 Gigabit Network Connection (rev 01)</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">태진티엔에스-네트워크-001</td>
+<td class="model">Intel Corporation Ethernet Controller E610 10GBASE T</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="group">
+<h2 class="group-header">RAID 컨트롤러 <span class="item-count">(9건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">raid-A</td>
+<td class="model">Broadcom Broadcom / LSI MegaRAID SAS-3 3108 [Invader] (rev 02)</td>
+<td class="num">1</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">raid-B</td>
+<td class="model">ASUS LSI Logic / Symbios Logic MegaRAID SAS-3 3108 [Invader] (rev 02)</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">raid-C</td>
+<td class="model">Broadcom MegaRaid SAS/SATA/NVMe 9460-16i</td>
+<td class="num">2</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">raid-D</td>
+<td class="model">Broadcom Broadcom / LSI MegaRAID SAS 9361-8i</td>
+<td class="num">0</td>
+<td class="num">25</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">raid-G</td>
+<td class="model">Broadcom Broadcom / LSI MegaRAID 9560-8i</td>
+<td class="num">0</td>
+<td class="num">5</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">raid-H</td>
+<td class="model">Intel Corporation sSATA Controller [RAID Mode] (rev 0a)</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">raid-I</td>
+<td class="model">Broadcom / LSI PERC H755 Front</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-RAID-001</td>
+<td class="model">Broadcom / LSI MegaRAID SAS-3 3108 [Invader] (rev 02)</td>
+<td class="num">0</td>
+<td class="num">2</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">태진티엔에스-RAID-001</td>
+<td class="model">PERC H965i Front</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="group">
+<h2 class="group-header">PSU(전원공급장치) <span class="item-count">(4건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">PSU-2550W-A</td>
+<td class="model">PSU</td>
+<td class="num">0</td>
+<td class="num">6</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">PSU-800W-A</td>
+<td class="model">PSU</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-PSU-001</td>
+<td class="model">DELTA TDPS2400HB A</td>
+<td class="num">0</td>
+<td class="num">4</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">이슬림코리아-PSU-001</td>
+<td class="model">DELTA DLG3200AN12C31</td>
+<td class="num">0</td>
+<td class="num">8</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="group">
+<h2 class="group-header">NPU <span class="item-count">(1건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">유니와이드-npu-001</td>
+<td class="model">FuriosaAI FuriosaAI, Inc. RNGD</td>
+<td class="num">0</td>
+<td class="num">1</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="group">
+<h2 class="group-header">케이블 <span class="item-count">(10건)</span></h2>
+<table>
+<thead>
+<tr>
+<th class="col-code">item_code</th>
+<th class="col-model">모델</th>
+<th class="col-num">시스템<br>보관</th>
+<th class="col-num">시스템<br>사용 중</th>
+<th class="col-input">실물 보관</th>
+<th class="col-diff">차이</th>
+<th class="col-note">사유/비고</th>
+<th class="col-check">점검<br>OK</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="code">cab-100G-A</td>
+<td class="model">Mellanox MCP1600-E003</td>
+<td class="num">1</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">cab-100G-B</td>
+<td class="model">do networks DC-FCAC-003</td>
+<td class="num">2</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">cab-100G-C</td>
+<td class="model">Mellanox MCP1600-C003E26N</td>
+<td class="num">10</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">cab-100G-D</td>
+<td class="model">HPE 845416-B21</td>
+<td class="num">4</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">cab-200G-A</td>
+<td class="model">Mellanox MCP1650-H002E26</td>
+<td class="num">1</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">cab-200G-B</td>
+<td class="model">Mellanox MCP7H50-H002R26</td>
+<td class="num">10</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">cab-200G-C</td>
+<td class="model">3rd party QSFP56-200G-CU3M</td>
+<td class="num">4</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-케이블-001</td>
+<td class="model">FS QDD-400G-2QPC025</td>
+<td class="num">5</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-케이블-002</td>
+<td class="model">FS OFL-400G-QDD8xPPC03</td>
+<td class="num">2</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+<tr>
+<td class="code">글루시스-케이블-003</td>
+<td class="model">FS OFL-400G-QDD8xPPC02</td>
+<td class="num">4</td>
+<td class="num">0</td>
+<td class="input-cell"></td>
+<td class="input-cell"></td>
+<td class="input-cell note-cell"></td>
+<td class="check-cell">&#9744;</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="footer-section">
+    <h3>종합 메모</h3>
+    <div class="memo-area"></div>
+
+    <div class="header-info">
+        <div class="field">
+            <label>다음 점검 예정일:</label>
+            <span class="blank narrow"></span>년
+            <span class="blank narrow"></span>월
+            <span class="blank narrow"></span>일
+        </div>
+    </div>
+
+    <div class="sig-row">
+        <div class="sig-field">
+            <label>점검자 서명:</label>
+            <span class="sig-line"></span>
+        </div>
+        <div class="sig-field">
+            <label>확인자 서명:</label>
+            <span class="sig-line"></span>
+        </div>
+    </div>
+</div>
+
+</body>
+</html>
