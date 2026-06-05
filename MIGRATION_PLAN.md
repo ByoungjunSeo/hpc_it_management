@@ -498,14 +498,40 @@ pool.query('SELECT NOW()')
 module.exports = { pool };
 ```
 
+### B-1.4: Admin 초기 계정 생성 (결정 사항)
+
+**원래 계획**: `07_seed.sql`로 admin INSERT
+**변경 사유**: v1이 Node.js crypto PBKDF2 사용. SQL에서 같은 해시 생성 불가.
+**최종 결정**: Node.js `init-admin.js` 스크립트로 처리
+
+**구현 위치**: `v2/scripts/init-admin.js` (B-3 코드 포팅 시 구현)
+
+**동작 명세**:
+1. `process.env.INITIAL_ADMIN_PASSWORD` 환경변수 읽기
+2. users 테이블에 `username='admin'`이 있는지 확인
+3. 없으면:
+   - v1과 동일한 `hashPassword()` 사용 (PBKDF2 SHA-512, 100K회, 16B salt)
+   - `INSERT INTO users (username, password_hash, role, ...) VALUES ('admin', 해시, 'admin', ...)`
+4. 있으면: skip (idempotent)
+
+**실행 방식**: docker-compose.yml의 app 서비스에서 자동 호출
+```
+command: sh -c "node scripts/init-admin.js && node app.js"
+```
+
+**보안**:
+- `INITIAL_ADMIN_PASSWORD`는 `.env`에만 존재 (git 제외)
+- 평문 비밀번호는 해시 후 메모리에서 제거
+- 환경변수 자체는 컨테이너 종료 시 사라짐
+
 ### B-1 검증 체크리스트
 
 - [ ] `docker-compose up -d db` → PostgreSQL 컨테이너 실행
-- [ ] `init.sql` 실행으로 21개 테이블 + 인덱스 생성 확인
-- [ ] `seed.sql`로 admin 계정 생성 확인
+- [ ] `01~06 SQL` 실행으로 21개 테이블 + 인덱스 + 트리거 생성 확인
 - [ ] `pool.query('SELECT NOW()')` 연결 테스트 성공
 - [ ] `\dt` 명령으로 테이블 목록 확인
 - [ ] `\d assets` 등으로 개별 테이블 스키마 확인
+- [ ] `init-admin.js` 실행으로 admin 계정 생성 확인 (B-3 이후)
 
 ### B-1 롤백
 
@@ -1589,6 +1615,33 @@ git tag v2.0-b4-complete     # B-4 완료 시
 git tag v2.0-b5-complete     # B-5 완료 시
 git tag v2.0-b6-start        # B-6 병행 운영 시작
 git tag v2.0-released        # B-7 전환 완료
+```
+
+---
+
+## 14. 배포 정책 (확정)
+
+### 본인 회사 (v2 첫 운영)
+- v1 → v2 데이터 마이그레이션 실행
+- 자산, 모듈, 이력, 사용자 계정 모두 보존
+
+### 다른 부서 배포
+- 빈 DB로 시작 (migrate 스크립트 실행 안 함)
+- 그 부서가 자기 자산을 처음부터 입력
+- 그 부서가 자기 사용자 계정 시스템 운영
+
+### 모든 배포 공통
+- admin 계정 자동 생성 (`init-admin.js`)
+- admin 초기 비밀번호: `.env`의 `INITIAL_ADMIN_PASSWORD`에서 받음
+- 배포자(부서 IT 담당자)가 `.env` 작성 시 비밀번호 정함
+
+### 배포 흐름
+```
+1. .env 작성 (POSTGRES_PASSWORD, INITIAL_ADMIN_PASSWORD, APP_PORT, SESSION_SECRET)
+2. docker compose up -d (자동 실행: 01~06 SQL)
+3. 앱 컨테이너 시작 시 init-admin.js 자동 실행 (admin 없으면 생성)
+4. 본인 회사만: node scripts/migrate-from-v1.js 추가 실행
+5. admin 로그인, 운영 시작
 ```
 
 ---
