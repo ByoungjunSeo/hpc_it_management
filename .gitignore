@@ -22,6 +22,12 @@ backup/
 # Generated checklist instances (keep template only)
 INVENTORY_CHECKLIST_20*.html
 
+# Environment (secrets)
+.env
+
+# PostgreSQL data
+v2/pgdata/
+
 # OS files
 .DS_Store
 Thumbs.db
