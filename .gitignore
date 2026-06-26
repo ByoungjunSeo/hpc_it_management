@@ -31,3 +31,5 @@ v2/pgdata/
 # OS files
 .DS_Store
 Thumbs.db
+v2/scripts/dryrun-eul-output.json
+v2/scripts/*-output.json
