@@ -10,3 +10,6 @@ pgdata/
 # 임시 파일
 *.tmp
 *.bak
+
+# Node.js 의존성 (scripts/)
+scripts/node_modules/
