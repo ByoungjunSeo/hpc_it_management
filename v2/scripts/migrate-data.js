@@ -173,6 +173,523 @@ async function migrateModuleInventory(sqlite, pgClient) {
   }
 }
 
+async function migrateAssets(sqlite, pgClient) {
+  const TABLE = 'assets';
+  const allRows = sqlite.prepare('SELECT * FROM assets ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${allRows.length}행`);
+
+  // 자기참조 FK 처리: 부모 먼저, 자식 나중
+  const parents = allRows.filter(r => r.parent_asset_id == null);
+  const children = allRows.filter(r => r.parent_asset_id != null);
+  console.log(`  1차: 부모 자산 ${parents.length}행 (parent_asset_id IS NULL)`);
+  console.log(`  2차: 자식 자산 ${children.length}행 (블레이드 노드 등)`);
+
+  const insertSQL = `INSERT INTO assets (id, asset_number, management_number, asset_type, ownership,
+       vendor_id, model_name, manufacturer, serial_number, rack_id,
+       rack_unit_start, rack_unit_size, ip_address, ssh_port, ssh_user, ssh_password,
+       assigned_user, purpose, status, purchase_date, warranty_end, notes,
+       blade_slot, room_id, parent_asset_id, shelf_size, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+       $21, $22, $23, $24, $25, $26, $27, $28)`;
+
+  function rowToParams(r) {
+    return [
+      r.id, r.asset_number, r.management_number, r.asset_type,
+      r.ownership || 'company',
+      r.vendor_id || null, r.model_name, r.manufacturer, r.serial_number,
+      r.rack_id || null,
+      r.rack_unit_start || null, r.rack_unit_size || 1,
+      r.ip_address, r.ssh_port || 22, r.ssh_user || 'root', r.ssh_password,
+      r.assigned_user, r.purpose, r.status || 'active',
+      r.purchase_date || null, r.warranty_end || null, r.notes,
+      r.blade_slot, r.room_id || null, r.parent_asset_id || null,
+      r.shelf_size || 0,
+      toTimestampTZ(r.created_at), toTimestampTZ(r.updated_at)
+    ];
+  }
+
+  await pgClient.query('BEGIN');
+  try {
+    // 1차: 부모 자산
+    for (const r of parents) {
+      await pgClient.query(insertSQL, rowToParams(r));
+    }
+    console.log(`  [${TABLE}] 1차: 부모 자산 ${parents.length}행 INSERT 완료`);
+
+    // 2차: 자식 자산 (블레이드 노드)
+    for (const r of children) {
+      await pgClient.query(insertSQL, rowToParams(r));
+    }
+    console.log(`  [${TABLE}] 2차: 자식 자산 ${children.length}행 INSERT 완료`);
+
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ 총 ${allRows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateIpAddresses(sqlite, pgClient) {
+  const TABLE = 'ip_addresses';
+  const rows = sqlite.prepare('SELECT * FROM ip_addresses ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  const insertSQL = `INSERT INTO ip_addresses (id, ip_address, subnet, network_zone, allocation_type,
+       asset_id, assigned_to, description, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    let count = 0;
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.ip_address, r.subnet, r.network_zone,
+        r.allocation_type || 'available',
+        r.asset_id || null, r.assigned_to, r.description,
+        toTimestampTZ(r.created_at), toTimestampTZ(r.updated_at)
+      ]);
+      count++;
+      if (count % 500 === 0) {
+        console.log(`  [${TABLE}] ${count}/${rows.length}행 진행 중...`);
+      }
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateAssetIps(sqlite, pgClient) {
+  const TABLE = 'asset_ips';
+  const rows = sqlite.prepare('SELECT * FROM asset_ips ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  const insertSQL = `INSERT INTO asset_ips (id, asset_id, ip_address, ip_type, description,
+       interface_type, speed, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.asset_id, r.ip_address, r.ip_type || 'management',
+        r.description, r.interface_type, r.speed,
+        toTimestampTZ(r.created_at)
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateAssetCredentials(sqlite, pgClient) {
+  const TABLE = 'asset_credentials';
+  const rows = sqlite.prepare('SELECT * FROM asset_credentials ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  const insertSQL = `INSERT INTO asset_credentials (id, asset_id, username, password, credential_type,
+       description, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.asset_id, r.username, r.password,
+        r.credential_type || 'root', r.description,
+        toTimestampTZ(r.created_at)
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migratePhotos(sqlite, pgClient) {
+  const TABLE = 'photos';
+  const rows = sqlite.prepare('SELECT * FROM photos ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  const insertSQL = `INSERT INTO photos (id, entity_type, entity_id, file_path, original_name,
+       description, uploaded_at, uploaded_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.entity_type, r.entity_id, r.file_path, r.original_name,
+        r.description, toTimestampTZ(r.uploaded_at), r.uploaded_by
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateComputingModules(sqlite, pgClient) {
+  const TABLE = 'computing_modules';
+  const rows = sqlite.prepare('SELECT * FROM computing_modules ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  const insertSQL = `INSERT INTO computing_modules (id, asset_id, module_type, model, manufacturer,
+       capacity, count, specification, slot_info, notes, owner, owner_vendor_id,
+       is_onboard, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    let cnt = 0;
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.asset_id, r.module_type, r.model, r.manufacturer,
+        r.capacity, r.count || 1, r.specification, r.slot_info, r.notes,
+        r.owner || 'company', r.owner_vendor_id || null,
+        r.is_onboard || 0,
+        toTimestampTZ(r.created_at), toTimestampTZ(r.updated_at)
+      ]);
+      cnt++;
+      if (cnt % 200 === 0) {
+        console.log(`  [${TABLE}] ${cnt}/${rows.length}행 진행 중...`);
+      }
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migratePowerNodes(sqlite, pgClient) {
+  const TABLE = 'power_nodes';
+  const rows = sqlite.prepare('SELECT * FROM power_nodes ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  if (rows.length === 0) {
+    console.log(`  [${TABLE}] ⏭️ 0행 — 건너뜀`);
+    return;
+  }
+
+  // 자기참조: parent_id IS NULL 먼저
+  const parents = rows.filter(r => r.parent_id == null);
+  const children = rows.filter(r => r.parent_id != null);
+
+  const insertSQL = `INSERT INTO power_nodes (id, room_id, parent_id, node_type, name,
+       capacity_kw, rating, voltage, phase, circuit_number,
+       asset_id, description, sort_order, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of parents) {
+      await pgClient.query(insertSQL, [
+        r.id, r.room_id, null, r.node_type, r.name,
+        r.capacity_kw, r.rating, r.voltage, r.phase, r.circuit_number,
+        r.asset_id || null, r.description, r.sort_order || 0,
+        toTimestampTZ(r.created_at), toTimestampTZ(r.updated_at)
+      ]);
+    }
+    for (const r of children) {
+      await pgClient.query(insertSQL, [
+        r.id, r.room_id, r.parent_id, r.node_type, r.name,
+        r.capacity_kw, r.rating, r.voltage, r.phase, r.circuit_number,
+        r.asset_id || null, r.description, r.sort_order || 0,
+        toTimestampTZ(r.created_at), toTimestampTZ(r.updated_at)
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateNetworkConnections(sqlite, pgClient) {
+  const TABLE = 'network_connections';
+  const rows = sqlite.prepare('SELECT * FROM network_connections ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  if (rows.length === 0) {
+    console.log(`  [${TABLE}] ⏭️ 0행 — 건너뜀`);
+    return;
+  }
+
+  const insertSQL = `INSERT INTO network_connections (id, room_id, from_asset_id, from_port,
+       to_asset_id, to_port, cable_type, cable_label, cable_color, cable_length,
+       ownership, vendor_id, speed, status, description, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.room_id, r.from_asset_id, r.from_port,
+        r.to_asset_id, r.to_port, r.cable_type, r.cable_label,
+        r.cable_color, r.cable_length, r.ownership || 'company',
+        r.vendor_id || null, r.speed, r.status || 'active', r.description,
+        toTimestampTZ(r.created_at), toTimestampTZ(r.updated_at)
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateVendorIntakeRequests(sqlite, pgClient) {
+  const TABLE = 'vendor_intake_requests';
+  const rows = sqlite.prepare('SELECT * FROM vendor_intake_requests ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  if (rows.length === 0) {
+    console.log(`  [${TABLE}] ⏭️ 0행 — 건너뜀`);
+    return;
+  }
+
+  const insertSQL = `INSERT INTO vendor_intake_requests (id, token, status, company_name, contact_name,
+       contact_phone, contact_email, equipment_type, model_name, manufacturer,
+       serial_number, rack_unit_size, quantity, purpose, expected_start, expected_end,
+       power_requirement, network_requirement, notes, admin_notes, asset_id,
+       submitted_at, reviewed_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.token, r.status || 'pending', r.company_name, r.contact_name,
+        r.contact_phone, r.contact_email, r.equipment_type || 'server',
+        r.model_name, r.manufacturer, r.serial_number,
+        r.rack_unit_size || 1, r.quantity || 1, r.purpose,
+        r.expected_start || null, r.expected_end || null,
+        r.power_requirement, r.network_requirement, r.notes, r.admin_notes,
+        r.asset_id || null,
+        toTimestampTZ(r.submitted_at), toTimestampTZ(r.reviewed_at)
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateLendings(sqlite, pgClient) {
+  const TABLE = 'lendings';
+  const rows = sqlite.prepare('SELECT * FROM lendings ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  if (rows.length === 0) {
+    console.log(`  [${TABLE}] ⏭️ 0행 — 건너뜀`);
+    return;
+  }
+
+  const insertSQL = `INSERT INTO lendings (id, direction, counterparty, loan_date, return_date,
+       status, notes, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.direction, r.counterparty,
+        r.loan_date || null, r.return_date || null,
+        r.status || 'active', r.notes,
+        toTimestampTZ(r.created_at)
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateLendingItems(sqlite, pgClient) {
+  const TABLE = 'lending_items';
+  const rows = sqlite.prepare('SELECT * FROM lending_items ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  if (rows.length === 0) {
+    console.log(`  [${TABLE}] ⏭️ 0행 — 건너뜀`);
+    return;
+  }
+
+  const insertSQL = `INSERT INTO lending_items (id, lending_id, item_type, item_code, quantity, description)
+     VALUES ($1, $2, $3, $4, $5, $6)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.lending_id, r.item_type, r.item_code,
+        r.quantity || 1, r.description
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateAuditLogs(sqlite, pgClient) {
+  const TABLE = 'audit_logs';
+  const rows = sqlite.prepare('SELECT * FROM audit_logs ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  // 삭제된 사용자 user_id → NULL 처리 (v1 FK 미강제, v2 FK ON DELETE SET NULL)
+  const validUserIds = new Set(sqlite.prepare('SELECT id FROM users').all().map(u => u.id));
+  let nullified = 0;
+
+  const insertSQL = `INSERT INTO audit_logs (id, user_id, username, action, target_type,
+       target_id, target_label, details, ip_address, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    let cnt = 0;
+    for (const r of rows) {
+      let userId = r.user_id || null;
+      if (userId !== null && !validUserIds.has(userId)) {
+        userId = null;
+        nullified++;
+      }
+      // target_id: v1은 TEXT 허용 (item_code 등), v2는 INTEGER
+      // 비정수 값은 target_id=NULL, 원래 값은 target_label에 보존
+      let targetId = r.target_id;
+      let targetLabel = r.target_label;
+      if (targetId !== null && typeof targetId === 'string' && !/^\d+$/.test(targetId)) {
+        targetLabel = targetLabel || targetId;
+        targetId = null;
+      }
+      await pgClient.query(insertSQL, [
+        r.id, userId, r.username, r.action, r.target_type,
+        targetId || null, targetLabel, r.details, r.ip_address,
+        toTimestampTZ(r.created_at)
+      ]);
+      cnt++;
+      if (cnt % 500 === 0) {
+        console.log(`  [${TABLE}] ${cnt}/${rows.length}행 진행 중...`);
+      }
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+    if (nullified > 0) {
+      console.log(`  [${TABLE}] ⚠️ 삭제된 사용자 user_id → NULL 처리: ${nullified}행`);
+    }
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateModuleInventoryLogs(sqlite, pgClient) {
+  const TABLE = 'module_inventory_logs';
+  const rows = sqlite.prepare('SELECT * FROM module_inventory_logs ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  const insertSQL = `INSERT INTO module_inventory_logs (id, item_code, event_type, quantity_change,
+       before_total, after_total, before_spare, after_spare,
+       asset_id, asset_label, from_asset_id, from_asset_label,
+       to_asset_id, to_asset_label, asset_number, user_id, username, notes, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      await pgClient.query(insertSQL, [
+        r.id, r.item_code, r.event_type, r.quantity_change || 0,
+        r.before_total, r.after_total, r.before_spare, r.after_spare,
+        r.asset_id || null, r.asset_label, r.from_asset_id || null, r.from_asset_label,
+        r.to_asset_id || null, r.to_asset_label, r.asset_number,
+        r.user_id || null, r.username, r.notes,
+        toTimestampTZ(r.created_at)
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
+async function migrateModuleTransferLogs(sqlite, pgClient) {
+  const TABLE = 'module_transfer_logs';
+  const rows = sqlite.prepare('SELECT * FROM module_transfer_logs ORDER BY id').all();
+  console.log(`\n[${TABLE}] 이전 시작 — ${rows.length}행`);
+
+  // 삭제된 자산 asset_id → NULL 처리 (v1 FK 미강제, v2 FK ON DELETE SET NULL)
+  const validAssets = new Set(sqlite.prepare('SELECT id FROM assets').all().map(a => a.id));
+  let nullified = 0;
+
+  const insertSQL = `INSERT INTO module_transfer_logs (id, transfer_date, module_type, model, capacity,
+       count, owner, owner_vendor_id, from_asset_id, from_asset_label,
+       to_asset_id, to_asset_label, reason, user_id, username, notes, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`;
+
+  await pgClient.query('BEGIN');
+  try {
+    for (const r of rows) {
+      let fromId = r.from_asset_id || null;
+      let toId = r.to_asset_id || null;
+      if (fromId !== null && !validAssets.has(fromId)) { fromId = null; nullified++; }
+      if (toId !== null && !validAssets.has(toId)) { toId = null; nullified++; }
+      await pgClient.query(insertSQL, [
+        r.id, r.transfer_date || null, r.module_type, r.model, r.capacity,
+        r.count || 1, r.owner || 'company', r.owner_vendor_id || null,
+        fromId, r.from_asset_label,
+        toId, r.to_asset_label,
+        r.reason, r.user_id || null, r.username, r.notes,
+        toTimestampTZ(r.created_at)
+      ]);
+    }
+    await pgClient.query('COMMIT');
+    console.log(`  [${TABLE}] ✅ ${rows.length}행 INSERT 완료`);
+    if (nullified > 0) {
+      console.log(`  [${TABLE}] ⚠️ 삭제된 자산 asset_id → NULL 처리: ${nullified}건`);
+    }
+  } catch (e) {
+    await pgClient.query('ROLLBACK');
+    console.error(`  [${TABLE}] ❌ ROLLBACK — ${e.message}`);
+    throw e;
+  }
+}
+
 // ── 검증 ──
 
 async function verifyRowCount(sqlite, pgClient, table) {
@@ -192,7 +709,7 @@ async function main() {
   const tableArg = args.find(a => a.startsWith('--table='));
   const targetTable = tableArg ? tableArg.split('=')[1] : null;
 
-  console.log('=== v1 → v2 데이터 이전 (B-2.2: 단순 테이블 5개) ===');
+  console.log('=== v1 → v2 데이터 이전 ===');
   console.log(`모드: ${dryRun ? 'DRY RUN (실제 INSERT 없음)' : '실제 실행'}`);
   if (targetTable) console.log(`대상: ${targetTable}만`);
   console.log('');
@@ -210,13 +727,34 @@ async function main() {
   const pgClient = await pg.connect();
 
   try {
-    // B-2.2 이전 대상 (의존성 순서)
+    // 이전 대상 (의존성 순서)
     const migrationPlan = [
+      // B-2.2: 단순 테이블 5개
       { table: 'server_rooms',    fn: migrateServerRooms },
       { table: 'vendor_info',     fn: migrateVendorInfo },
       { table: 'users',           fn: migrateUsers },
       { table: 'racks',           fn: migrateRacks },
       { table: 'module_inventory', fn: migrateModuleInventory },
+      // B-2.3: 자산 핵심
+      { table: 'assets',          fn: migrateAssets },
+      // B-2.4: IP 주소
+      { table: 'ip_addresses',    fn: migrateIpAddresses },
+      // B-2.5: 자산 부속
+      { table: 'asset_ips',       fn: migrateAssetIps },
+      { table: 'asset_credentials', fn: migrateAssetCredentials },
+      { table: 'photos',          fn: migratePhotos },
+      // B-2.6: 모듈 + 시설
+      { table: 'computing_modules', fn: migrateComputingModules },
+      { table: 'power_nodes',     fn: migratePowerNodes },
+      { table: 'network_connections', fn: migrateNetworkConnections },
+      // B-2.7: 대여 + 벤더 입고
+      { table: 'vendor_intake_requests', fn: migrateVendorIntakeRequests },
+      { table: 'lendings',        fn: migrateLendings },
+      { table: 'lending_items',   fn: migrateLendingItems },
+      // B-2.8: 로그 테이블
+      { table: 'audit_logs',      fn: migrateAuditLogs },
+      { table: 'module_inventory_logs', fn: migrateModuleInventoryLogs },
+      { table: 'module_transfer_logs',  fn: migrateModuleTransferLogs },
     ];
 
     const targets = targetTable
@@ -224,7 +762,7 @@ async function main() {
       : migrationPlan;
 
     if (targets.length === 0) {
-      console.error(`❌ 테이블 "${targetTable}"은 B-2.2 대상이 아닙니다.`);
+      console.error(`❌ 테이블 "${targetTable}"은 이전 대상이 아닙니다.`);
       process.exit(1);
     }
 
@@ -249,15 +787,10 @@ async function main() {
       if (!ok) allMatch = false;
     }
 
-    // 보류 항목 요약
-    console.log('\n=== 보류 항목 ===');
-    console.log('  racks.linked_asset_id = 1175 → NULL (rack #212 "AquaRack 21U (탱크)")');
-    console.log('  → assets 이전 후 UPDATE로 복원 예정');
-
     // 최종
     console.log('\n=== 최종 결과 ===');
     if (allMatch) {
-      console.log(`✅ B-2.2 완료 — ${targets.length}개 테이블 일치`);
+      console.log(`✅ ${targets.length}개 테이블 일치`);
     } else {
       console.log('❌ 일부 테이블 불일치 — 확인 필요');
     }
