@@ -1,0 +1,115 @@
+    </main>
+    <footer class="footer">
+        <p>HPC/AIDC IT Asset Management System</p>
+    </footer>
+    <script src="/js/main.js"></script>
+    <script>
+    (function() {
+        var input = document.getElementById('globalSearch');
+        var results = document.getElementById('globalSearchResults');
+        if (!input || !results) return;
+        var timer = null;
+
+        input.addEventListener('input', function() {
+            clearTimeout(timer);
+            var q = this.value.trim();
+            if (q.length < 2) { results.classList.remove('show'); return; }
+            timer = setTimeout(function() {
+                fetch('/api/search?q=' + encodeURIComponent(q))
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.length === 0) {
+                            results.innerHTML = '<div class="gsr-empty">검색 결과가 없습니다.</div>';
+                        } else {
+                            var badgeMap = { asset: '장비', ip: 'IP', module: '모듈' };
+                            results.innerHTML = data.map(function(d) {
+                                var badge = '<span class="gsr-badge ' + d.type + '">' + (badgeMap[d.type] || d.type) + '</span>';
+                                return '<a class="gsr-item" href="' + d.url + '">' +
+                                    '<div class="gsr-title">' + badge + escH(d.title) + '</div>' +
+                                    '<div class="gsr-subtitle">' + escH(d.subtitle || '') + (d.location ? ' &middot; ' + escH(d.location) : '') + '</div>' +
+                                    '</a>';
+                            }).join('');
+                        }
+                        results.classList.add('show');
+                    });
+            }, 250);
+        });
+
+        input.addEventListener('focus', function() {
+            if (results.innerHTML && this.value.trim().length >= 2) results.classList.add('show');
+        });
+
+        document.addEventListener('click', function(e) {
+            if (!input.contains(e.target) && !results.contains(e.target)) {
+                results.classList.remove('show');
+            }
+        });
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') { results.classList.remove('show'); input.blur(); }
+        });
+
+        function escH(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    })();
+    </script>
+    <script>
+    // Auto-add returnTo hidden field to all inline POST forms (delete, return, etc.)
+    document.querySelectorAll('form[method="POST"]').forEach(function(form) {
+        if (!form.querySelector('input[name="returnTo"]')) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'returnTo';
+            input.value = location.pathname + location.search;
+            form.appendChild(input);
+        }
+    });
+
+    // Auto-add ?returnTo= to navigation links so users return to where they came from
+    (function() {
+        var cur = location.pathname + location.search;
+        // Propagate existing returnTo or use current page as returnTo
+        var params = new URLSearchParams(location.search);
+        var existingReturnTo = params.get('returnTo');
+
+        // 1) Add returnTo to /edit and /new links
+        document.querySelectorAll('a[href*="/edit"], a[href*="/new"]').forEach(function(a) {
+            var href = a.getAttribute('href');
+            if (!href || href.indexOf('returnTo') !== -1) return;
+            // Use existing returnTo (propagate) or current page
+            var rt = existingReturnTo || cur;
+            a.setAttribute('href', href + (href.indexOf('?') === -1 ? '?' : '&') + 'returnTo=' + encodeURIComponent(rt));
+        });
+
+        // 2) "목록"/"취소" buttons: use returnTo if present, else keep original href
+        if (existingReturnTo) {
+            document.querySelectorAll('a.btn-secondary').forEach(function(a) {
+                var text = a.textContent.trim();
+                if (text === '목록' || text === '취소') {
+                    a.setAttribute('href', existingReturnTo);
+                }
+            });
+        }
+
+        // 3) On detail pages: add returnTo to asset/equipment detail links
+        //    so clicking through to detail and then "목록" returns to the right list
+        var detailPages = ['/storage', '/offices', '/rooms', '/module-inventory',
+                           '/inventory', '/lendings', '/discovery', '/audit-log'];
+        var isListPage = detailPages.some(function(p) {
+            return cur === p || cur.indexOf(p + '?') === 0;
+        });
+        if (isListPage) {
+            document.querySelectorAll('a[href^="/assets/"], a[href*="/inventory/equipment/"]').forEach(function(a) {
+                var href = a.getAttribute('href');
+                if (!href || href.indexOf('returnTo') !== -1) return;
+                // Skip list-level links
+                if (href === '/assets' || href === '/assets/' || href === '/inventory') return;
+                a.setAttribute('href', href + (href.indexOf('?') === -1 ? '?' : '&') + 'returnTo=' + encodeURIComponent(cur));
+            });
+        }
+    })();
+    </script>
+    <% if (typeof extraJs !== 'undefined' && extraJs) { %>
+    <script src="/js/<%= extraJs %>"></script>
+    <% } %>
+</body>
+</html>

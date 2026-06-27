@@ -1,0 +1,9 @@
+<%- include('partials/header', { title, currentPath, extraCss: null }) %>
+
+<div class="error-page">
+    <h1><%= statusCode %></h1>
+    <p><%= message %></p>
+    <a href="/" class="btn btn-primary">홈으로 돌아가기</a>
+</div>
+
+<%- include('partials/footer', { extraJs: null }) %>

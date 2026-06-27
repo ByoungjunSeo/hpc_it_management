@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= typeof title !== 'undefined' ? title + ' - ' : '' %>IT 자산 관리</title>
+    <link rel="stylesheet" href="/css/main.css?v=<%= Date.now() %>">
+    <% if (typeof extraCss !== 'undefined' && extraCss) { %>
+    <link rel="stylesheet" href="/css/<%= extraCss %>?v=<%= Date.now() %>">
+    <% } %>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <a href="/">IT 자산 관리</a>
+        </div>
+        <ul class="nav-links">
+            <li><a href="/" class="<%= currentPath === '/' ? 'active' : '' %>">대시보드</a></li>
+            <li><a href="/chat" class="<%= currentPath.startsWith('/chat') ? 'active' : '' %>">AI 채팅</a></li>
+            <li><a href="/inventory" class="<%= currentPath.startsWith('/inventory') ? 'active' : '' %>">입출고</a></li>
+            <li><a href="/requests" class="<%= currentPath.startsWith('/requests') ? 'active' : '' %>">신청서</a></li>
+            <li class="nav-dropdown<%= currentPath.startsWith('/assets') || currentPath.startsWith('/module-inventory') ? ' dropdown-active' : '' %>">
+                <a href="#" class="nav-dropdown-toggle">자산 ▾</a>
+                <ul class="nav-dropdown-menu">
+                    <li><a href="/assets" class="<%= currentPath.startsWith('/assets') ? 'active' : '' %>">자산현황</a></li>
+                    <li><a href="/module-inventory" class="<%= currentPath.startsWith('/module-inventory') ? 'active' : '' %>">부품현황</a></li>
+                </ul>
+            </li>
+            <li class="nav-dropdown<%= currentPath.startsWith('/rooms') || currentPath.startsWith('/racks') || currentPath.startsWith('/offices') || currentPath.startsWith('/storage') ? ' dropdown-active' : '' %>">
+                <a href="#" class="nav-dropdown-toggle">시설 ▾</a>
+                <ul class="nav-dropdown-menu">
+                    <li><a href="/rooms" class="<%= currentPath.startsWith('/rooms') || currentPath.startsWith('/racks') ? 'active' : '' %>">서버실</a></li>
+                    <li><a href="/offices" class="<%= currentPath.startsWith('/offices') ? 'active' : '' %>">사무실</a></li>
+                    <li><a href="/storage" class="<%= currentPath.startsWith('/storage') ? 'active' : '' %>">장비실</a></li>
+                </ul>
+            </li>
+            <li class="nav-dropdown<%= currentPath.startsWith('/power-panel') || currentPath.startsWith('/network-layout') || currentPath.startsWith('/ip-management') || currentPath.startsWith('/discovery') ? ' dropdown-active' : '' %>">
+                <a href="#" class="nav-dropdown-toggle">인프라 ▾</a>
+                <ul class="nav-dropdown-menu">
+                    <li><a href="/power-panel" class="<%= currentPath.startsWith('/power-panel') ? 'active' : '' %>">전력분전반</a></li>
+                    <li><a href="/network-layout" class="<%= currentPath.startsWith('/network-layout') ? 'active' : '' %>">네트워크</a></li>
+                    <li><a href="/ip-management" class="<%= currentPath.startsWith('/ip-management') ? 'active' : '' %>">IP 관리</a></li>
+                    <li><a href="/discovery" class="<%= currentPath.startsWith('/discovery') ? 'active' : '' %>">자산 매칭</a></li>
+                </ul>
+            </li>
+            <li class="nav-dropdown<%= currentPath.startsWith('/gpu-monitoring') || currentPath.startsWith('/audit-log') ? ' dropdown-active' : '' %>">
+                <a href="#" class="nav-dropdown-toggle">모니터링 ▾</a>
+                <ul class="nav-dropdown-menu">
+                    <li><a href="/gpu-monitoring" class="<%= currentPath.startsWith('/gpu-monitoring') ? 'active' : '' %>">GPU 모니터링</a></li>
+                    <li><a href="/audit-log" class="<%= currentPath.startsWith('/audit-log') ? 'active' : '' %>">이력관리</a></li>
+                </ul>
+            </li>
+            <% if (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') { %>
+            <li class="nav-dropdown<%= currentPath.startsWith('/backup') || currentPath.startsWith('/admin') ? ' dropdown-active' : '' %>">
+                <a href="#" class="nav-dropdown-toggle">관리 ▾</a>
+                <ul class="nav-dropdown-menu">
+                    <li><a href="/backup" class="<%= currentPath.startsWith('/backup') ? 'active' : '' %>">백업</a></li>
+                    <li><a href="/admin/users" class="<%= currentPath.startsWith('/admin') ? 'active' : '' %>">계정관리</a></li>
+                </ul>
+            </li>
+            <% } %>
+        </ul>
+        <div class="nav-search">
+            <input type="text" id="globalSearch" class="global-search-input" placeholder="통합 검색 (장비, IP, 사용자...)" autocomplete="off">
+            <div class="global-search-results" id="globalSearchResults"></div>
+        </div>
+        <% if (typeof currentUser !== 'undefined' && currentUser) { %>
+        <div class="nav-user" style="display:flex; align-items:center; gap:8px; margin-left:12px; white-space:nowrap;">
+            <span style="font-size:13px; color:var(--text-secondary);">
+                <strong><%= currentUser.displayName || currentUser.username %></strong>
+                <span class="badge badge-<%= currentUser.role === 'admin' ? 'danger' : currentUser.role === 'maintenance' ? 'warning' : 'info' %>" style="font-size:10px; padding:1px 6px;">
+                    <%= currentUser.role === 'admin' ? '관리자' : currentUser.role === 'maintenance' ? '유지보수' : '조회' %>
+                </span>
+            </span>
+            <a href="/logout" class="btn btn-sm btn-outline" style="font-size:11px; padding:2px 8px;">로그아웃</a>
+        </div>
+        <% } %>
+    </nav>
+    <% if (typeof flash !== 'undefined' && flash) { %>
+    <% if (flash.success) { %>
+    <div class="alert alert-success"><%- flash.success %></div>
+    <% } %>
+    <% if (flash.error) { %>
+    <div class="alert alert-error"><%= flash.error %></div>
+    <% } %>
+    <% } %>
+    <main class="container">

@@ -65,7 +65,7 @@ app.use((req, res, next) => {
 // B-4a-2 이후 하나씩 해제 예정
 
 // Auth routes (no login required)
-// app.use('/', require('./routes/auth'));
+app.use('/', require('./routes/auth'));
 
 // Public intake (no login required - external vendor use)
 // app.use('/intake', require('./routes/publicIntake'));
