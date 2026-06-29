@@ -1,0 +1,193 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<%
+  const typeMap = { server:'서버', switch:'스위치', pdu:'PDU', ups:'UPS', storage:'스토리지', other:'기타' };
+  const statusMap = { active:'운영중', inactive:'비활성', maintenance:'점검중', decommissioned:'폐기' };
+  const ownerMap = { company:'자사', vendor:'업체' };
+  const modTypeMap = { cpu:'CPU', memory:'메모리', disk:'디스크', network:'NIC', raid:'RAID', gpu:'GPU' };
+  const ipTypeMap = { management:'Management', bmc:'BMC', ib:'InfiniBand', data:'Data', os:'OS', other:'기타' };
+  const credTypeMap = { root:'Root', user:'User', admin:'Admin', bmc:'BMC', etc:'기타' };
+  function ipLabel(ip) { return (ip.ip_type === 'other' && ip.description) ? ip.description : (ipTypeMap[ip.ip_type] || ip.ip_type); }
+
+  function uLabel(a) {
+    if (!a.rack_unit_start) return '-';
+    var u = Math.floor((a.rack_unit_start - 1) / 3) + 1;
+    var uEnd = Math.floor((a.rack_unit_start + (a.rack_unit_size || 3) - 2) / 3) + 1;
+    return 'U' + u + (uEnd > u ? '~U' + uEnd : '');
+  }
+%>
+
+<div class="page-header">
+    <h1><%= room.name %> 자산 목록</h1>
+    <div class="btn-group">
+        <a href="/rooms/<%= room.id %>" class="btn btn-secondary">랙 배치</a>
+        <a href="/rooms" class="btn btn-secondary">서버실 목록</a>
+    </div>
+</div>
+
+<div class="card mb-2" style="padding:12px 16px;">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <strong style="font-size:13px;">컬럼 선택:</strong>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-asset-num" checked onchange="toggleCol(this)"> 자산번호</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-mgmt-num" onchange="toggleCol(this)"> 관리번호</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-type" checked onchange="toggleCol(this)"> 유형</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-owner" checked onchange="toggleCol(this)"> 소유</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-vendor" onchange="toggleCol(this)"> 업체</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-mfr" onchange="toggleCol(this)"> 제조사</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-model" checked onchange="toggleCol(this)"> 모델명</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-serial" onchange="toggleCol(this)"> 시리얼</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-rack" checked onchange="toggleCol(this)"> 랙</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-u" checked onchange="toggleCol(this)"> U위치</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-ip" checked onchange="toggleCol(this)"> IP</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-cred" onchange="toggleCol(this)"> 접속정보</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-module" onchange="toggleCol(this)"> 컴퓨팅모듈</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-user" checked onchange="toggleCol(this)"> 담당자</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-purpose" checked onchange="toggleCol(this)"> 용도</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-status" checked onchange="toggleCol(this)"> 상태</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-purchase" onchange="toggleCol(this)"> 구매일</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-warranty" onchange="toggleCol(this)"> 보증만료</label>
+        <label class="col-toggle" style="font-size:12px;cursor:pointer;"><input type="checkbox" data-col="col-notes" onchange="toggleCol(this)"> 비고</label>
+    </div>
+</div>
+
+<div class="card">
+    <p class="text-muted" style="font-size:13px;margin-bottom:8px;">총 <strong><%= assets.length %></strong>개 자산</p>
+    <div class="table-wrapper">
+        <table id="assetTable">
+            <thead>
+                <tr>
+                    <th class="col-asset-num sortable" data-col-idx="0" onclick="sortTable(0)">자산번호</th>
+                    <th class="col-mgmt-num sortable" style="display:none" data-col-idx="1" onclick="sortTable(1)">관리번호</th>
+                    <th class="col-type sortable" data-col-idx="2" onclick="sortTable(2)">유형</th>
+                    <th class="col-owner sortable" data-col-idx="3" onclick="sortTable(3)">소유</th>
+                    <th class="col-vendor sortable" style="display:none" data-col-idx="4" onclick="sortTable(4)">업체</th>
+                    <th class="col-mfr sortable" style="display:none" data-col-idx="5" onclick="sortTable(5)">제조사</th>
+                    <th class="col-model sortable" data-col-idx="6" onclick="sortTable(6)">모델명</th>
+                    <th class="col-serial sortable" style="display:none" data-col-idx="7" onclick="sortTable(7)">시리얼</th>
+                    <th class="col-rack sortable" data-col-idx="8" onclick="sortTable(8)">랙</th>
+                    <th class="col-u sortable" data-col-idx="9" onclick="sortTable(9)">U위치</th>
+                    <th class="col-ip sortable" data-col-idx="10" onclick="sortTable(10)">IP</th>
+                    <th class="col-cred" style="display:none">접속정보</th>
+                    <th class="col-module" style="display:none">컴퓨팅모듈</th>
+                    <th class="col-user sortable" data-col-idx="13" onclick="sortTable(13)">담당자</th>
+                    <th class="col-purpose sortable" data-col-idx="14" onclick="sortTable(14)">용도</th>
+                    <th class="col-status sortable" data-col-idx="15" onclick="sortTable(15)">상태</th>
+                    <th class="col-purchase sortable" style="display:none" data-col-idx="16" onclick="sortTable(16)">구매일</th>
+                    <th class="col-warranty sortable" style="display:none" data-col-idx="17" onclick="sortTable(17)">보증만료</th>
+                    <th class="col-notes" style="display:none">비고</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% if (assets.length === 0) { %>
+                <tr><td colspan="19" class="text-center text-muted">등록된 자산이 없습니다.</td></tr>
+                <% } %>
+                <% assets.forEach(function(a) { %>
+                <tr>
+                    <td class="col-asset-num"><a href="/assets/<%= a.id %>"><%= a.asset_number || '-' %></a></td>
+                    <td class="col-mgmt-num" style="display:none"><%= a.management_number || '-' %></td>
+                    <td class="col-type"><%= typeMap[a.asset_type] || a.asset_type %></td>
+                    <td class="col-owner"><%= ownerMap[a.ownership] || a.ownership %></td>
+                    <td class="col-vendor" style="display:none"><%= a.vendor_name || '-' %></td>
+                    <td class="col-mfr" style="display:none"><%= a.manufacturer || '-' %></td>
+                    <td class="col-model"><%= a.model_name || '-' %></td>
+                    <td class="col-serial" style="display:none"><%= a.serial_number || '-' %></td>
+                    <td class="col-rack"><%= a.rack_name || '-' %></td>
+                    <td class="col-u"><%= uLabel(a) %></td>
+                    <td class="col-ip">
+                        <% if (a.ips && a.ips.length > 0) { %>
+                            <% a.ips.forEach(function(ip) { %>
+                            <div style="white-space:nowrap;font-size:12px;"><span style="color:#64748b;"><%= ipLabel(ip) %>:</span> <strong><%= ip.ip_address %></strong></div>
+                            <% }) %>
+                        <% } else if (a.ip_address) { %>
+                            <strong><%= a.ip_address %></strong>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td class="col-cred" style="display:none">
+                        <% if (a.credentials && a.credentials.length > 0) { %>
+                            <% a.credentials.forEach(function(c) { %>
+                            <div style="white-space:nowrap;font-size:12px;"><span style="color:#64748b;"><%= credTypeMap[c.credential_type] || c.credential_type %>:</span> <%= c.username %></div>
+                            <% }) %>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td class="col-module" style="display:none">
+                        <% if (a.modules && a.modules.length > 0) { %>
+                            <% a.modules.forEach(function(m) { %>
+                            <div style="white-space:nowrap;font-size:12px;"><span class="badge" style="font-size:10px;"><%= modTypeMap[m.module_type] || m.module_type %></span> <%= m.model || '' %><%= m.capacity ? ' '+m.capacity : '' %><%= m.count > 1 ? ' x'+m.count : '' %></div>
+                            <% }) %>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td class="col-user"><%= a.assigned_user || '-' %></td>
+                    <td class="col-purpose"><%= a.purpose || '-' %></td>
+                    <td class="col-status"><%= statusMap[a.status] || a.status %></td>
+                    <td class="col-purchase" style="display:none"><%= a.purchase_date || '-' %></td>
+                    <td class="col-warranty" style="display:none"><%= a.warranty_end || '-' %></td>
+                    <td class="col-notes" style="display:none"><%= a.notes || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+.sortable { cursor: pointer; user-select: none; position: relative; padding-right: 18px !important; }
+.sortable:hover { background: var(--bg); }
+.sortable::after { content: '⇅'; position: absolute; right: 4px; opacity: 0.3; font-size: 11px; }
+.sortable.asc::after { content: '▲'; opacity: 0.7; }
+.sortable.desc::after { content: '▼'; opacity: 0.7; }
+</style>
+<script>
+function toggleCol(cb) {
+    var cls = cb.dataset.col;
+    var show = cb.checked;
+    document.querySelectorAll('.' + cls).forEach(function(el) {
+        el.style.display = show ? '' : 'none';
+    });
+}
+
+var currentSort = { col: -1, asc: true };
+function sortTable(colIdx) {
+    var table = document.getElementById('assetTable');
+    var tbody = table.querySelector('tbody');
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    if (rows.length <= 1) return;
+
+    // Toggle direction
+    if (currentSort.col === colIdx) {
+        currentSort.asc = !currentSort.asc;
+    } else {
+        currentSort.col = colIdx;
+        currentSort.asc = true;
+    }
+
+    // Update header styles
+    table.querySelectorAll('th.sortable').forEach(function(th) {
+        th.classList.remove('asc', 'desc');
+    });
+    var activeTh = table.querySelector('th[data-col-idx="' + colIdx + '"]');
+    if (activeTh) activeTh.classList.add(currentSort.asc ? 'asc' : 'desc');
+
+    rows.sort(function(a, b) {
+        var cellA = a.cells[colIdx];
+        var cellB = b.cells[colIdx];
+        if (!cellA || !cellB) return 0;
+        var valA = (cellA.textContent || '').trim().toLowerCase();
+        var valB = (cellB.textContent || '').trim().toLowerCase();
+
+        // Try numeric
+        var numA = parseFloat(valA.replace(/[^0-9.\-]/g, ''));
+        var numB = parseFloat(valB.replace(/[^0-9.\-]/g, ''));
+        if (!isNaN(numA) && !isNaN(numB)) {
+            return currentSort.asc ? numA - numB : numB - numA;
+        }
+        // String compare
+        if (valA < valB) return currentSort.asc ? -1 : 1;
+        if (valA > valB) return currentSort.asc ? 1 : -1;
+        return 0;
+    });
+
+    rows.forEach(function(row) { tbody.appendChild(row); });
+}
+</script>
+
+<%- include('../partials/footer', { extraJs: null }) %>

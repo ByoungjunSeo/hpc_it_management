@@ -206,6 +206,28 @@ express → getDb() → 디렉토리 생성(backups, photos)
 - blade_slot 표기 일관성 (글루시스-007 좌측/우측 vs 008 left/right)
 - TPC-SV-1U-06 모듈 등록 누락
 
+## 이식 기술부채 (B-4d에서 정리)
+
+### B-4b에서 발생한 호환층 부채 (B-4d §5 전환 시 제거 대상)
+
+- **equipmentUsageLog.js**: v2 깨끗한 스키마(event_type 영문, event_date)를
+  v1 대시보드 뷰에 맞추려 호환층 3종 적용 중:
+  1. event_type → 한글 status 역매핑 (incoming→입고 등). `EVENT_TYPE_LABEL` 상수.
+  2. SELECT에서 `event_date AS usage_date` 별칭 (뷰가 옛 컬럼명 기대).
+  3. 세 메서드(getRecent/countByStatus/getMonthlyTrend) 모두 fallback `|| event_type`.
+  → B-4d에서 §5대로 대시보드를 assets 기반 통계로 재작성하고,
+    위 호환층 제거 + 뷰를 event_type/event_date 직접 사용으로 전환.
+- **transferred event_type**: v1엔 없던 신규 개념(v1은 모듈 이동만 module_transfer_logs로 관리).
+  현재 DB 0건. 한글 라벨 미정 → fallback으로 'transferred' 원문 노출(안 깨짐).
+  자산 이관 기능을 실제 설계할 때(B-4d 또는 이후) 한글 라벨 확정.
+
+### B-4b 완료 상태
+
+- requireLogin + 읽기 라우트: auditLog, offices, storage, serverRooms(rooms),
+  index(대시보드), /api/search — 전부 pg async 전환, 로그인 보호 하에 200 동작.
+- 검증: 대시보드 자산통계 정확(172/87/22/7), audit login 기록(id 1422~), 세션 user 저장.
+- 알려진 호환층 부채는 위에 기록(기능 정상, B-4d에서 정리).
+
 ## 8. 작업 원칙 (유지)
 
 - 한 단계씩 잘게, 사용자 직접 검증 후 다음

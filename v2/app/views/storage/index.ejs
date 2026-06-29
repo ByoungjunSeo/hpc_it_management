@@ -1,0 +1,269 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>장비실 / 보관</h1>
+</div>
+
+<!-- Tab Navigation -->
+<div class="card" style="padding:0; overflow:hidden; margin-bottom:16px;">
+    <div style="display:flex; border-bottom:1px solid #e2e8f0;">
+        <button class="stg-tab active" data-tab="assetsTab" style="flex:1; padding:12px 16px; border:none; background:#fff; cursor:pointer; font-weight:600; border-bottom:2px solid #3b82f6; color:#3b82f6; font-size:14px;">보관 장비</button>
+        <button class="stg-tab" data-tab="modulesTab" style="flex:1; padding:12px 16px; border:none; background:#f8fafc; cursor:pointer; font-weight:400; border-bottom:2px solid transparent; color:#64748b; font-size:14px;">컴퓨팅 모듈<% if (storageModules.length > 0) { %> (<%= storageModules.length %>종)<% } %></button>
+    </div>
+</div>
+
+<!-- Tab 1: 보관 장비 -->
+<div id="assetsTab">
+<% rooms.forEach(room => { %>
+<div class="card">
+    <div class="card-header">
+        <h2><%= room.name %></h2>
+        <span class="text-muted"><%= room.location || '' %> &middot; 보관 자산 <%= room.assets.length %>대</span>
+    </div>
+
+    <% if (room.assets.length === 0) { %>
+    <p class="text-muted">보관 자산이 없습니다.</p>
+    <% } else { %>
+    <%
+      // Group by asset type
+      const grouped = {};
+      room.assets.forEach(a => {
+        const typeLabel = appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type;
+        if (!grouped[typeLabel]) grouped[typeLabel] = [];
+        grouped[typeLabel].push(a);
+      });
+    %>
+    <% Object.keys(grouped).forEach(typeLabel => { %>
+    <h3 style="margin: 12px 0 8px 0; font-size: 14px;"><%= typeLabel %> (<%= grouped[typeLabel].length %>)</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>자산번호</th>
+                    <th>모델명</th>
+                    <th>관리번호</th>
+                    <th>상태</th>
+                    <th>비고</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% grouped[typeLabel].forEach(asset => { %>
+                <tr>
+                    <td><a href="/assets/<%= asset.id %>"><%= asset.asset_number || '-' %></a></td>
+                    <td><%= asset.model_name || '-' %></td>
+                    <td><%= asset.management_number || '-' %></td>
+                    <td><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'returned' ? 'info' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label || asset.status %></span></td>
+                    <td><%= asset.notes || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% }) %>
+    <% } %>
+</div>
+<% }) %>
+
+<% if (unplacedAssets.length > 0) { %>
+<div class="card">
+    <div class="card-header">
+        <h2>미배치 / 비활성 자산</h2>
+        <span class="text-muted"><%= unplacedAssets.length %>대</span>
+    </div>
+    <%
+      const ungrouped = {};
+      unplacedAssets.forEach(a => {
+        const typeLabel = appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type;
+        if (!ungrouped[typeLabel]) ungrouped[typeLabel] = [];
+        ungrouped[typeLabel].push(a);
+      });
+    %>
+    <% Object.keys(ungrouped).forEach(typeLabel => { %>
+    <h3 style="margin: 12px 0 8px 0; font-size: 14px;"><%= typeLabel %> (<%= ungrouped[typeLabel].length %>)</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>자산번호</th>
+                    <th>모델명</th>
+                    <th>관리번호</th>
+                    <th>상태</th>
+                    <th>비고</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% ungrouped[typeLabel].forEach(asset => { %>
+                <tr>
+                    <td><a href="/assets/<%= asset.id %>"><%= asset.asset_number || '-' %></a></td>
+                    <td><%= asset.model_name || '-' %></td>
+                    <td><%= asset.management_number || '-' %></td>
+                    <td><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'returned' ? 'info' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label || asset.status %></span></td>
+                    <td><%= asset.notes || '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% }) %>
+</div>
+<% } %>
+
+<% if (rooms.length === 0 && unplacedAssets.length === 0) { %>
+<div class="card text-center">
+    <p class="text-muted">등록된 장비실이나 미배치 자산이 없습니다.</p>
+</div>
+<% } %>
+</div>
+
+<!-- Tab 2: 컴퓨팅 모듈 -->
+<div id="modulesTab" style="display:none;">
+<% if (storageModules.length > 0) { %>
+<%
+  const moduleTypeLabels = {};
+  appConfig.moduleTypes.forEach(t => { moduleTypeLabels[t.value] = t.label; });
+  const groupedModules = {};
+  storageModules.forEach(m => {
+    if (!groupedModules[m.module_type]) groupedModules[m.module_type] = [];
+    groupedModules[m.module_type].push(m);
+  });
+  const typeOrder = ['cpu','memory','disk','network','raid','gpu','cable'];
+  let totalStorageQty = 0;
+  storageModules.forEach(m => { totalStorageQty += m.storage_quantity; });
+%>
+
+<div class="card">
+    <div class="card-header">
+        <h2>보관 컴퓨팅 모듈 현황</h2>
+        <span class="text-muted">총 <%= storageModules.length %>종 / <%= totalStorageQty %>개</span>
+    </div>
+
+    <!-- Type summary badges -->
+    <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
+    <% typeOrder.forEach(typeKey => {
+      if (!groupedModules[typeKey]) return;
+      const items = groupedModules[typeKey];
+      const typeLabel = moduleTypeLabels[typeKey] || typeKey;
+      let typeTotal = 0;
+      items.forEach(m => { typeTotal += m.storage_quantity; });
+    %>
+        <span class="badge badge-secondary" style="font-size:12px; padding:4px 10px; cursor:pointer;" onclick="document.getElementById('moduleType_<%= typeKey %>').scrollIntoView({behavior:'smooth', block:'start'})"><%= typeLabel %> <%= items.length %>종/<%= typeTotal %>개</span>
+    <% }) %>
+    </div>
+
+    <% typeOrder.forEach(typeKey => {
+      if (!groupedModules[typeKey]) return;
+      const items = groupedModules[typeKey];
+      const typeLabel = moduleTypeLabels[typeKey] || typeKey;
+      let typeTotal = 0;
+      items.forEach(m => { typeTotal += m.storage_quantity; });
+    %>
+    <h3 id="moduleType_<%= typeKey %>" style="margin:20px 0 8px; font-size:14px; color:#475569; border-bottom:1px solid #e2e8f0; padding-bottom:6px;"><%= typeLabel %> <span class="badge badge-secondary"><%= items.length %>종 / <%= typeTotal %>개</span></h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>코드</th>
+                    <th>제조사</th>
+                    <th>모델</th>
+                    <th>용량/사양</th>
+                    <% if (typeKey === 'cable') { %>
+                    <th>상세</th>
+                    <% } %>
+                    <th style="text-align:right;">보관 수량</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% items.forEach(m => { %>
+                <tr>
+                    <td><a href="/module-inventory?type=<%= m.module_type %>" style="font-weight:600;"><%= m.item_code %></a></td>
+                    <td><%= m.manufacturer || m.label || '-' %></td>
+                    <td><%= m.model || '-' %></td>
+                    <td><%= m.capacity || '-' %></td>
+                    <% if (typeKey === 'cable') { %>
+                    <td style="font-size:12px; color:#64748b;"><%= m.specification || '-' %></td>
+                    <% } %>
+                    <td style="text-align:right;">
+                        <span class="storage-qty-display" data-id="<%= m.id %>" data-code="<%= m.item_code %>" style="font-weight:600; font-size:16px; cursor:pointer; padding:2px 8px; border-radius:4px; border:1px solid transparent;" title="클릭하여 수정" onclick="editStorageQty(this)"><%= m.storage_quantity %></span>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% }) %>
+</div>
+
+<script>
+function editStorageQty(el) {
+  if (el.querySelector('input')) return;
+  var currentVal = parseInt(el.textContent.trim());
+  var id = el.dataset.id;
+  var input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.value = currentVal;
+  input.style.cssText = 'width:70px; text-align:right; font-size:14px; font-weight:600; padding:2px 6px; border:2px solid #3b82f6; border-radius:4px; outline:none;';
+  el.textContent = '';
+  el.style.border = 'none';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+
+  function save() {
+    var newVal = parseInt(input.value);
+    if (isNaN(newVal) || newVal < 0) { el.textContent = currentVal; return; }
+    if (newVal === currentVal) { el.textContent = currentVal; return; }
+    el.textContent = '...';
+    fetch('/module-inventory/api/inventory/' + id + '/update-storage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storage_quantity: newVal })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.success) {
+        el.textContent = data.storage_quantity;
+        el.style.background = '#dcfce7';
+        setTimeout(function() { el.style.background = ''; }, 1500);
+      } else {
+        alert(data.error || '수정 실패');
+        el.textContent = currentVal;
+      }
+    })
+    .catch(function() { alert('서버 오류'); el.textContent = currentVal; });
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { el.textContent = currentVal; }
+  });
+}
+</script>
+<% } else { %>
+<div class="card text-center">
+    <p class="text-muted">보관 중인 컴퓨팅 모듈이 없습니다.</p>
+</div>
+<% } %>
+</div>
+
+<script>
+document.querySelectorAll('.stg-tab').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var tabId = this.dataset.tab;
+    document.querySelectorAll('.stg-tab').forEach(function(b) {
+      b.style.fontWeight = '400';
+      b.style.borderBottom = '2px solid transparent';
+      b.style.color = '#64748b';
+      b.style.background = '#f8fafc';
+    });
+    this.style.fontWeight = '600';
+    this.style.borderBottom = '2px solid #3b82f6';
+    this.style.color = '#3b82f6';
+    this.style.background = '#fff';
+    document.getElementById('assetsTab').style.display = tabId === 'assetsTab' ? '' : 'none';
+    document.getElementById('modulesTab').style.display = tabId === 'modulesTab' ? '' : 'none';
+  });
+});
+</script>
+
+<%- include('../partials/footer', { extraJs: null }) %>

@@ -1,0 +1,604 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= room.name %> 서버실</h1>
+    <div class="btn-group">
+        <button class="btn btn-primary" onclick="openModal('addRackModal')">+ 랙 추가</button>
+        <a href="/rooms/<%= room.id %>/assets" class="btn btn-outline">자산 목록</a>
+        <a href="/rooms/<%= room.id %>/modules" class="btn btn-outline">모듈 현황</a>
+        <a href="/rooms" class="btn btn-secondary">서버실 목록</a>
+        <form method="POST" action="/rooms/<%= room.id %>/delete" style="display:inline" onsubmit="return confirmDelete('서버실과 포함된 모든 랙/장비가 삭제됩니다.')">
+            <button type="submit" class="btn btn-danger">삭제</button>
+        </form>
+    </div>
+</div>
+
+<% if (room.stats || room.location || room.description) { %>
+<div class="card mb-2 room-detail-stats">
+    <% if (room.location || room.description) { %>
+    <div style="margin-bottom:8px;font-size:13px;color:#64748b;">
+        <% if (room.location) { %><strong>위치:</strong> <%= room.location %><% } %>
+        <% if (room.description) { %> &middot; <%= room.description %><% } %>
+    </div>
+    <% } %>
+    <% if (room.stats) { %>
+    <div class="room-stats-bar">
+        <div class="room-stat">
+            <span class="room-stat-value"><%= room.stats.rackCount %></span>
+            <span class="room-stat-label">랙</span>
+        </div>
+        <div class="room-stat">
+            <span class="room-stat-value"><%= room.stats.totalAssets %></span>
+            <span class="room-stat-label">장비</span>
+        </div>
+        <div class="room-stat room-stat-util">
+            <div class="room-util-bar">
+                <div class="room-util-fill" style="width:<%= room.stats.utilization %>%"></div>
+            </div>
+            <span class="room-stat-label"><%= room.stats.usedU %>/<%= room.stats.totalU %>U (<%= room.stats.utilization %>%)</span>
+        </div>
+        <% if (room.stats.typeCounts && Object.keys(room.stats.typeCounts).length > 0) { %>
+        <div class="room-stat room-stat-types">
+            <% var typeLabels = { server:'서버', switch:'스위치', storage:'스토리지', pdu:'PDU', ups:'UPS', kvm:'KVM', other:'기타' }; %>
+            <% Object.keys(room.stats.typeCounts).forEach(function(t) { %>
+            <span class="room-type-chip <%= t %>"><%= typeLabels[t] || t %> <%= room.stats.typeCounts[t] %></span>
+            <% }) %>
+        </div>
+        <% } %>
+    </div>
+    <% } %>
+</div>
+<% } %>
+
+<% if (typeof storageModules !== 'undefined' && storageModules.length > 0) { %>
+<div class="card mb-2" style="padding:0; overflow:hidden;">
+    <div class="tab-nav" style="display:flex; border-bottom:1px solid #e2e8f0;">
+        <button class="tab-btn active" data-tab="rackTab" style="flex:1; padding:10px 16px; border:none; background:#fff; cursor:pointer; font-weight:600; border-bottom:2px solid #3b82f6; color:#3b82f6;">랙 배치</button>
+        <button class="tab-btn" data-tab="moduleTab" style="flex:1; padding:10px 16px; border:none; background:#f8fafc; cursor:pointer; font-weight:400; border-bottom:2px solid transparent; color:#64748b;">컴퓨팅 모듈 (<%= storageModules.length %>종)</button>
+    </div>
+</div>
+<% } %>
+
+<div id="rackTab">
+<div class="card mb-2" style="padding:12px 16px;">
+    <div class="d-flex align-center justify-between" style="flex-wrap:wrap;gap:8px;">
+        <span class="text-muted" style="font-size:13px;">랙을 드래그하여 위치를 변경할 수 있습니다.</span>
+        <div class="d-flex gap-1 align-center" style="font-size:12px;">
+            <span class="legend-color server" style="width:16px;height:10px;border-radius:2px;display:inline-block;"></span> 자사
+            <span class="legend-color vendor" style="width:16px;height:10px;border-radius:2px;display:inline-block;margin-left:8px;"></span> 업체
+            <span class="legend-color switch" style="width:16px;height:10px;border-radius:2px;display:inline-block;margin-left:8px;"></span> 스위치
+            <span class="legend-color pdu" style="width:16px;height:10px;border-radius:2px;display:inline-block;margin-left:8px;"></span> PDU
+        </div>
+    </div>
+</div>
+
+<%
+  // Auto-distribute racks that share the same position
+  var posMap = {};
+  racks.forEach(function(r) {
+    var key = (r.row_position || 1) + ':' + (r.col_position || 1);
+    if (!posMap[key]) posMap[key] = [];
+    posMap[key].push(r);
+  });
+  // If any position has multiple racks, redistribute them sequentially
+  var hasOverlap = Object.keys(posMap).some(function(k) { return posMap[k].length > 1; });
+  if (hasOverlap) {
+    var col = 1, row = 1;
+    var maxCols = Math.min(Math.max(Math.ceil(Math.sqrt(racks.length)), 3), 8);
+    racks.forEach(function(r) {
+      r.row_position = row;
+      r.col_position = col;
+      col++;
+      if (col > maxCols) { col = 1; row++; }
+    });
+  }
+
+  // Compute grid dimensions from rack positions
+  var maxRow = 1, maxCol = 1;
+  racks.forEach(function(r) {
+    if (r.row_position > maxRow) maxRow = r.row_position;
+    if (r.col_position > maxCol) maxCol = r.col_position;
+  });
+  // Add one extra row/col for drop targets
+  maxRow = Math.max(maxRow, 1) + 1;
+  maxCol = Math.max(maxCol, 2) + 1;
+  // Cap to reasonable size
+  if (maxCol > 12) maxCol = 12;
+  if (maxRow > 10) maxRow = 10;
+%>
+
+<div class="rack-grid-container">
+    <% if (racks.length === 0) { %>
+    <div class="card text-center">
+        <p class="text-muted">등록된 랙이 없습니다. 랙을 추가해주세요.</p>
+    </div>
+    <% } else { %>
+    <div class="rack-dnd-grid" id="rackGrid"
+         style="grid-template-columns: repeat(<%= maxCol %>, minmax(120px, 1fr)); grid-template-rows: repeat(<%= maxRow %>, auto);">
+        <%
+          // Place racks at their positions
+          racks.forEach(function(rack) {
+            var r = rack.row_position || 1;
+            var c = rack.col_position || 1;
+        %>
+        <div class="rack-thumbnail rack-draggable"
+             draggable="true"
+             data-rack-id="<%= rack.id %>"
+             data-rack-type="<%= rack.rack_type || 'standard' %>"
+             data-row="<%= r %>"
+             data-col="<%= c %>"
+             style="grid-row: <%= r %>; grid-column: <%= c %>;">
+            <div class="rack-thumb-header">
+                <span class="drag-handle">&#x2630;</span>
+                <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } %><%= rack.name %>
+            </div>
+            <div class="rack-thumb-body">
+                <div class="rack-usage-bar">
+                    <div class="rack-usage-fill" style="height:<%= rack.total_units > 0 ? (rack.used_units / rack.total_units * 100) : 0 %>%"></div>
+                </div>
+                <div class="rack-thumb-info">
+                    <span><%= rack.used_units || 0 %>/<%= rack.total_units %>U</span>
+                    <span><%= rack.asset_count || 0 %>대</span>
+                </div>
+            </div>
+            <div class="rack-thumb-actions">
+                <a href="/racks/<%= rack.id %>" class="rack-thumb-link">상세 보기</a>
+                <button class="rack-thumb-btn" title="수정" onclick="event.stopPropagation(); openEditRack(<%= rack.id %>, '<%= (rack.name || '').replace(/'/g, "\\'") %>', '<%= rack.rack_type || "standard" %>', <%= rack.total_units || 42 %>, '<%= (rack.description || '').replace(/'/g, "\\'") %>')">&#x270E;</button>
+            </div>
+        </div>
+        <% }) %>
+
+        <% // Render empty drop zones for unoccupied cells
+           var occupied = {};
+           racks.forEach(function(rack) {
+             occupied[(rack.row_position || 1) + ':' + (rack.col_position || 1)] = true;
+           });
+           for (var rr = 1; rr <= maxRow; rr++) {
+             for (var cc = 1; cc <= maxCol; cc++) {
+               if (!occupied[rr + ':' + cc]) {
+        %>
+        <div class="rack-drop-zone"
+             data-row="<%= rr %>"
+             data-col="<%= cc %>"
+             style="grid-row: <%= rr %>; grid-column: <%= cc %>;">
+        </div>
+        <%     }
+             }
+           }
+        %>
+    </div>
+    <% } %>
+</div>
+
+</div><!-- /rackTab -->
+
+<% if (typeof storageModules !== 'undefined' && storageModules.length > 0) { %>
+<div id="moduleTab" style="display:none;">
+<div class="card">
+    <div class="card-header">
+        <h3>보관 컴퓨팅 모듈 현황</h3>
+    </div>
+    <%
+      // Group modules by type
+      const moduleTypeLabels = {};
+      if (typeof appConfig !== 'undefined') {
+        appConfig.moduleTypes.forEach(t => { moduleTypeLabels[t.value] = t.label; });
+      }
+      const groupedModules = {};
+      storageModules.forEach(m => {
+        if (!groupedModules[m.module_type]) groupedModules[m.module_type] = [];
+        groupedModules[m.module_type].push(m);
+      });
+      const typeOrder = ['cpu','memory','disk','network','raid','gpu','cable'];
+      let totalStorageQty = 0;
+      storageModules.forEach(m => { totalStorageQty += m.storage_quantity; });
+    %>
+    <p class="text-muted" style="margin:0 0 12px;">총 <%= storageModules.length %>종 / <%= totalStorageQty %>개</p>
+
+    <% typeOrder.forEach(typeKey => {
+      if (!groupedModules[typeKey]) return;
+      const items = groupedModules[typeKey];
+      const typeLabel = moduleTypeLabels[typeKey] || typeKey;
+      let typeTotal = 0;
+      items.forEach(m => { typeTotal += m.storage_quantity; });
+    %>
+    <h4 style="margin:16px 0 8px; font-size:14px; color:#475569;"><%= typeLabel %> <span class="badge badge-secondary"><%= items.length %>종 / <%= typeTotal %>개</span></h4>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>코드</th>
+                    <th>제조사</th>
+                    <th>모델</th>
+                    <th>용량/사양</th>
+                    <th style="text-align:right;">보관 수량</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% items.forEach(m => { %>
+                <tr>
+                    <td><a href="/module-inventory?type=<%= m.module_type %>" style="font-weight:600;"><%= m.item_code %></a></td>
+                    <td><%= m.manufacturer || m.label || '-' %></td>
+                    <td><%= m.model || '-' %></td>
+                    <td><%= m.capacity || m.specification || '-' %></td>
+                    <td style="text-align:right;">
+                        <span class="storage-qty-display" data-id="<%= m.id %>" data-code="<%= m.item_code %>" style="font-weight:600; font-size:16px; cursor:pointer; padding:2px 8px; border-radius:4px; border:1px solid transparent;" title="클릭하여 수정" onclick="editStorageQty(this)"><%= m.storage_quantity %></span>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% }) %>
+</div>
+</div>
+
+<script>
+function editStorageQty(el) {
+  if (el.querySelector('input')) return;
+  var currentVal = parseInt(el.textContent.trim());
+  var id = el.dataset.id;
+  var code = el.dataset.code;
+  var input = document.createElement('input');
+  input.type = 'number';
+  input.min = '0';
+  input.value = currentVal;
+  input.style.cssText = 'width:70px; text-align:right; font-size:14px; font-weight:600; padding:2px 6px; border:2px solid #3b82f6; border-radius:4px; outline:none;';
+  el.textContent = '';
+  el.style.border = 'none';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+
+  function save() {
+    var newVal = parseInt(input.value);
+    if (isNaN(newVal) || newVal < 0) { el.textContent = currentVal; return; }
+    if (newVal === currentVal) { el.textContent = currentVal; return; }
+    el.textContent = '...';
+    fetch('/module-inventory/api/inventory/' + id + '/update-storage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storage_quantity: newVal })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.success) {
+        el.textContent = data.storage_quantity;
+        el.style.background = '#dcfce7';
+        setTimeout(function() { el.style.background = ''; }, 1500);
+      } else {
+        alert(data.error || '수정 실패');
+        el.textContent = currentVal;
+      }
+    })
+    .catch(function() { alert('서버 오류'); el.textContent = currentVal; });
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { el.textContent = currentVal; }
+  });
+}
+</script>
+<% } %>
+
+<!-- Add Rack Modal -->
+<div class="modal-overlay" id="addRackModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>랙 추가</h3>
+            <button class="modal-close" onclick="closeModal('addRackModal')">&times;</button>
+        </div>
+        <form method="POST" action="/rooms/<%= room.id %>/racks">
+            <div class="form-group">
+                <label>랙 이름 *</label>
+                <input type="text" name="name" class="form-control" required placeholder="예: A-01">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>랙 유형</label>
+                    <select name="rack_type" class="form-control">
+                        <option value="standard">서버랙</option>
+                        <option value="immersion">액침탱크</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>총 U 수</label>
+                    <input type="number" name="total_units" class="form-control" value="42" min="1" max="52">
+                </div>
+                <div class="form-group">
+                    <label>행 위치</label>
+                    <input type="number" name="row_position" class="form-control" value="1" min="1">
+                </div>
+                <div class="form-group">
+                    <label>열 위치</label>
+                    <input type="number" name="col_position" class="form-control" value="1" min="1">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>설명</label>
+                <textarea name="description" class="form-control"></textarea>
+            </div>
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary">추가</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('addRackModal')">취소</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Edit Rack Modal -->
+<div class="modal-overlay" id="editRackModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>랙 수정</h3>
+            <button class="modal-close" onclick="closeModal('editRackModal')">&times;</button>
+        </div>
+        <form method="POST" id="editRackForm" action="">
+            <input type="hidden" name="room_id" value="<%= room.id %>">
+            <div class="form-group">
+                <label>랙 이름 *</label>
+                <input type="text" name="name" id="editRackName" class="form-control" required>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>랙 유형</label>
+                    <select name="rack_type" id="editRackType" class="form-control">
+                        <option value="standard">서버랙</option>
+                        <option value="immersion">액침탱크</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>총 U 수</label>
+                    <input type="number" name="total_units" id="editRackUnits" class="form-control" min="1" max="52">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>설명</label>
+                <textarea name="description" id="editRackDesc" class="form-control"></textarea>
+            </div>
+            <div class="btn-group">
+                <button type="submit" class="btn btn-primary">저장</button>
+                <button type="button" class="btn btn-danger" id="deleteRackBtn" onclick="deleteRackFromEdit()">삭제</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('editRackModal')">취소</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+var _editRackId = null;
+function openEditRack(id, name, type, units, desc) {
+    _editRackId = id;
+    document.getElementById('editRackForm').action = '/racks/' + id;
+    document.getElementById('editRackName').value = name;
+    document.getElementById('editRackType').value = type;
+    document.getElementById('editRackUnits').value = units;
+    document.getElementById('editRackDesc').value = desc;
+    openModal('editRackModal');
+}
+function deleteRackFromEdit() {
+    if (!_editRackId) return;
+    if (!confirm('이 랙을 삭제하시겠습니까? 포함된 장비의 위치 정보가 해제됩니다.')) return;
+    var form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/racks/' + _editRackId + '/delete';
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'returnTo';
+    input.value = '/rooms/<%= room.id %>';
+    form.appendChild(input);
+    document.body.appendChild(form);
+    form.submit();
+}
+</script>
+
+<script>
+(function() {
+  var dragSrcEl = null;
+
+  // --- Drag Start ---
+  document.querySelectorAll('.rack-draggable').forEach(function(el) {
+    el.addEventListener('dragstart', function(e) {
+      dragSrcEl = this;
+      this.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', this.dataset.rackId);
+    });
+    el.addEventListener('dragend', function() {
+      this.classList.remove('dragging');
+      document.querySelectorAll('.rack-drop-zone, .rack-draggable').forEach(function(z) {
+        z.classList.remove('drag-over');
+      });
+    });
+  });
+
+  // --- Drop zones (empty cells) ---
+  document.querySelectorAll('.rack-drop-zone').forEach(function(zone) {
+    zone.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.classList.add('drag-over');
+    });
+    zone.addEventListener('dragleave', function() {
+      this.classList.remove('drag-over');
+    });
+    zone.addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.classList.remove('drag-over');
+      if (!dragSrcEl) return;
+      var newRow = parseInt(this.dataset.row);
+      var newCol = parseInt(this.dataset.col);
+      moveRack(dragSrcEl, newRow, newCol, this);
+    });
+  });
+
+  // --- Drop on another rack (swap) ---
+  document.querySelectorAll('.rack-draggable').forEach(function(el) {
+    el.addEventListener('dragover', function(e) {
+      if (this === dragSrcEl) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', function() {
+      this.classList.remove('drag-over');
+    });
+    el.addEventListener('drop', function(e) {
+      e.preventDefault();
+      this.classList.remove('drag-over');
+      if (!dragSrcEl || this === dragSrcEl) return;
+      swapRacks(dragSrcEl, this);
+    });
+  });
+
+  function moveRack(srcEl, newRow, newCol, dropZone) {
+    var rackId = srcEl.dataset.rackId;
+    var oldRow = parseInt(srcEl.dataset.row);
+    var oldCol = parseInt(srcEl.dataset.col);
+
+    // Update visually
+    srcEl.style.gridRow = newRow;
+    srcEl.style.gridColumn = newCol;
+    srcEl.dataset.row = newRow;
+    srcEl.dataset.col = newCol;
+
+    // The old position becomes a drop zone
+    dropZone.style.gridRow = oldRow;
+    dropZone.style.gridColumn = oldCol;
+    dropZone.dataset.row = oldRow;
+    dropZone.dataset.col = oldCol;
+
+    savePosition(rackId, newRow, newCol);
+    rebuildGrid();
+  }
+
+  function swapRacks(srcEl, targetEl) {
+    var srcId = srcEl.dataset.rackId;
+    var targetId = targetEl.dataset.rackId;
+    var srcRow = parseInt(srcEl.dataset.row);
+    var srcCol = parseInt(srcEl.dataset.col);
+    var tgtRow = parseInt(targetEl.dataset.row);
+    var tgtCol = parseInt(targetEl.dataset.col);
+
+    // Swap visual positions
+    srcEl.style.gridRow = tgtRow;
+    srcEl.style.gridColumn = tgtCol;
+    srcEl.dataset.row = tgtRow;
+    srcEl.dataset.col = tgtCol;
+
+    targetEl.style.gridRow = srcRow;
+    targetEl.style.gridColumn = srcCol;
+    targetEl.dataset.row = srcRow;
+    targetEl.dataset.col = srcCol;
+
+    savePosition(srcId, tgtRow, tgtCol);
+    savePosition(targetId, srcRow, srcCol);
+    rebuildGrid();
+  }
+
+  function savePosition(rackId, row, col) {
+    fetch('/racks/' + rackId + '/position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ row_position: row, col_position: col })
+    }).then(function(r) {
+      if (!r.ok) console.error('Failed to save rack position');
+    });
+  }
+
+  function rebuildGrid() {
+    var grid = document.getElementById('rackGrid');
+    if (!grid) return;
+
+    // Collect current rack positions
+    var rackEls = grid.querySelectorAll('.rack-draggable');
+    var maxRow = 1, maxCol = 1;
+    rackEls.forEach(function(el) {
+      var r = parseInt(el.dataset.row);
+      var c = parseInt(el.dataset.col);
+      if (r > maxRow) maxRow = r;
+      if (c > maxCol) maxCol = c;
+    });
+
+    // Add one extra row/col for drop targets
+    maxRow = Math.max(maxRow, 1) + 1;
+    maxCol = Math.max(maxCol, 2) + 1;
+    if (maxCol > 12) maxCol = 12;
+    if (maxRow > 10) maxRow = 10;
+
+    // Update grid template
+    grid.style.gridTemplateColumns = 'repeat(' + maxCol + ', minmax(120px, 1fr))';
+    grid.style.gridTemplateRows = 'repeat(' + maxRow + ', auto)';
+
+    // Build occupied map
+    var occupied = {};
+    rackEls.forEach(function(el) {
+      occupied[el.dataset.row + ':' + el.dataset.col] = true;
+    });
+
+    // Remove old drop zones
+    grid.querySelectorAll('.rack-drop-zone').forEach(function(z) { z.remove(); });
+
+    // Create new drop zones
+    for (var rr = 1; rr <= maxRow; rr++) {
+      for (var cc = 1; cc <= maxCol; cc++) {
+        if (!occupied[rr + ':' + cc]) {
+          var zone = document.createElement('div');
+          zone.className = 'rack-drop-zone';
+          zone.dataset.row = rr;
+          zone.dataset.col = cc;
+          zone.style.gridRow = rr;
+          zone.style.gridColumn = cc;
+          // Attach drop events
+          zone.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            this.classList.add('drag-over');
+          });
+          zone.addEventListener('dragleave', function() {
+            this.classList.remove('drag-over');
+          });
+          zone.addEventListener('drop', (function(z) {
+            return function(e) {
+              e.preventDefault();
+              z.classList.remove('drag-over');
+              if (!dragSrcEl) return;
+              var nr = parseInt(z.dataset.row);
+              var nc = parseInt(z.dataset.col);
+              moveRack(dragSrcEl, nr, nc, z);
+            };
+          })(zone));
+          grid.appendChild(zone);
+        }
+      }
+    }
+  }
+})();
+</script>
+
+<script>
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var tabId = this.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(function(b) {
+      b.classList.remove('active');
+      b.style.fontWeight = '400';
+      b.style.borderBottom = '2px solid transparent';
+      b.style.color = '#64748b';
+      b.style.background = '#f8fafc';
+    });
+    this.classList.add('active');
+    this.style.fontWeight = '600';
+    this.style.borderBottom = '2px solid #3b82f6';
+    this.style.color = '#3b82f6';
+    this.style.background = '#fff';
+
+    document.getElementById('rackTab').style.display = tabId === 'rackTab' ? '' : 'none';
+    var moduleTab = document.getElementById('moduleTab');
+    if (moduleTab) moduleTab.style.display = tabId === 'moduleTab' ? '' : 'none';
+  });
+});
+</script>
+<%- include('../partials/footer', { extraJs }) %>

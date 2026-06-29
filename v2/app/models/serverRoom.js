@@ -1,0 +1,60 @@
+const { pool } = require('../config/database');
+
+const ServerRoom = {
+  async findAll(locationType) {
+    if (locationType) {
+      const { rows } = await pool.query(
+        `SELECT sr.*,
+          (SELECT COUNT(*) FROM racks r WHERE r.room_id = sr.id) as rack_count
+         FROM server_rooms sr
+         WHERE sr.location_type = $1
+         ORDER BY sr.name`, [locationType]
+      );
+      return rows;
+    }
+    const { rows } = await pool.query(
+      `SELECT sr.*,
+        (SELECT COUNT(*) FROM racks r WHERE r.room_id = sr.id) as rack_count
+       FROM server_rooms sr
+       ORDER BY sr.name`
+    );
+    return rows;
+  },
+
+  async findById(id) {
+    const { rows } = await pool.query('SELECT * FROM server_rooms WHERE id = $1', [id]);
+    return rows[0];
+  },
+
+  async findByName(name, locationType) {
+    if (locationType) {
+      const { rows } = await pool.query(
+        'SELECT * FROM server_rooms WHERE name = $1 AND location_type = $2', [name, locationType]
+      );
+      return rows[0];
+    }
+    const { rows } = await pool.query('SELECT * FROM server_rooms WHERE name = $1', [name]);
+    return rows[0];
+  },
+
+  async create(data) {
+    const { rows } = await pool.query(
+      'INSERT INTO server_rooms (name, location, description, location_type) VALUES ($1, $2, $3, $4) RETURNING id',
+      [data.name, data.location, data.description, data.location_type || 'server_room']
+    );
+    return rows[0].id;
+  },
+
+  async update(id, data) {
+    return pool.query(
+      'UPDATE server_rooms SET name=$1, location=$2, description=$3, location_type=$4, updated_at=NOW() WHERE id=$5',
+      [data.name, data.location, data.description, data.location_type || 'server_room', id]
+    );
+  },
+
+  async delete(id) {
+    return pool.query('DELETE FROM server_rooms WHERE id = $1', [id]);
+  }
+};
+
+module.exports = ServerRoom;

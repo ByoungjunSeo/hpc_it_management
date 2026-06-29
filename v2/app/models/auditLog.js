@@ -55,6 +55,10 @@ const AuditLog = {
 
     sql += ' ORDER BY created_at DESC LIMIT 500';
     const { rows } = await pool.query(sql, params);
+    // pg returns Date objects; views expect ISO string
+    rows.forEach(r => {
+      if (r.created_at instanceof Date) r.created_at = r.created_at.toISOString();
+    });
     return rows;
   },
 

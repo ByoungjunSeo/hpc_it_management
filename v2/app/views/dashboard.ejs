@@ -1,0 +1,511 @@
+<%- include('partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>대시보드</h1>
+</div>
+
+<!-- Summary Stats - Assets -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value"><%= totalAssets %></div>
+        <div class="stat-label">총 자산</div>
+    </div>
+    <% appConfig.assetTypes.forEach(t => { %>
+    <% const found = assetsByType.find(a => a.asset_type === t.value); %>
+    <div class="stat-card">
+        <div class="stat-value"><%= found ? found.count : 0 %></div>
+        <div class="stat-label"><%= t.label %></div>
+    </div>
+    <% }) %>
+</div>
+
+<!-- Equipment Usage Stats -->
+<div class="stats-grid">
+    <div class="stat-card info">
+        <div class="stat-value"><%= usageCounts.total || 0 %></div>
+        <div class="stat-label">입출고 전체</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value"><%= usageCounts['입고'] || 0 %></div>
+        <div class="stat-label">입고</div>
+    </div>
+    <div class="stat-card success">
+        <div class="stat-value"><%= usageCounts['사용중'] || 0 %></div>
+        <div class="stat-label">사용중</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="stat-value"><%= usageCounts['반납완료'] || 0 %></div>
+        <div class="stat-label">반납완료</div>
+    </div>
+</div>
+
+<!-- Charts Grid -->
+<div class="dashboard-grid">
+    <!-- Chart 1: Asset Type Distribution (Doughnut) -->
+    <div class="chart-card">
+        <div class="card-header"><h3>자산 유형별 분포</h3></div>
+        <div class="chart-wrap">
+            <canvas id="chartAssetType"></canvas>
+        </div>
+    </div>
+
+    <!-- Chart 2: Asset Status (Doughnut) -->
+    <div class="chart-card">
+        <div class="card-header"><h3>자산 상태별 현황</h3></div>
+        <div class="chart-wrap">
+            <canvas id="chartAssetStatus"></canvas>
+        </div>
+    </div>
+
+    <!-- Chart 3: Assets by Room (Horizontal Bar) -->
+    <div class="chart-card">
+        <div class="card-header"><h3>서버실별 장비 현황</h3></div>
+        <div class="chart-wrap">
+            <canvas id="chartAssetRoom"></canvas>
+        </div>
+    </div>
+
+    <!-- Chart 4 & 5: Ownership + IP (Two doughnuts side by side) -->
+    <div class="chart-card">
+        <div class="card-header"><h3>소유 구분 / IP 할당 현황</h3></div>
+        <div class="chart-wrap" style="display:flex; gap:16px;">
+            <div style="flex:1; position:relative;">
+                <canvas id="chartOwnership"></canvas>
+            </div>
+            <div style="flex:1; position:relative;">
+                <canvas id="chartIp"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart 6: Rack Usage by Room (Stacked Horizontal Bar) - Full Width -->
+    <div class="chart-card full-width">
+        <div class="card-header"><h3>서버실별 랙 사용률</h3></div>
+        <div class="chart-wrap">
+            <canvas id="chartRackUsage"></canvas>
+        </div>
+    </div>
+
+    <!-- Chart 7: Monthly Trend (Bar + Line) - Full Width -->
+    <div class="chart-card full-width">
+        <div class="card-header"><h3>월별 입출고 추이 (최근 6개월)</h3></div>
+        <div class="chart-wrap">
+            <canvas id="chartMonthlyTrend"></canvas>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="chart-card">
+        <div class="card-header">
+            <h3>최근 입출고 활동</h3>
+            <a href="/inventory" class="btn btn-sm btn-outline">전체 보기</a>
+        </div>
+        <% if (recentLogs.length === 0) { %>
+        <p class="text-muted" style="padding:16px;">최근 활동이 없습니다.</p>
+        <% } else { %>
+        <div class="timeline">
+            <% recentLogs.forEach(log => { %>
+            <div class="timeline-item">
+                <% if (log.status === '입고') { %>
+                <span class="badge badge-secondary" style="min-width:55px;text-align:center;">입고</span>
+                <% } else if (log.status === '사용중') { %>
+                <span class="badge badge-success" style="min-width:55px;text-align:center;">사용중</span>
+                <% } else if (log.status === '반납완료') { %>
+                <span class="badge badge-warning" style="min-width:55px;text-align:center;">반납완료</span>
+                <% } %>
+                <span class="timeline-date"><%= log.usage_date || log.return_date || '-' %></span>
+                <% if (log.management_number) { %>
+                <a href="/inventory/equipment/<%= encodeURIComponent(log.management_number) %>"><strong><%= log.management_number %></strong></a>
+                <% } %>
+                <span><%= log.model_name || '' %></span>
+                <% if (log.user_name) { %><span class="text-muted">- <%= log.user_name %></span><% } %>
+                <% if (log.test_name) { %><span class="text-muted">(<%= log.test_name %>)</span><% } %>
+            </div>
+            <% }) %>
+        </div>
+        <% } %>
+    </div>
+
+    <!-- Quick Links -->
+    <div class="chart-card">
+        <div class="card-header"><h3>바로가기</h3></div>
+        <div class="quick-links">
+            <a href="/inventory/new" class="quick-link-card">
+                <div class="ql-icon">+</div>
+                <div class="ql-label">사용 등록</div>
+            </a>
+            <a href="/rooms" class="quick-link-card">
+                <div class="ql-icon">&#9638;</div>
+                <div class="ql-label">랙 시각화</div>
+            </a>
+            <a href="/discovery" class="quick-link-card">
+                <div class="ql-icon">&#8644;</div>
+                <div class="ql-label">SSH 수집</div>
+            </a>
+            <a href="/ip-management" class="quick-link-card">
+                <div class="ql-icon">&#127760;</div>
+                <div class="ql-label">IP 관리</div>
+            </a>
+        </div>
+    </div>
+</div>
+
+<style>
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    margin-top: 20px;
+}
+.chart-card {
+    background: var(--bg-white);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+.chart-card .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    padding: 0;
+    border: none;
+}
+.chart-card .card-header h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+}
+.chart-card.full-width {
+    grid-column: 1 / -1;
+}
+.chart-wrap {
+    position: relative;
+    min-height: 280px;
+    flex: 1;
+}
+.chart-wrap canvas {
+    max-height: 320px;
+}
+
+/* Timeline */
+.timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+.timeline-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+.timeline-item:last-child { border-bottom: none; }
+.timeline-date {
+    color: var(--text-light);
+    font-size: 12px;
+    min-width: 85px;
+}
+
+/* Quick Links */
+.quick-links {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    flex: 1;
+    align-content: center;
+}
+.quick-link-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.15s;
+}
+.quick-link-card:hover {
+    border-color: var(--primary);
+    background: #f0f6ff;
+    box-shadow: var(--shadow);
+}
+.ql-icon {
+    font-size: 28px;
+    margin-bottom: 6px;
+    color: var(--primary);
+}
+.ql-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+}
+
+@media (max-width: 768px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+    .chart-card.full-width {
+        grid-column: 1;
+    }
+    .chart-wrap {
+        min-height: 220px;
+    }
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+(function() {
+    // Color palette
+    var COLORS = {
+        primary: '#2563eb',
+        primaryLight: '#93c5fd',
+        teal: '#14b8a6',
+        purple: '#7c3aed',
+        orange: '#f97316',
+        gray: '#64748b',
+        green: '#16a34a',
+        blue: '#3b82f6',
+        yellow: '#eab308',
+        red: '#dc2626',
+        lightGray: '#e2e8f0',
+        cyan: '#0891b2',
+        amber: '#b45309'
+    };
+
+    var typeColors = [COLORS.primary, COLORS.teal, COLORS.cyan, COLORS.purple, COLORS.amber, COLORS.orange, COLORS.gray];
+    var statusMap = {
+        'active': { label: '운영중', color: COLORS.green },
+        'inactive': { label: '비활성', color: COLORS.gray },
+        'returned': { label: '반납', color: COLORS.yellow },
+        'maintenance': { label: '점검중', color: COLORS.blue },
+        'decommissioned': { label: '폐기', color: COLORS.red }
+    };
+
+    // Common chart defaults
+    Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.plugins.legend.position = 'bottom';
+    Chart.defaults.plugins.legend.labels.padding = 12;
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+
+    // --- Chart 1: Asset Type (Doughnut) ---
+    var typeData = <%- JSON.stringify(assetsByType) %>;
+    var typeLabels = [];
+    var typeCounts = [];
+    var typeColorArr = [];
+    var typeMap = <%- JSON.stringify(appConfig.assetTypes) %>;
+    typeData.forEach(function(d, i) {
+        var found = typeMap.find(function(t) { return t.value === d.asset_type; });
+        typeLabels.push(found ? found.label : d.asset_type);
+        typeCounts.push(d.count);
+        typeColorArr.push(typeColors[i % typeColors.length]);
+    });
+    if (typeLabels.length > 0) {
+        new Chart(document.getElementById('chartAssetType'), {
+            type: 'doughnut',
+            data: {
+                labels: typeLabels,
+                datasets: [{ data: typeCounts, backgroundColor: typeColorArr, borderWidth: 0 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                plugins: { legend: { position: 'right' } }
+            }
+        });
+    }
+
+    // --- Chart 2: Asset Status (Doughnut) ---
+    var statusData = <%- JSON.stringify(assetsByStatus) %>;
+    var statusLabels = [];
+    var statusCounts = [];
+    var statusColors = [];
+    statusData.forEach(function(d) {
+        var m = statusMap[d.status];
+        statusLabels.push(m ? m.label : d.status);
+        statusCounts.push(d.count);
+        statusColors.push(m ? m.color : COLORS.gray);
+    });
+    if (statusLabels.length > 0) {
+        new Chart(document.getElementById('chartAssetStatus'), {
+            type: 'doughnut',
+            data: {
+                labels: statusLabels,
+                datasets: [{ data: statusCounts, backgroundColor: statusColors, borderWidth: 0 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                plugins: { legend: { position: 'right' } }
+            }
+        });
+    }
+
+    // --- Chart 3: Assets by Room (Horizontal Bar) ---
+    var roomData = <%- JSON.stringify(assetsByRoom) %>;
+    var roomLabels = roomData.map(function(d) { return d.room_name; });
+    var roomCounts = roomData.map(function(d) { return d.count; });
+    if (roomLabels.length > 0) {
+        new Chart(document.getElementById('chartAssetRoom'), {
+            type: 'bar',
+            data: {
+                labels: roomLabels,
+                datasets: [{
+                    label: '장비 수',
+                    data: roomCounts,
+                    backgroundColor: COLORS.primary,
+                    borderRadius: 4,
+                    barThickness: 24
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // --- Chart 4: Ownership (Doughnut) ---
+    var ownerData = <%- JSON.stringify(assetsByOwnership) %>;
+    var ownerLabels = ownerData.map(function(d) { return d.ownership === 'company' ? '자사' : '업체'; });
+    var ownerCounts = ownerData.map(function(d) { return d.count; });
+    var ownerColors = ownerData.map(function(d) { return d.ownership === 'company' ? COLORS.blue : COLORS.orange; });
+    if (ownerLabels.length > 0) {
+        new Chart(document.getElementById('chartOwnership'), {
+            type: 'doughnut',
+            data: {
+                labels: ownerLabels,
+                datasets: [{ data: ownerCounts, backgroundColor: ownerColors, borderWidth: 0 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { padding: 8, font: { size: 11 } } },
+                    title: { display: true, text: '소유 구분', font: { size: 12, weight: '500' }, color: '#64748b' }
+                }
+            }
+        });
+    }
+
+    // --- Chart 5: IP Allocation (Doughnut) ---
+    var ipStats = <%- JSON.stringify(ipStats) %>;
+    if (ipStats && ipStats.total > 0) {
+        new Chart(document.getElementById('chartIp'), {
+            type: 'doughnut',
+            data: {
+                labels: ['할당', '예약', '가용'],
+                datasets: [{
+                    data: [ipStats.assigned || 0, ipStats.reserved || 0, ipStats.available || 0],
+                    backgroundColor: [COLORS.green, COLORS.blue, COLORS.lightGray],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: '55%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { padding: 8, font: { size: 11 } } },
+                    title: { display: true, text: 'IP 할당', font: { size: 12, weight: '500' }, color: '#64748b' }
+                }
+            }
+        });
+    }
+
+    // --- Chart 6: Rack Usage by Room (Stacked Horizontal Bar) ---
+    var rackData = <%- JSON.stringify(roomRackUsage) %>;
+    var rackRoomLabels = rackData.map(function(d) { return d.room_name; });
+    var rackUsed = rackData.map(function(d) { return d.used_units || 0; });
+    var rackFree = rackData.map(function(d) { return Math.max(0, (d.total_units || 0) - (d.used_units || 0)); });
+    if (rackRoomLabels.length > 0) {
+        new Chart(document.getElementById('chartRackUsage'), {
+            type: 'bar',
+            data: {
+                labels: rackRoomLabels,
+                datasets: [
+                    { label: '사용 U', data: rackUsed, backgroundColor: COLORS.primary, borderRadius: 2, barThickness: 28 },
+                    { label: '여유 U', data: rackFree, backgroundColor: COLORS.lightGray, borderRadius: 2, barThickness: 28 }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+                plugins: {
+                    legend: { position: 'top' },
+                    tooltip: {
+                        callbacks: {
+                            afterBody: function(ctx) {
+                                var idx = ctx[0].dataIndex;
+                                var total = (rackUsed[idx] || 0) + (rackFree[idx] || 0);
+                                var pct = total > 0 ? Math.round(rackUsed[idx] / total * 100) : 0;
+                                return '사용률: ' + pct + '%';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { stacked: true, beginAtZero: true, title: { display: true, text: 'U (Units)' }, grid: { color: '#f1f5f9' } },
+                    y: { stacked: true, grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // --- Chart 7: Monthly Trend (Bar + Line) ---
+    var trendRaw = <%- JSON.stringify(monthlyTrend) %>;
+    // Aggregate by month and status
+    var monthSet = {};
+    trendRaw.forEach(function(d) { monthSet[d.month] = true; });
+    var months = Object.keys(monthSet).sort();
+    var trendMap = {};
+    trendRaw.forEach(function(d) {
+        if (!trendMap[d.month]) trendMap[d.month] = {};
+        trendMap[d.month][d.status] = d.count;
+    });
+    var incoming = months.map(function(m) { return (trendMap[m] && trendMap[m]['입고']) || 0; });
+    var inUse = months.map(function(m) { return (trendMap[m] && trendMap[m]['사용중']) || 0; });
+    var returned = months.map(function(m) { return (trendMap[m] && trendMap[m]['반납완료']) || 0; });
+    var monthLabels = months.map(function(m) { var parts = m.split('-'); return parts[1] + '월'; });
+
+    if (months.length > 0) {
+        new Chart(document.getElementById('chartMonthlyTrend'), {
+            type: 'bar',
+            data: {
+                labels: monthLabels,
+                datasets: [
+                    { type: 'bar', label: '입고', data: incoming, backgroundColor: COLORS.gray, borderRadius: 3, order: 2 },
+                    { type: 'bar', label: '사용중', data: inUse, backgroundColor: COLORS.green, borderRadius: 3, order: 2 },
+                    { type: 'bar', label: '반납', data: returned, backgroundColor: COLORS.orange, borderRadius: 3, order: 2 },
+                    {
+                        type: 'line', label: '전체',
+                        data: months.map(function(m, i) { return incoming[i] + inUse[i] + returned[i]; }),
+                        borderColor: COLORS.primary, backgroundColor: 'transparent',
+                        borderWidth: 2, pointRadius: 4, pointBackgroundColor: COLORS.primary,
+                        tension: 0.3, order: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                scales: {
+                    x: { grid: { display: false } },
+                    y: { beginAtZero: true, grid: { color: '#f1f5f9' } }
+                }
+            }
+        });
+    }
+})();
+</script>
+
+<%- include('partials/footer', { extraJs }) %>

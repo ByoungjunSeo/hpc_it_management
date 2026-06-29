@@ -1,0 +1,885 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= rack.room_name %> &gt; <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } %><%= rack.name %> (<%= totalUnits %>U)<% if (rack.rack_type === 'immersion') { %> <span class="rack-type-badge immersion">액침탱크</span><% } %></h1>
+    <div class="btn-group">
+        <button class="btn btn-warning" id="btnPowerCheck" onclick="checkPowerStatus()">&#x26A1; 전원 상태 확인</button>
+        <a href="/assets/new?rack_id=<%= rack.id %>" class="btn btn-primary">+ 장비 추가</a>
+        <a href="/rooms/<%= rack.room_id %>" class="btn btn-secondary">서버실</a>
+    </div>
+</div>
+
+<% if (rackStats) { %>
+<div class="rack-stats-summary">
+    <div class="rack-stats-usage">
+        <div class="rack-stats-usage-bar">
+            <div class="rack-stats-usage-fill<%= rackStats.utilization >= 90 ? ' critical' : rackStats.utilization >= 70 ? ' warning' : '' %>" style="width:<%= rackStats.utilization %>%"></div>
+        </div>
+        <span class="rack-stats-usage-text"><%= rackStats.usedU %>/<%= rackStats.totalU %>U 사용 (<%= rackStats.utilization %>%)</span>
+    </div>
+    <div class="rack-stats-chips">
+        <span class="rack-stats-chip">장비 <strong><%= rackStats.totalAssets %></strong></span>
+        <% if (rackStats.childAssets > 0) { %><span class="rack-stats-chip">노드 <strong><%= rackStats.childAssets %></strong></span><% } %>
+        <span class="rack-stats-chip">여유 <strong><%= rackStats.freeU %>U</strong></span>
+        <% if (rackStats.companyCount > 0) { %><span class="rack-stats-chip company">자사 <strong><%= rackStats.companyCount %></strong></span><% } %>
+        <% if (rackStats.vendorCount > 0) { %><span class="rack-stats-chip vendor">업체 <strong><%= rackStats.vendorCount %></strong></span><% } %>
+        <% var typeLabels = { server:'서버', switch:'스위치', storage:'스토리지', pdu:'PDU', ups:'UPS', kvm:'KVM', other:'기타' }; %>
+        <% Object.keys(rackStats.typeCounts).forEach(function(t) { %>
+        <span class="rack-stats-chip type-<%= t %>"><%= typeLabels[t] || t %> <strong><%= rackStats.typeCounts[t] %></strong></span>
+        <% }) %>
+    </div>
+</div>
+<% } %>
+
+<div class="rack-detail-layout">
+    <div class="rack-visual">
+        <p class="text-muted" style="font-size:12px;margin-bottom:8px;">장비를 드래그하여 위치를 변경할 수 있습니다. (1U = 상/중/하 3구멍)</p>
+<%
+function getAssetClass(info) {
+    if (info.asset_type === 'switch') return 'switch';
+    if (info.asset_type === 'kvm') return 'kvm';
+    if (info.asset_type === 'pdu') return 'pdu';
+    if (info.asset_type === 'ups') return 'ups';
+    if (info.asset_type === 'storage') return 'storage';
+    if (info.asset_type === 'other') return 'other';
+    if (info.ownership === 'vendor') return 'vendor';
+    return 'server';
+}
+%>
+        <table class="rack-slot-table" id="rackSlotTable">
+            <colgroup>
+                <col class="col-u-label">
+                <col class="col-hole">
+                <col class="col-asset-l">
+                <col class="col-asset-r">
+            </colgroup>
+<%
+  // Build slot-level occupancy map with equipment/shelf split
+  var slotMap = {};
+  assets.forEach(function(a) {
+    if (a.parent_asset_id || !a.rack_unit_start) return;
+    var slotStart = a.rack_unit_start;
+    var slotSize = a.rack_unit_size || 3;
+    var shelfSlots = a.shelf_size || 0;
+    var equipSlots = slotSize - shelfSlots;
+    if (equipSlots < 1) equipSlots = slotSize; // safety: if bad data, treat all as equipment
+    var hasChildren = childrenMap[a.id] && childrenMap[a.id].length > 0;
+    var side = hasChildren ? 'full' : (a.blade_slot || 'full');
+    var startU = Math.floor((slotStart - 1) / 3) + 1;
+    var sizeU = Math.ceil(slotSize / 3);
+    var baseInfo = {
+      id: a.id, asset_type: a.asset_type, ownership: a.ownership,
+      model_name: a.model_name || a.asset_type,
+      management_number: a.management_number || '',
+      slotStart: slotStart, slotSize: slotSize,
+      startU: startU, sizeU: sizeU,
+      children: hasChildren ? childrenMap[a.id] : null
+    };
+
+    if (shelfSlots > 0 && shelfSlots < slotSize) {
+      // Equipment portion (top - higher slot numbers)
+      var equipInfo = {};
+      for (var k in baseInfo) equipInfo[k] = baseInfo[k];
+      equipInfo.cellSlots = equipSlots;
+      equipInfo.cellType = 'equipment';
+      for (var s = slotStart + shelfSlots; s < slotStart + slotSize; s++) {
+        if (!slotMap[s]) slotMap[s] = { full: null, left: null, right: null };
+        if (side === 'full') slotMap[s].full = equipInfo;
+        else slotMap[s][side] = equipInfo;
+      }
+      // Shelf portion (bottom - lower slot numbers)
+      var shelfInfo = {};
+      for (var k in baseInfo) shelfInfo[k] = baseInfo[k];
+      shelfInfo.cellSlots = shelfSlots;
+      shelfInfo.cellType = 'shelf';
+      for (var s = slotStart; s < slotStart + shelfSlots; s++) {
+        if (!slotMap[s]) slotMap[s] = { full: null, left: null, right: null };
+        if (side === 'full') slotMap[s].full = shelfInfo;
+        else slotMap[s][side] = shelfInfo;
+      }
+    } else {
+      // No shelf - single equipment cell
+      var info = {};
+      for (var k in baseInfo) info[k] = baseInfo[k];
+      info.cellSlots = slotSize;
+      info.cellType = 'equipment';
+      for (var s = slotStart; s < slotStart + slotSize; s++) {
+        if (!slotMap[s]) slotMap[s] = { full: null, left: null, right: null };
+        if (side === 'full') slotMap[s].full = info;
+        else slotMap[s][side] = info;
+      }
+    }
+  });
+
+  var holeLabels = ['하', '중', '상'];
+  var skipCols = 0, skipL = 0, skipR = 0;
+%>
+            <% for (var u = totalUnits; u >= 1; u--) { %>
+            <% for (var h = 3; h >= 1; h--) { %>
+            <%
+              var slot = (u - 1) * 3 + h;
+              var m = slotMap[slot] || { full: null, left: null, right: null };
+            %>
+            <tr data-slot="<%= slot %>" data-u="<%= u %>" data-h="<%= h %>">
+                <% if (h === 3) { %>
+                <td class="slot-u-label" rowspan="3">U<%= u %></td>
+                <% } %>
+                <td class="slot-hole-label"><%= holeLabels[h - 1] %></td>
+<% if (skipCols > 0) { skipCols--; } else if (m.full) {
+  var af = m.full; var cls = getAssetClass(af); skipCols = af.cellSlots - 1;
+  if (af.cellType === 'shelf') {
+%>
+                <td colspan="2" rowspan="<%= af.cellSlots %>" class="slot-asset-cell slot-shelf"
+                    data-asset-id="<%= af.id %>" data-slot-size="<%= af.slotSize %>"
+                    data-start-u="<%= af.startU %>" data-size-u="<%= af.sizeU %>"
+                    draggable="true">
+                    <span class="slot-shelf-label">선반</span>
+                </td>
+<%  } else { %>
+                <td colspan="2" rowspan="<%= af.cellSlots %>" class="slot-asset-cell <%= cls %>"
+                    data-asset-id="<%= af.id %>" data-slot-size="<%= af.slotSize %>"
+                    data-start-u="<%= af.startU %>" data-size-u="<%= af.sizeU %>"
+                    draggable="true">
+                    <div class="slot-asset-inner">
+                        <span class="slot-asset-name"><%= af.model_name %><% if (af.management_number) { %> (<%= af.management_number %>)<% } %></span>
+                        <% if (af.sizeU > 1) { %><span class="slot-asset-usize"> <%= af.sizeU %>U</span><% } %>
+                        <% if (af.children && af.children.length > 0) { %>
+                        <div class="chassis-nodes">
+                            <% af.children.forEach(function(child, idx) { %>
+                            <span class="chassis-node-tag" onclick="event.stopPropagation(); showAssetPopup(<%= child.id %>)" data-asset-id="<%= child.id %>">N<%= idx + 1 %></span>
+                            <% }) %>
+                        </div>
+                        <% } %>
+                    </div>
+                    <span class="power-dot" data-asset-id="<%= af.id %>"></span>
+                </td>
+<%  }
+} else {
+  if (skipL > 0) { skipL--; } else if (m.left) {
+    var al = m.left; skipL = al.cellSlots - 1;
+    if (al.cellType === 'shelf') {
+%>
+                <td rowspan="<%= al.cellSlots %>" class="slot-asset-cell slot-blade slot-shelf"
+                    data-asset-id="<%= al.id %>" data-slot-size="<%= al.slotSize %>"
+                    data-start-u="<%= al.startU %>" data-size-u="<%= al.sizeU %>"
+                    draggable="true">
+                    <span class="slot-shelf-label">선반</span>
+                </td>
+<%    } else {
+        var clsL = getAssetClass(al);
+%>
+                <td rowspan="<%= al.cellSlots %>" class="slot-asset-cell slot-blade <%= clsL %>"
+                    data-asset-id="<%= al.id %>" data-slot-size="<%= al.slotSize %>"
+                    data-start-u="<%= al.startU %>" data-size-u="<%= al.sizeU %>"
+                    draggable="true">
+                    <span class="slot-asset-name"><%= al.model_name %><% if (al.management_number) { %> (<%= al.management_number %>)<% } %></span>
+                    <span class="power-dot" data-asset-id="<%= al.id %>"></span>
+                </td>
+<%    }
+  } else { %>
+                <td class="slot-empty-cell"></td>
+<%  }
+  if (skipR > 0) { skipR--; } else if (m.right) {
+    var ar = m.right; skipR = ar.cellSlots - 1;
+    if (ar.cellType === 'shelf') {
+%>
+                <td rowspan="<%= ar.cellSlots %>" class="slot-asset-cell slot-blade slot-shelf"
+                    data-asset-id="<%= ar.id %>" data-slot-size="<%= ar.slotSize %>"
+                    data-start-u="<%= ar.startU %>" data-size-u="<%= ar.sizeU %>"
+                    draggable="true">
+                    <span class="slot-shelf-label">선반</span>
+                </td>
+<%    } else {
+        var clsR = getAssetClass(ar);
+%>
+                <td rowspan="<%= ar.cellSlots %>" class="slot-asset-cell slot-blade <%= clsR %>"
+                    data-asset-id="<%= ar.id %>" data-slot-size="<%= ar.slotSize %>"
+                    data-start-u="<%= ar.startU %>" data-size-u="<%= ar.sizeU %>"
+                    draggable="true">
+                    <span class="slot-asset-name"><%= ar.model_name %><% if (ar.management_number) { %> (<%= ar.management_number %>)<% } %></span>
+                    <span class="power-dot" data-asset-id="<%= ar.id %>"></span>
+                </td>
+<%    }
+  } else { %>
+                <td class="slot-empty-cell"></td>
+<%  }
+} %>
+            </tr>
+            <% } %>
+            <% } %>
+        </table>
+<% if (rack.rack_type === 'immersion' && rack.switch_slots > 0) { %>
+<%
+  // Build switch slot occupancy from assets assigned to this rack with blade_slot starting with 'SW'
+  var switchAssets = assets.filter(a => a.blade_slot && a.blade_slot.match(/^SW/i));
+  var switchSlotMap = {};
+  switchAssets.forEach(function(a) {
+    var slotMatch = a.blade_slot.match(/^SW(\d+)$/i);
+    if (slotMatch) {
+      switchSlotMap[parseInt(slotMatch[1])] = a;
+    }
+  });
+%>
+        <div style="margin-top:16px;">
+            <h3 style="font-size:14px; font-weight:600; margin-bottom:8px;">스위치 슬롯 (상단)</h3>
+            <p class="text-muted" style="font-size:11px; margin-bottom:6px;">스위치를 드래그하여 슬롯 간 이동 가능</p>
+            <table class="rack-slot-table" id="switchSlotTable" style="margin-bottom:0;">
+                <colgroup>
+                    <col style="width:60px;">
+                    <col>
+                </colgroup>
+                <% for (var sw = 1; sw <= rack.switch_slots; sw++) { %>
+                <tr data-sw-slot="SW<%= sw %>">
+                    <td class="slot-u-label" style="text-align:center; font-weight:600;">SW<%= sw %></td>
+                    <% if (switchSlotMap[sw]) { var swa = switchSlotMap[sw]; %>
+                    <td class="slot-asset-cell switch" draggable="true" data-asset-id="<%= swa.id %>" data-sw-slot="SW<%= sw %>" style="cursor:grab;">
+                        <div class="slot-asset-inner">
+                            <span class="slot-asset-name"><%= swa.model_name || swa.asset_type %><% if (swa.management_number) { %> (<%= swa.management_number %>)<% } %></span>
+                        </div>
+                    </td>
+                    <% } else { %>
+                    <td class="slot-empty-cell sw-drop-target" data-sw-slot="SW<%= sw %>" style="text-align:center; color:#94a3b8; font-size:12px;">빈 슬롯</td>
+                    <% } %>
+                </tr>
+                <% } %>
+            </table>
+        </div>
+<% } %>
+    </div>
+
+    <div class="rack-sidebar">
+        <div class="card">
+            <div class="card-header">
+                <h2>랙 정보</h2>
+                <button class="btn btn-sm btn-outline" onclick="openModal('rackEditModal')">수정</button>
+            </div>
+            <p><strong>서버실:</strong> <%= rack.room_name %></p>
+            <p><strong>이름:</strong> <%= rack.name %></p>
+            <p><strong>유형:</strong> <% if (rack.rack_type === 'immersion') { %><span class="rack-type-badge immersion">&#x1F4A7; 액침탱크</span><% } else { %>서버랙<% } %></p>
+            <p><strong>총 U:</strong> <%= totalUnits %></p>
+            <p><strong>장비 수:</strong> <%= assets.length %>대</p>
+            <% if (rack.switch_slots) { %><p><strong>스위치 슬롯:</strong> <%= rack.switch_slots %>개</p><% } %>
+            <% if (rack.linked_asset_id) { %>
+            <div style="margin-top:8px; padding:8px; background:#eff6ff; border-radius:6px; font-size:12px;">
+                <p style="margin:0 0 4px;"><strong>연결 자산:</strong>
+                    <a href="/assets/<%= rack.linked_asset_id %>"><%= rack.linked_model_name || rack.linked_asset_number || '자산 #' + rack.linked_asset_id %></a>
+                </p>
+                <% if (rack.linked_asset_number) { %><p style="margin:0 0 2px;"><strong>자산번호:</strong> <%= rack.linked_asset_number %></p><% } %>
+                <% if (rack.linked_serial_number) { %><p style="margin:0;"><strong>시리얼:</strong> <%= rack.linked_serial_number %></p><% } %>
+            </div>
+            <% } %>
+            <% if (rack.description) { %><p><strong>설명:</strong> <%= rack.description %></p><% } %>
+            <% if (typeof connectedInfra !== 'undefined' && connectedInfra.length > 0) { %>
+            <div style="margin-top:8px; padding:8px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; font-size:12px;">
+                <p style="margin:0 0 6px; font-weight:600;">연결 설비</p>
+                <% connectedInfra.forEach(function(ci) { %>
+                <p style="margin:0 0 3px;">
+                    <span class="badge badge-<%= ci.asset_type %>"><%= ci.asset_type === 'cdu' ? 'CDU' : ci.asset_type === 'chiller' ? '칠러' : ci.asset_type %></span>
+                    <a href="/assets/<%= ci.id %>"><%= ci.management_number || ci.model_name || '#' + ci.id %></a>
+                    <% if (ci.model_name && ci.management_number) { %><span style="color:#64748b;">(<%= ci.model_name %>)</span><% } %>
+                </p>
+                <% }) %>
+            </div>
+            <% } %>
+            <div class="mt-2">
+                <form method="POST" action="/racks/<%= rack.id %>/delete" onsubmit="return confirmDelete('이 랙을 삭제하시겠습니까?')">
+                    <button type="submit" class="btn btn-sm btn-danger">랙 삭제</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h2>범례</h2></div>
+            <div class="rack-legend">
+                <div class="legend-item"><span class="legend-color server"></span> 자사 서버</div>
+                <div class="legend-item"><span class="legend-color vendor"></span> 업체 장비</div>
+                <div class="legend-item"><span class="legend-color switch"></span> 스위치</div>
+                <div class="legend-item"><span class="legend-color kvm"></span> KVM</div>
+                <div class="legend-item"><span class="legend-color pdu"></span> PDU</div>
+                <div class="legend-item"><span class="legend-color ups"></span> UPS</div>
+                <div class="legend-item"><span class="legend-color storage"></span> 스토리지</div>
+                <div class="legend-item"><span class="legend-color other"></span> 기타</div>
+                <div class="legend-item"><span class="legend-color empty"></span> 빈 공간</div>
+                <div class="legend-item"><span class="legend-color" style="background:#555;"></span> 선반</div>
+            </div>
+        </div>
+
+        <div class="card" id="powerLegend" style="display:none;">
+            <div class="card-header"><h2>전원 상태</h2></div>
+            <div class="rack-legend" style="flex-direction:row; flex-wrap:wrap; gap:12px;">
+                <div class="legend-item"><span class="power-dot power-on" style="position:static;"></span> 전원 켜짐</div>
+                <div class="legend-item"><span class="power-dot power-off" style="position:static;"></span> 전원 꺼짐</div>
+                <div class="legend-item"><span class="power-dot power-no_bmc" style="position:static;"></span> BMC 미등록</div>
+                <div class="legend-item"><span class="power-dot power-error" style="position:static;"></span> 연결 실패</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><h2>장비 목록</h2></div>
+            <% if (assets.length === 0) { %>
+            <p class="text-muted">장비가 없습니다.</p>
+            <% } %>
+            <% assets.forEach(a => { %>
+            <% if (a.parent_asset_id) return; %>
+            <%
+                const aStartU = a.rack_unit_start ? Math.floor((a.rack_unit_start - 1) / 3) + 1 : 0;
+                const aSizeU = Math.ceil((a.rack_unit_size || 3) / 3);
+                const isSwitchSlot = a.blade_slot && /^SW\d+$/i.test(a.blade_slot);
+                const posLabel = isSwitchSlot ? a.blade_slot : (aStartU ? 'U' + aStartU : 'U?');
+            %>
+            <div class="rack-asset-item" onclick="showAssetPopup(<%= a.id %>)">
+                <strong><%= posLabel %></strong>
+                <%= a.model_name || a.asset_type %><% if (!isSwitchSlot && aSizeU > 1) { %> <span style="font-size:11px;color:#64748b;">(<%= aSizeU %>U)</span><% } %>
+                <% if (['server','storage','switch','kvm','other'].includes(a.asset_type)) { %>
+                <span class="asset-power-badge" data-asset-id="<%= a.id %>"></span>
+                <% } %>
+            </div>
+            <% if (childrenMap[a.id] && childrenMap[a.id].length > 0) { %>
+            <% childrenMap[a.id].forEach(function(child, idx) { %>
+            <div class="rack-asset-item" style="padding-left:28px; font-size:12px; color:#475569;" onclick="showAssetPopup(<%= child.id %>)">
+                N<%= idx + 1 %> (<%= child.management_number %>)
+                <% if (['server','storage','switch','kvm','other'].includes(child.asset_type)) { %>
+                <span class="asset-power-badge" data-asset-id="<%= child.id %>"></span>
+                <% } %>
+            </div>
+            <% }) %>
+            <% } %>
+            <% }) %>
+        </div>
+    </div>
+</div>
+
+<!-- Asset Popup Modal -->
+<div class="modal-overlay" id="assetPopup">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="popupTitle">장비 정보</h3>
+            <button class="modal-close" onclick="closeModal('assetPopup')">&times;</button>
+        </div>
+        <div id="popupContent">로딩중...</div>
+    </div>
+</div>
+
+<!-- Rack Edit Modal -->
+<div class="modal-overlay" id="rackEditModal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>랙 정보 수정</h3>
+            <button class="modal-close" onclick="closeModal('rackEditModal')">&times;</button>
+        </div>
+        <form method="POST" action="/racks/<%= rack.id %>">
+            <input type="hidden" name="room_id" value="<%= rack.room_id %>">
+            <div class="form-group">
+                <label>이름</label>
+                <input type="text" name="name" class="form-control" value="<%= rack.name %>" required>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>랙 유형</label>
+                    <select name="rack_type" class="form-control">
+                        <option value="standard" <%= (rack.rack_type || 'standard') === 'standard' ? 'selected' : '' %>>서버랙</option>
+                        <option value="immersion" <%= rack.rack_type === 'immersion' ? 'selected' : '' %>>액침탱크</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>총 U수</label>
+                    <input type="number" name="total_units" class="form-control" value="<%= rack.total_units %>" min="1">
+                </div>
+                <div class="form-group">
+                    <label>행 위치</label>
+                    <input type="number" name="row_position" class="form-control" value="<%= rack.row_position || 1 %>" min="1">
+                </div>
+                <div class="form-group">
+                    <label>열 위치</label>
+                    <input type="number" name="col_position" class="form-control" value="<%= rack.col_position || 1 %>" min="1">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>설명</label>
+                <textarea name="description" class="form-control"><%= rack.description || '' %></textarea>
+            </div>
+            <div class="btn-group mt-2">
+                <button type="submit" class="btn btn-primary">저장</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('rackEditModal')">취소</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+var assetsData = <%- JSON.stringify(assets) %>;
+var rackId = <%= rack.id %>;
+var totalUnits = <%= totalUnits %>;
+
+function uToSlot(u) { return (u - 1) * 3 + 1; }
+
+// --- Slot-level drag-and-drop (상/중/하 granularity) ---
+(function() {
+    var dragAssetId = null;
+    var dragSlotSize = 0;
+    var table = document.getElementById('rackSlotTable');
+    var totalSlots = totalUnits * 3;
+
+    // Build JS-side slot occupancy for canPlace checks
+    var jsSlotOcc = {};
+    assetsData.forEach(function(a) {
+        if (a.parent_asset_id || !a.rack_unit_start) return;
+        for (var s = a.rack_unit_start; s < a.rack_unit_start + (a.rack_unit_size || 3); s++) {
+            jsSlotOcc[s] = a.id;
+        }
+    });
+
+    function getSlotFromY(y) {
+        var rows = table.querySelectorAll('tr[data-slot]');
+        for (var i = 0; i < rows.length; i++) {
+            var rect = rows[i].getBoundingClientRect();
+            if (y >= rect.top && y < rect.bottom) {
+                return parseInt(rows[i].dataset.slot);
+            }
+        }
+        return null;
+    }
+
+    function getRowsForSlotRange(startSlot, count) {
+        var rows = [];
+        for (var s = startSlot; s < startSlot + count && s <= totalSlots; s++) {
+            var row = table.querySelector('tr[data-slot="' + s + '"]');
+            if (row) rows.push(row);
+        }
+        return rows;
+    }
+
+    function canPlace(targetSlot, slotSize) {
+        if (targetSlot < 1 || targetSlot + slotSize - 1 > totalSlots) return false;
+        for (var s = targetSlot; s < targetSlot + slotSize; s++) {
+            if (jsSlotOcc[s] && jsSlotOcc[s] !== dragAssetId) return false;
+        }
+        return true;
+    }
+
+    table.addEventListener('dragstart', function(e) {
+        var cell = e.target.closest('.slot-asset-cell[data-asset-id]');
+        if (!cell) return;
+        dragAssetId = parseInt(cell.dataset.assetId);
+        dragSlotSize = parseInt(cell.dataset.slotSize) || 3;
+        cell.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragAssetId));
+    });
+
+    table.addEventListener('dragend', function() {
+        table.querySelectorAll('.dragging').forEach(function(el) { el.classList.remove('dragging'); });
+        table.querySelectorAll('tr').forEach(function(el) { el.classList.remove('drag-target', 'drag-invalid'); });
+        dragAssetId = null;
+        dragSlotSize = 0;
+    });
+
+    table.addEventListener('dragover', function(e) {
+        if (!dragAssetId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+
+        var targetSlot = getSlotFromY(e.clientY);
+        if (!targetSlot) return;
+
+        table.querySelectorAll('tr').forEach(function(el) { el.classList.remove('drag-target', 'drag-invalid'); });
+        var ok = canPlace(targetSlot, dragSlotSize);
+        getRowsForSlotRange(targetSlot, dragSlotSize).forEach(function(r) {
+            r.classList.add(ok ? 'drag-target' : 'drag-invalid');
+        });
+    });
+
+    table.addEventListener('dragleave', function(e) {
+        if (!table.contains(e.relatedTarget)) {
+            table.querySelectorAll('tr').forEach(function(el) { el.classList.remove('drag-target', 'drag-invalid'); });
+        }
+    });
+
+    table.addEventListener('drop', function(e) {
+        e.preventDefault();
+        if (!dragAssetId) return;
+        var targetSlot = getSlotFromY(e.clientY);
+        if (!targetSlot) return;
+
+        if (!canPlace(targetSlot, dragSlotSize)) {
+            var targetU = Math.floor((targetSlot - 1) / 3) + 1;
+            var hLabels = ['하', '중', '상'];
+            var targetH = ((targetSlot - 1) % 3);
+            showToast('U' + targetU + ' ' + hLabels[targetH] + ' 위치에 놓을 수 없습니다 (충돌 또는 범위 초과)', 'error');
+            return;
+        }
+
+        // Send slot number directly to API
+        fetch('/racks/' + rackId + '/move-asset', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_id: dragAssetId, new_slot_start: targetSlot })
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) location.reload();
+            else showToast(data.error || '이동 실패', 'error');
+        }).catch(function() {
+            showToast('서버 통신 오류', 'error');
+        });
+    });
+
+    // Click to open popup
+    var didDrag = false;
+    table.addEventListener('dragstart', function() { didDrag = true; });
+    table.addEventListener('click', function(e) {
+        if (didDrag) { didDrag = false; return; }
+        var cell = e.target.closest('.slot-asset-cell[data-asset-id]');
+        if (cell) showAssetPopup(parseInt(cell.dataset.assetId));
+    });
+
+    function showToast(msg, type) {
+        var div = document.createElement('div');
+        div.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;padding:10px 16px;border-radius:6px;color:white;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:opacity .3s;';
+        div.style.background = type === 'error' ? '#ef4444' : '#22c55e';
+        div.textContent = msg;
+        document.body.appendChild(div);
+        setTimeout(function() { div.style.opacity = '0'; setTimeout(function() { div.remove(); }, 300); }, 2500);
+    }
+})();
+
+// --- Switch slot drag-and-drop ---
+(function() {
+    var swTable = document.getElementById('switchSlotTable');
+    if (!swTable) return;
+
+    var dragSwAssetId = null;
+    var dragSwFromSlot = null;
+
+    swTable.addEventListener('dragstart', function(e) {
+        var cell = e.target.closest('[data-asset-id][data-sw-slot]');
+        if (!cell) return;
+        dragSwAssetId = parseInt(cell.dataset.assetId);
+        dragSwFromSlot = cell.dataset.swSlot;
+        cell.style.opacity = '0.5';
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(dragSwAssetId));
+    });
+
+    swTable.addEventListener('dragend', function(e) {
+        var cell = e.target.closest('[data-asset-id]');
+        if (cell) cell.style.opacity = '1';
+        swTable.querySelectorAll('tr').forEach(function(r) { r.classList.remove('drag-target', 'drag-invalid'); });
+        dragSwAssetId = null;
+        dragSwFromSlot = null;
+    });
+
+    swTable.addEventListener('dragover', function(e) {
+        if (!dragSwAssetId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        var row = e.target.closest('tr[data-sw-slot]');
+        if (!row) return;
+        swTable.querySelectorAll('tr').forEach(function(r) { r.classList.remove('drag-target', 'drag-invalid'); });
+        var targetCell = row.querySelector('td:nth-child(2)');
+        var isOccupied = targetCell && targetCell.dataset.assetId && parseInt(targetCell.dataset.assetId) !== dragSwAssetId;
+        row.classList.add(isOccupied ? 'drag-invalid' : 'drag-target');
+    });
+
+    swTable.addEventListener('dragleave', function(e) {
+        if (!swTable.contains(e.relatedTarget)) {
+            swTable.querySelectorAll('tr').forEach(function(r) { r.classList.remove('drag-target', 'drag-invalid'); });
+        }
+    });
+
+    swTable.addEventListener('drop', function(e) {
+        e.preventDefault();
+        if (!dragSwAssetId) return;
+        var row = e.target.closest('tr[data-sw-slot]');
+        if (!row) return;
+        var targetSlot = row.dataset.swSlot;
+        if (targetSlot === dragSwFromSlot) return;
+
+        var targetCell = row.querySelector('td:nth-child(2)');
+        if (targetCell && targetCell.dataset.assetId && parseInt(targetCell.dataset.assetId) !== dragSwAssetId) {
+            showSwToast(targetSlot + ' 이미 사용중입니다', 'error');
+            return;
+        }
+
+        fetch('/racks/' + rackId + '/move-switch-slot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ asset_id: dragSwAssetId, new_slot: targetSlot })
+        }).then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.success) location.reload();
+            else showSwToast(data.error || '이동 실패', 'error');
+        }).catch(function() {
+            showSwToast('서버 통신 오류', 'error');
+        });
+    });
+
+    // Click to popup
+    swTable.addEventListener('click', function(e) {
+        var cell = e.target.closest('[data-asset-id]');
+        if (cell) showAssetPopup(parseInt(cell.dataset.assetId));
+    });
+
+    function showSwToast(msg, type) {
+        var div = document.createElement('div');
+        div.style.cssText = 'position:fixed;top:20px;right:20px;z-index:9999;padding:10px 16px;border-radius:6px;color:white;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.3);transition:opacity .3s;';
+        div.style.background = type === 'error' ? '#ef4444' : '#22c55e';
+        div.textContent = msg;
+        document.body.appendChild(div);
+        setTimeout(function() { div.style.opacity = '0'; setTimeout(function() { div.remove(); }, 300); }, 2500);
+    }
+})();
+
+var ipTypeLabels = {<% appConfig.ipTypes.forEach(function(t,i) { %>'<%= t.value %>':'<%= t.label %>'<% if(i<appConfig.ipTypes.length-1){%>,<%}%><%})%>};
+function ipLabel(ip) {
+    if (ip.ip_type === 'other' && ip.description) return ip.description;
+    return ipTypeLabels[ip.ip_type] || ip.ip_type;
+}
+function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+
+var _popupCache = {};
+function showAssetPopup(assetId) {
+    document.getElementById('popupTitle').textContent = '로딩중...';
+    document.getElementById('popupContent').innerHTML = '<p class="text-muted">로딩중...</p>';
+    openModal('assetPopup');
+
+    fetch('/assets/' + assetId + '/json')
+        .then(function(r) { return r.json(); })
+        .then(function(data) { renderPopup(assetId, data); })
+        .catch(function() { document.getElementById('popupContent').innerHTML = '<p style="color:#ef4444;">데이터를 불러올 수 없습니다.</p>'; });
+}
+
+function renderPopup(assetId, data) {
+    var a = data.asset;
+    var startU = Math.floor((a.rack_unit_start - 1) / 3) + 1;
+    var sizeU = Math.ceil((a.rack_unit_size || 3) / 3);
+    var sizeText = sizeU + 'U';
+    var posText = a.rack_unit_start ? 'U' + startU : 'U?';
+    posText += ' (' + sizeText + ')';
+    document.getElementById('popupTitle').textContent = a.model_name || a.asset_type;
+
+    var html = '<div class="form-row">' +
+        '<div class="form-group"><label>관리번호</label><p>' + esc(a.management_number || '-') + '</p></div>' +
+        '<div class="form-group"><label>유형</label><p>' + esc(a.asset_type) + '</p></div>' +
+        '<div class="form-group"><label>소유</label><p>' + (a.ownership === 'company' ? '자사' : '업체') + '</p></div>' +
+        '</div>' +
+        '<div class="form-row">' +
+        '<div class="form-group"><label>위치</label><p>' + posText + '</p></div>' +
+        '<div class="form-group"><label>담당자</label><p>' + esc(a.assigned_user || '-') + '</p></div>' +
+        '<div class="form-group"><label>용도</label><p>' + esc(a.purpose || '-') + '</p></div>' +
+        '</div>';
+
+    // Parent chassis info (if this is a node)
+    if (data.parent) {
+        html += '<div style="margin-top:8px; padding:6px 10px; background:#eff6ff; border-radius:4px; font-size:12px; color:#1e40af;">' +
+            '<strong>섀시:</strong> ' + esc(data.parent.management_number) + ' (' + esc(data.parent.model_name || '') + ')' +
+            '</div>';
+    }
+
+    // Child nodes (if this is a chassis)
+    if (data.children && data.children.length > 0) {
+        html += '<div style="margin-top:8px;"><label style="font-weight:600;font-size:12px;">노드 (' + data.children.length + '개)</label>';
+        data.children.forEach(function(child, idx) {
+            html += '<div style="font-size:13px; padding:2px 0; cursor:pointer;" onclick="showAssetPopup(' + child.id + ')">' +
+                '<span class="badge" style="font-size:10px; background:#3b82f6; color:white;">N' + (idx+1) + '</span> ' +
+                esc(child.management_number) +
+                (child.assigned_user ? ' - ' + esc(child.assigned_user) : '') +
+                (child.purpose ? ' | ' + esc(child.purpose) : '') +
+                '</div>';
+        });
+        html += '</div>';
+    }
+
+    // IPs
+    if (data.assetIps && data.assetIps.length > 0) {
+        html += '<div style="margin-top:8px;"><label style="font-weight:600;font-size:12px;">네트워크</label>';
+        data.assetIps.forEach(function(ip) {
+            var extra = '';
+            if (ip.speed) extra += ' ' + esc(ip.speed);
+            if (ip.interface_type) extra += ' ' + esc(ip.interface_type);
+            html += '<div style="font-size:13px;"><span class="badge badge-info" style="font-size:10px;">' + esc(ipLabel(ip)) + '</span>' + extra + ' <strong>' + esc(ip.ip_address) + '</strong></div>';
+        });
+        html += '</div>';
+    }
+
+    // Credentials
+    if (data.credentials && data.credentials.length > 0) {
+        html += '<div style="margin-top:8px;"><label style="font-weight:600;font-size:12px;">접속정보</label>';
+        data.credentials.forEach(function(c) {
+            html += '<div style="font-size:13px;"><span class="badge" style="font-size:10px;">' + esc(c.credential_type) + '</span> ' + esc(c.username) + ' / <code>' + esc(c.password || '') + '</code></div>';
+        });
+        html += '</div>';
+    }
+
+    // Power control section (only for BMC-capable asset types, not PDU/UPS)
+    var powerTypes = ['server', 'storage', 'switch', 'kvm', 'other'];
+    if (powerTypes.indexOf(a.asset_type) !== -1) {
+        var hasBmc = data.assetIps && data.assetIps.some(function(ip) { return ip.ip_type === 'bmc'; });
+        if (hasBmc) {
+            html += '<div class="power-control-section" id="powerControlSection_' + assetId + '" style="margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+                '<label style="font-weight:600;font-size:12px;margin:0;">전원 제어</label>' +
+                '<span class="power-status-badge" id="popupPowerBadge_' + assetId + '" style="font-size:11px;padding:2px 8px;border-radius:10px;background:#94a3b8;color:white;">확인 중...</span>' +
+                '</div>' +
+                '<div style="display:flex;gap:6px;">' +
+                '<button class="btn btn-sm" style="background:#22c55e;color:white;flex:1;" onclick="doPowerControl(' + assetId + ',\'on\',\'' + esc(a.management_number || a.model_name || '') + '\')">켜기</button>' +
+                '<button class="btn btn-sm" style="background:#ef4444;color:white;flex:1;" onclick="doPowerControl(' + assetId + ',\'off\',\'' + esc(a.management_number || a.model_name || '') + '\')">끄기</button>' +
+                '<button class="btn btn-sm" style="background:#f59e0b;color:white;flex:1;" onclick="doPowerControl(' + assetId + ',\'reset\',\'' + esc(a.management_number || a.model_name || '') + '\')">재시작</button>' +
+                '</div>' +
+                '<div id="powerControlMsg_' + assetId + '" style="margin-top:6px;font-size:11px;color:#64748b;"></div>' +
+                '</div>';
+            // Auto-check power status for this asset
+            setTimeout(function() { checkAssetPowerInPopup(assetId); }, 100);
+        }
+    }
+
+    html += '<div class="btn-group mt-2">' +
+        '<a href="/assets/' + assetId + '" class="btn btn-primary">상세 보기</a>' +
+        '<a href="/assets/' + assetId + '/edit" class="btn btn-outline">수정</a>' +
+        '</div>';
+    document.getElementById('popupContent').innerHTML = html;
+}
+
+// --- Power Status Check via IPMI ---
+var _powerChecked = false;
+var _powerRefreshTimer = null;
+
+function checkPowerStatus(isAuto) {
+    var btn = document.getElementById('btnPowerCheck');
+    if (!isAuto) {
+        btn.disabled = true;
+        btn.innerHTML = '&#x26A1; 확인 중...';
+        // Show loading dots on first check only
+        if (!_powerChecked) {
+            document.querySelectorAll('.power-dot').forEach(function(dot) {
+                dot.className = 'power-dot loading';
+                dot.title = '확인 중...';
+            });
+        }
+    }
+
+    fetch('/racks/' + rackId + '/power-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            _powerChecked = true;
+            btn.innerHTML = '&#x26A1; 새로고침';
+            btn.disabled = false;
+
+            // Update sidebar legend
+            var legendCard = document.getElementById('powerLegend');
+            if (legendCard) legendCard.style.display = '';
+
+            // Apply power status to dots
+            document.querySelectorAll('.power-dot').forEach(function(dot) {
+                var assetId = dot.dataset.assetId;
+                if (!assetId) return;
+                var info = data[assetId];
+                if (!info) {
+                    dot.className = 'power-dot hidden';
+                    return;
+                }
+                dot.className = 'power-dot power-' + info.status;
+                dot.title = info.message + (info.bmc_ip ? ' (' + info.bmc_ip + ')' : '');
+            });
+
+            // Update asset list power status
+            document.querySelectorAll('.asset-power-badge').forEach(function(badge) {
+                var assetId = badge.dataset.assetId;
+                if (!assetId) return;
+                var info = data[assetId];
+                if (!info) return;
+                badge.className = 'asset-power-badge power-badge-' + info.status;
+                var labels = { on: 'ON', off: 'OFF', no_bmc: 'BMC 미등록', error: '연결실패', unknown: '알수없음' };
+                badge.textContent = labels[info.status] || info.status;
+            });
+
+            // Start auto-refresh after first check (every 30s)
+            if (!_powerRefreshTimer) {
+                _powerRefreshTimer = setInterval(function() { checkPowerStatus(true); }, 30000);
+            }
+        })
+        .catch(function() {
+            btn.innerHTML = '&#x26A1; 확인 실패 (재시도)';
+            btn.disabled = false;
+            if (!_powerChecked) {
+                document.querySelectorAll('.power-dot').forEach(function(dot) {
+                    dot.className = 'power-dot';
+                });
+            }
+        });
+}
+
+// --- Power Control Functions ---
+function checkAssetPowerInPopup(assetId) {
+    fetch('/racks/' + rackId + '/power-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var info = data[assetId];
+            var badge = document.getElementById('popupPowerBadge_' + assetId);
+            if (!badge) return;
+            if (!info) {
+                badge.textContent = 'BMC 미등록';
+                badge.style.background = '#1e293b';
+                return;
+            }
+            updatePowerBadge(badge, info.status);
+        })
+        .catch(function() {
+            var badge = document.getElementById('popupPowerBadge_' + assetId);
+            if (badge) { badge.textContent = '확인 실패'; badge.style.background = '#eab308'; }
+        });
+}
+
+function updatePowerBadge(badge, status) {
+    var labels = { on: '전원 켜짐', off: '전원 꺼짐', error: '연결 실패', no_bmc: 'BMC 미등록', unknown: '알 수 없음' };
+    var colors = { on: '#22c55e', off: '#ef4444', error: '#eab308', no_bmc: '#1e293b', unknown: '#94a3b8' };
+    badge.textContent = labels[status] || status;
+    badge.style.background = colors[status] || '#94a3b8';
+}
+
+function doPowerControl(assetId, action, assetName) {
+    var actionLabels = { on: '켜기', off: '끄기', reset: '재시작', cycle: '전원 순환' };
+    if (action === 'off' || action === 'reset' || action === 'cycle') {
+        if (!confirm((assetName || 'Asset') + ' 전원을 ' + (actionLabels[action] || action) + ' 하시겠습니까?')) return;
+    }
+
+    var msgEl = document.getElementById('powerControlMsg_' + assetId);
+    if (msgEl) { msgEl.textContent = '처리 중...'; msgEl.style.color = '#3b82f6'; }
+
+    fetch('/racks/' + rackId + '/power-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetId: assetId, action: action })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (msgEl) {
+            msgEl.textContent = data.message || (data.success ? '완료' : '실패');
+            msgEl.style.color = data.success ? '#22c55e' : '#ef4444';
+        }
+        // Update badge
+        if (data.status) {
+            var badge = document.getElementById('popupPowerBadge_' + assetId);
+            if (badge) updatePowerBadge(badge, data.status);
+        }
+        // Update rack power-dot
+        if (data.status) {
+            document.querySelectorAll('.power-dot[data-asset-id="' + assetId + '"]').forEach(function(dot) {
+                dot.className = 'power-dot power-' + data.status;
+                var labels = { on: '전원 켜짐', off: '전원 꺼짐' };
+                dot.title = labels[data.status] || data.status;
+            });
+            // Also update sidebar badges
+            document.querySelectorAll('.asset-power-badge[data-asset-id="' + assetId + '"]').forEach(function(badge) {
+                badge.className = 'asset-power-badge power-badge-' + data.status;
+                var badgeLabels = { on: 'ON', off: 'OFF' };
+                badge.textContent = badgeLabels[data.status] || data.status;
+            });
+        }
+    })
+    .catch(function() {
+        if (msgEl) { msgEl.textContent = '서버 통신 오류'; msgEl.style.color = '#ef4444'; }
+    });
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
