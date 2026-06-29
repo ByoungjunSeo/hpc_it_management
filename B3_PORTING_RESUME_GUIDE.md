@@ -24,6 +24,19 @@
 - FK 무결성 15/15 고아 행 0
 - 시퀀스 20/20 정렬 (last_value = max(id))
 
+## ★ 세션 시작 시 v1 운영 확인 (최우선)
+
+재개할 때 가장 먼저:
+```bash
+systemctl status it-assets --no-pager | head -5
+ss -ltnp | grep 3000
+```
+- inactive/dead면 즉시: `sudo systemctl start it-assets`
+- v1(3000, systemd)과 v2 개발(3001, 수동 node)은 같은 서버 공존.
+- v2 작업 중 절대 it-assets stop 금지, 3000 포트 건드리지 말 것.
+- v2 검증 서버는 timeout으로만 띄우고 자동 종료시킬 것 (nohup 금지).
+- (2026-06-29 14:20 v1이 status=0 정상종료로 꺼져있던 적 있음 — 원인 추적 중)
+
 ## 2. v2 현재 상태
 
 ### 있음
@@ -242,6 +255,25 @@ express → getDb() → 디렉토리 생성(backups, photos)
 - equipmentUsageLog.js: event_type→한글 역매핑 + event_date AS usage_date 별칭.
   세 메서드 fallback `|| event_type` 적용(transferred 등 안 깨짐).
 - transferred: v1 무, v2 신규. 라벨 미정. 자산 이관 기능 설계 시 확정.
+
+### 이식 버그 트래킹 (BUG_TRACKING.md 연결)
+
+v1에 원래 있던 버그 목록. 방침: (나) 이식하며 수정. 문서: `./BUG_TRACKING.md`
+- 각 라우트/모델 이식 전 BUG_TRACKING.md 확인 필수.
+- 등록 버그는 v2에서 의도적으로 v1과 다르게(고쳐서) 동작.
+  → 검증 시 v1↔v2 차이가 나면 BUG_TRACKING 먼저 확인: 등록 버그 수정이면 정상.
+- 현재 버그:
+  - BUG-1 (B-4d): 부품수정 시 사용자 비고 손실 → 비고 보존
+  - BUG-2 (보류/신기능): 전원 끄기 미동작(no_cred) → 자격증명 규명 후 신기능 트랙. (나) 예외
+  - BUG-3 (B-4d): 부품 이동 팝업 UI 깨짐
+  - BUG-4 (B-4d): audit before/after [object Object]. v1 기존 결함(pg 아님), 신규기록부터 수정
+- 수정 완료 시 BUG_TRACKING.md에 [완료]+커밋해시 기록.
+
+### 메뉴 정리 결정 (가) — 이식 제외 + 숨김
+
+- 신청서(requests.js), 전력분전반(powerPanel.js), 네트워크(networkLayout.js):
+  데이터 0행 또는 테스트뿐 → v2 이식 제외 + 메뉴 숨김. 완전삭제 아님(v1 코드 보존).
+- B-4c 로드맵에서 위 3개 제외하고 재구성.
 
 ## 8. 작업 원칙 (유지)
 
