@@ -221,12 +221,27 @@ express → getDb() → 디렉토리 생성(backups, photos)
   현재 DB 0건. 한글 라벨 미정 → fallback으로 'transferred' 원문 노출(안 깨짐).
   자산 이관 기능을 실제 설계할 때(B-4d 또는 이후) 한글 라벨 확정.
 
-### B-4b 완료 상태
+### B-4b 검증 경계 (커밋 ba9401e)
 
-- requireLogin + 읽기 라우트: auditLog, offices, storage, serverRooms(rooms),
-  index(대시보드), /api/search — 전부 pg async 전환, 로그인 보호 하에 200 동작.
-- 검증: 대시보드 자산통계 정확(172/87/22/7), audit login 기록(id 1422~), 세션 user 저장.
-- 알려진 호환층 부채는 위에 기록(기능 정상, B-4d에서 정리).
+검증 완료 (실데이터 확인):
+- requireLogin 보호 + 읽기 라우트: auditLog, 대시보드, offices, storage,
+  rooms(목록/상세/자산/모듈), /api/search — 전부 pg async, 200 동작.
+- rooms 상세 검증: room_id=64 → 자산 55개 화면 렌더 = DB 55 일치.
+- 주의: server_rooms id는 60~71 대역(원본 id 보존). assets id도 1041~.
+  검증 시 id=1 가정 금지, 항상 실제 분포부터 확인할 것.
+
+선반입됐으나 독립 검증 안 됨 (파일 존재 ≠ 전환 완료):
+- 모델 asset.js는 rooms 경유 '읽기'만 검증됨. 자산 CRUD(생성/수정/삭제) 미검증.
+- ipAddress.js, moduleInventory.js, assetCredential.js, assetIp.js:
+  자체 라우트(/assets, /modules, IP관리) 아직 mount 안 됨 → B-4c/d에서 정식 이식·검증.
+- rack.js, computingModule.js: rooms 읽기 경유로만 동작 확인. 자체 기능 미검증.
+→ B-4c/d 진입 시 "파일 있음"을 완료로 간주하지 말고, 해당 라우트에서 독립 검증할 것.
+
+### §5 호환층 부채 (B-4d 정리) — 재확인
+
+- equipmentUsageLog.js: event_type→한글 역매핑 + event_date AS usage_date 별칭.
+  세 메서드 fallback `|| event_type` 적용(transferred 등 안 깨짐).
+- transferred: v1 무, v2 신규. 라벨 미정. 자산 이관 기능 설계 시 확정.
 
 ## 8. 작업 원칙 (유지)
 
