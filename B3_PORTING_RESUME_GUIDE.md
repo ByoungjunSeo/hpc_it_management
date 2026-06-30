@@ -292,9 +292,26 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 6. audit_logs 연쇄 기록 확인
 - 테스트 데이터는 `__TEST_xxx__` 명명으로 격리, DELETE로 반드시 정리. 운영 데이터 불가침.
 
+### B-4c-2 vendorIntake 완료
+
+- 이식+쓰기검증 통과: create-link(id=2)→approve(상태전이)→delete, 시퀀스 정합, id=1 보존.
+- audit 연쇄 기록(1441~1442). publicIntake 제외(v1도 미사용), requests 제외(가).
+
+### ★ B-4c 공통 원칙 (이후 모든 쓰기 라우트 적용)
+
+1. **pg 날짜 후처리 패턴**:
+   - pg는 날짜/타임스탬프 컬럼을 Date 객체로 반환 → 뷰가 문자열 기대 시 깨짐.
+   - 날짜 컬럼 있는 모델은 fixDates류 후처리(Date→ISO 문자열) 적용.
+   - 적용 이력: auditLog, equipmentUsageLog, vendorIntake. 이후 ipManagement/photos 등도 점검.
+2. **audit 일관 적용**:
+   - 쓰기 라우트의 생성/수정/삭제/상태변경에는 AuditLog.log 기록을 남긴다.
+   - v1에 audit가 없던 동작도 v2에서 보강(의도된 개선 — v1과 다른 것은 정상).
+   - 단 BUG_TRACKING이 아니라 "공통 개선 원칙"으로 분류. 검증 시 audit 차이는 의도된 것.
+   - 확인: serverRooms·vendorIntake 모두 audit 있음(일관성 OK).
+
 ### B-4c 남은 라우트 (순서)
 
-- vendorIntake(승인/반려) → ipManagement(서브넷 벌크) → photos(파일+DB)
+- ~~vendorIntake(완료)~~ → ipManagement(서브넷 벌크) → photos(파일+DB)
 - lendings: 의존 모델(Lending/ModuleTransferLog/ModuleInventoryLog 신규 + stub 확장 다수) 갖춰진 뒤.
   fault-return 핸들러(6모델 대형 트랜잭션)는 B-4d 후보로 분리.
 - 제외(메뉴정리 가): requests, powerPanel, networkLayout.
