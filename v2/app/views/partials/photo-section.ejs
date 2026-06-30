@@ -1,0 +1,220 @@
+<%
+  const _entityType = typeof entityType !== 'undefined' ? entityType : 'asset';
+  const _entityId = typeof entityId !== 'undefined' ? entityId : 0;
+  const _photos = typeof photos !== 'undefined' ? photos : [];
+  const _editable = typeof editable !== 'undefined' ? editable : true;
+  const _sectionId = 'photoSection_' + _entityType + '_' + _entityId;
+%>
+<div class="card" id="<%= _sectionId %>">
+    <div class="card-header">
+        <h2>사진</h2>
+        <% if (_editable) { %>
+        <label class="btn btn-sm btn-primary" style="margin:0; cursor:pointer;">
+            + 사진 추가
+            <input type="file" multiple accept="image/*" style="display:none;"
+                   onchange="handlePhotoUpload(this, '<%= _entityType %>', <%= _entityId %>)">
+        </label>
+        <% } %>
+    </div>
+
+    <div class="photo-gallery" id="gallery_<%= _entityType %>_<%= _entityId %>" style="padding:8px 0; min-height:40px;">
+        <% if (_photos.length === 0) { %>
+        <p class="text-muted photo-empty-msg" style="margin:0; padding:4px 0;">등록된 사진이 없습니다.</p>
+        <% } else {
+            var _lastDate = '';
+            _photos.forEach(function(photo, _idx) {
+                var _photoDate = (photo.uploaded_at || '').substring(0, 10);
+                if (_photoDate !== _lastDate) {
+                    if (_lastDate !== '') { %>
+        </div><!-- close prev group -->
+        <%          }
+                    _lastDate = _photoDate; %>
+        <div class="photo-date-header" style="font-size:12px; font-weight:600; color:#475569; margin-top:<%= _idx > 0 ? '12px' : '0' %>; margin-bottom:6px; padding:4px 0; border-bottom:1px solid #e2e8f0;"><%= _photoDate || '날짜 없음' %></div>
+        <div class="photo-date-group" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:4px;">
+        <%      }  %>
+        <div class="photo-thumb" data-photo-id="<%= photo.id %>" data-date="<%= _photoDate %>" style="position:relative; width:160px;">
+            <img src="<%= photo.file_path %>" alt="<%= photo.original_name || '' %>"
+                 style="width:160px; height:120px; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #e2e8f0;"
+                 onclick="openPhotoLightbox('<%= photo.file_path %>', '<%= (photo.original_name || '').replace(/'/g, "\\'") %>')">
+            <div style="font-size:11px; color:#64748b; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="<%= photo.original_name || '' %>"><%= photo.original_name || '' %></div>
+            <div style="font-size:10px; color:#94a3b8;"><%= photo.uploaded_by ? photo.uploaded_by + ' · ' : '' %><%= (photo.uploaded_at || '').substring(11, 16) %></div>
+            <% if (_editable) { %>
+            <button class="photo-delete-btn" onclick="deletePhoto(<%= photo.id %>, '<%= _entityType %>', <%= _entityId %>)"
+                    style="position:absolute; top:4px; right:4px; background:rgba(0,0,0,0.6); color:white; border:none; border-radius:50%; width:24px; height:24px; cursor:pointer; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center;"
+                    title="삭제">&times;</button>
+            <% } %>
+        </div>
+        <%  }) %>
+        </div><!-- close last group -->
+        <% } %>
+    </div>
+
+    <div class="photo-upload-progress" id="uploadProgress_<%= _entityType %>_<%= _entityId %>" style="display:none; padding:8px 0;">
+        <div style="display:flex; align-items:center; gap:8px;">
+            <div style="width:200px; height:6px; background:#e2e8f0; border-radius:3px; overflow:hidden;">
+                <div class="progress-bar" style="width:0%; height:100%; background:#3b82f6; transition:width 0.3s;"></div>
+            </div>
+            <span class="progress-text" style="font-size:12px; color:#64748b;">업로드 중...</span>
+        </div>
+    </div>
+</div>
+
+<!-- Photo Lightbox (shared) -->
+<div id="photoLightbox" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:10000; cursor:pointer; align-items:center; justify-content:center;" onclick="closePhotoLightbox()">
+    <button onclick="closePhotoLightbox()" style="position:absolute; top:20px; right:20px; background:none; border:none; color:white; font-size:32px; cursor:pointer; z-index:10001;">&times;</button>
+    <img id="lightboxImg" src="" alt="" style="max-width:90vw; max-height:90vh; object-fit:contain; border-radius:8px;">
+    <div id="lightboxCaption" style="position:absolute; bottom:20px; left:50%; transform:translateX(-50%); color:white; font-size:14px; background:rgba(0,0,0,0.5); padding:6px 16px; border-radius:4px;"></div>
+</div>
+
+<script>
+if (typeof window._photoScriptLoaded === 'undefined') {
+  window._photoScriptLoaded = true;
+
+  window.openPhotoLightbox = function(src, caption) {
+    var lb = document.getElementById('photoLightbox');
+    document.getElementById('lightboxImg').src = src;
+    document.getElementById('lightboxCaption').textContent = caption || '';
+    lb.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  };
+
+  window.closePhotoLightbox = function() {
+    document.getElementById('photoLightbox').style.display = 'none';
+    document.body.style.overflow = '';
+  };
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('photoLightbox').style.display === 'flex') {
+      closePhotoLightbox();
+    }
+  });
+
+  window.handlePhotoUpload = function(input, entityType, entityId) {
+    var files = input.files;
+    if (!files || files.length === 0) return;
+
+    var formData = new FormData();
+    for (var i = 0; i < files.length; i++) {
+      formData.append('photos', files[i]);
+    }
+
+    var progressEl = document.getElementById('uploadProgress_' + entityType + '_' + entityId);
+    var progressBar = progressEl.querySelector('.progress-bar');
+    var progressText = progressEl.querySelector('.progress-text');
+    progressEl.style.display = '';
+    progressBar.style.width = '10%';
+    progressText.textContent = '업로드 중... (0/' + files.length + ')';
+
+    fetch('/api/photos/' + entityType + '/' + entityId, {
+      method: 'POST',
+      body: formData
+    })
+    .then(function(r) {
+      if (!r.ok) {
+        return r.text().then(function(t) {
+          try { return JSON.parse(t); } catch(e) { throw new Error('서버 오류 (' + r.status + ')'); }
+        });
+      }
+      return r.json();
+    })
+    .then(function(data) {
+      progressBar.style.width = '100%';
+      if (data.success) {
+        progressText.textContent = files.length + '장 업로드 완료';
+        setTimeout(function() {
+          progressEl.style.display = 'none';
+          refreshPhotoGallery(entityType, entityId);
+        }, 600);
+      } else {
+        progressText.textContent = '오류: ' + (data.error || '업로드 실패');
+        progressText.style.color = '#ef4444';
+      }
+    })
+    .catch(function(err) {
+      progressBar.style.width = '100%';
+      progressBar.style.background = '#ef4444';
+      progressText.textContent = '오류: ' + err.message;
+    });
+
+    // Reset input
+    input.value = '';
+  };
+
+  window.deletePhoto = function(photoId, entityType, entityId) {
+    if (!confirm('이 사진을 삭제하시겠습니까?')) return;
+    fetch('/api/photos/' + photoId, { method: 'DELETE' })
+      .then(function(r) {
+        if (!r.ok) { return r.text().then(function(t) { try { return JSON.parse(t); } catch(e) { throw new Error('서버 오류 (' + r.status + ')'); } }); }
+        return r.json();
+      })
+      .then(function(data) {
+        if (data.success) {
+          var thumb = document.querySelector('.photo-thumb[data-photo-id="' + photoId + '"]');
+          if (thumb) thumb.remove();
+          // Show empty message if no photos left
+          var gallery = document.getElementById('gallery_' + entityType + '_' + entityId);
+          if (gallery && gallery.querySelectorAll('.photo-thumb').length === 0) {
+            gallery.innerHTML = '<p class="text-muted photo-empty-msg" style="margin:0; padding:4px 0;">등록된 사진이 없습니다.</p>';
+          }
+        } else {
+          alert('삭제 실패: ' + (data.error || ''));
+        }
+      })
+      .catch(function(err) {
+        alert('삭제 오류: ' + err.message);
+      });
+  };
+
+  window.refreshPhotoGallery = function(entityType, entityId) {
+    fetch('/api/photos/' + entityType + '/' + entityId)
+      .then(function(r) {
+        if (!r.ok) { return r.text().then(function(t) { try { return JSON.parse(t); } catch(e) { throw new Error('서버 오류 (' + r.status + ')'); } }); }
+        return r.json();
+      })
+      .then(function(data) {
+        if (!data.success) return;
+        var gallery = document.getElementById('gallery_' + entityType + '_' + entityId);
+        if (!gallery) return;
+        gallery.innerHTML = '';
+        if (data.photos.length === 0) {
+          gallery.innerHTML = '<p class="text-muted photo-empty-msg" style="margin:0; padding:4px 0;">등록된 사진이 없습니다.</p>';
+          return;
+        }
+        var lastDate = '';
+        var groupDiv = null;
+        data.photos.forEach(function(photo) {
+          var photoDate = (photo.uploaded_at || '').substring(0, 10);
+          if (photoDate !== lastDate) {
+            lastDate = photoDate;
+            var header = document.createElement('div');
+            header.className = 'photo-date-header';
+            header.style.cssText = 'font-size:12px; font-weight:600; color:#475569; margin-top:' + (groupDiv ? '12px' : '0') + '; margin-bottom:6px; padding:4px 0; border-bottom:1px solid #e2e8f0;';
+            header.textContent = photoDate || '날짜 없음';
+            gallery.appendChild(header);
+            groupDiv = document.createElement('div');
+            groupDiv.className = 'photo-date-group';
+            groupDiv.style.cssText = 'display:flex; flex-wrap:wrap; gap:10px; margin-bottom:4px;';
+            gallery.appendChild(groupDiv);
+          }
+          var div = document.createElement('div');
+          div.className = 'photo-thumb';
+          div.setAttribute('data-photo-id', photo.id);
+          div.style.cssText = 'position:relative; width:160px;';
+          var safeName = (photo.original_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+          var timeStr = (photo.uploaded_at || '').substring(11, 16);
+          var byStr = photo.uploaded_by ? photo.uploaded_by + ' &middot; ' : '';
+          div.innerHTML =
+            '<img src="' + photo.file_path + '" alt="' + safeName + '"' +
+            ' style="width:160px; height:120px; object-fit:cover; border-radius:6px; cursor:pointer; border:1px solid #e2e8f0;"' +
+            ' onclick="openPhotoLightbox(\'' + photo.file_path + '\', \'' + safeName + '\')">' +
+            '<div style="font-size:11px; color:#64748b; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + safeName + '">' + (photo.original_name || '') + '</div>' +
+            '<div style="font-size:10px; color:#94a3b8;">' + byStr + timeStr + '</div>' +
+            '<button class="photo-delete-btn" onclick="deletePhoto(' + photo.id + ', \'' + entityType + '\', ' + entityId + ')"' +
+            ' style="position:absolute; top:4px; right:4px; background:rgba(0,0,0,0.6); color:white; border:none; border-radius:50%; width:24px; height:24px; cursor:pointer; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center;"' +
+            ' title="삭제">&times;</button>';
+          groupDiv.appendChild(div);
+        });
+      });
+  };
+}
+</script>

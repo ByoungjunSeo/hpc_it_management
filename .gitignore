@@ -33,3 +33,4 @@ v2/pgdata/
 Thumbs.db
 v2/scripts/dryrun-eul-output.json
 v2/scripts/*-output.json
+v2/app/public/uploads/

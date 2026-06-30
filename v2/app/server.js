@@ -72,7 +72,7 @@ app.use('/', require('./routes/auth'));
 // All other routes require login
 app.use(requireLogin);
 
-// app.use('/api/photos', require('./routes/photos'));
+app.use('/api/photos', require('./routes/photos'));
 app.use('/', require('./routes/index'));
 // app.use('/assets', require('./routes/assets'));
 app.use('/rooms', require('./routes/serverRooms'));
