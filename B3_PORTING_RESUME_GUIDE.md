@@ -275,6 +275,30 @@ v1에 원래 있던 버그 목록. 방침: (나) 이식하며 수정. 문서: `.
   데이터 0행 또는 테스트뿐 → v2 이식 제외 + 메뉴 숨김. 완전삭제 아님(v1 코드 보존).
 - B-4c 로드맵에서 위 3개 제외하고 재구성.
 
+### B-4c 진행 — 쓰기 라우트 검증
+
+B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이미 async 전환됨):
+- CRUD 한 사이클 검증: CREATE(id=72)→UPDATE→DELETE 전부 302, DB 반영 확인.
+- 시퀀스 정합 실전 검증: 새 id=72 (B-2.9에서 server_rooms 시퀀스 71로 맞춘 것 확인).
+- audit_logs 연쇄 기록 정상(1435~1437). 원본 9행 보존, 테스트 데이터 정리 완료.
+
+### 쓰기 검증 템플릿 (이후 쓰기 라우트 공통)
+
+1. before 기준 행수
+2. CREATE → DB 확인 + 새 id가 시퀀스 이상인지(정합)
+3. UPDATE → 값 변경 확인
+4. DELETE → 정리 겸 삭제 검증
+5. after → 원본 보존 + 테스트 0
+6. audit_logs 연쇄 기록 확인
+- 테스트 데이터는 `__TEST_xxx__` 명명으로 격리, DELETE로 반드시 정리. 운영 데이터 불가침.
+
+### B-4c 남은 라우트 (순서)
+
+- vendorIntake(승인/반려) → ipManagement(서브넷 벌크) → photos(파일+DB)
+- lendings: 의존 모델(Lending/ModuleTransferLog/ModuleInventoryLog 신규 + stub 확장 다수) 갖춰진 뒤.
+  fault-return 핸들러(6모델 대형 트랜잭션)는 B-4d 후보로 분리.
+- 제외(메뉴정리 가): requests, powerPanel, networkLayout.
+
 ## 8. 작업 원칙 (유지)
 
 - 한 단계씩 잘게, 사용자 직접 검증 후 다음
