@@ -1,0 +1,422 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>대여 관리</h1>
+    <a href="/lendings/new" class="btn btn-primary">+ 대여 등록</a>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card warning">
+        <div class="stat-value"><%= summary.outbound_active %></div>
+        <div class="stat-label">TTA → 외부 대여중</div>
+    </div>
+    <div class="stat-card info">
+        <div class="stat-value"><%= summary.inbound_active %></div>
+        <div class="stat-label">외부 → TTA 차입중</div>
+    </div>
+</div>
+
+<div class="card">
+    <form class="filters" method="GET" action="/lendings">
+        <div class="form-group">
+            <label>방향</label>
+            <select name="direction" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% appConfig.lendingDirections.forEach(d => { %>
+                <option value="<%= d.value %>" <%= filters.direction === d.value ? 'selected' : '' %>><%= d.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>상태</label>
+            <select name="status" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% appConfig.lendingStatuses.forEach(s => { %>
+                <option value="<%= s.value %>" <%= filters.status === s.value ? 'selected' : '' %>><%= s.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>검색</label>
+            <input type="text" name="search" class="form-control" placeholder="대상기관..." value="<%= filters.search || '' %>">
+        </div>
+        <div class="form-group">
+            <button type="submit" class="btn btn-primary">검색</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>방향</th>
+                    <th>대상</th>
+                    <th>대여일</th>
+                    <th>반납일</th>
+                    <th>품목</th>
+                    <th>상태</th>
+                    <th>비고</th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% if (lendings.length === 0) { %>
+                <tr><td colspan="8" class="text-center text-muted">대여 기록이 없습니다.</td></tr>
+                <% } %>
+                <% lendings.forEach(l => { %>
+                <tr>
+                    <td>
+                        <span class="badge badge-<%= l.direction === 'outbound' ? 'warning' : 'info' %>">
+                            <%= l.direction === 'outbound' ? 'TTA→외부' : '외부→TTA' %>
+                        </span>
+                    </td>
+                    <td><%= l.counterparty %></td>
+                    <td><%= l.loan_date || '-' %></td>
+                    <td><%= l.return_date || '-' %></td>
+                    <td><%= l.items_summary || '-' %></td>
+                    <td>
+                        <span class="badge badge-<%= l.status === 'active' ? 'danger' : 'success' %>">
+                            <%= l.status === 'active' ? '대여중' : '반납완료' %>
+                        </span>
+                    </td>
+                    <td><%= l.notes || '-' %></td>
+                    <td>
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-sm btn-outline" onclick="openLendingPhotoModal(<%= l.id %>, '<%= (l.counterparty || '').replace(/'/g, "\\'") %>')" title="사진">📷</button>
+                            <a href="/lendings/<%= l.id %>/edit" class="btn btn-sm btn-outline">수정</a>
+                            <% if (l.status === 'active') { %>
+                            <form method="POST" action="/lendings/<%= l.id %>/return" style="display:inline" onsubmit="return confirm('반납 처리하시겠습니까?')">
+                                <button type="submit" class="btn btn-sm btn-success">반납</button>
+                            </form>
+                            <% if (l.direction === 'inbound') { %>
+                            <button type="button" class="btn btn-sm btn-warning" onclick="showFaultReturnModal(<%= l.id %>, '<%= l.counterparty.replace(/'/g, "\\'") %>')">장애반납</button>
+                            <% } %>
+                            <% } %>
+                            <form method="POST" action="/lendings/<%= l.id %>/delete" style="display:inline" onsubmit="return confirmDelete()">
+                                <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted mt-1">총 <%= lendings.length %>건</p>
+</div>
+
+<!-- Fault Return Modal -->
+<div id="faultReturnModal" class="modal-overlay" style="display:none">
+  <div class="modal-content" style="max-width:700px">
+    <div class="modal-header">
+      <h3>업체 장비 장애반납</h3>
+      <button class="modal-close" onclick="closeFaultReturnModal()">&times;</button>
+    </div>
+    <form id="faultReturnForm" method="POST" action="">
+      <div class="modal-body">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:15px">
+          <div class="form-group">
+            <label>사유</label>
+            <select name="reason" class="form-control">
+              <option value="장애">장애</option>
+              <option value="오류">오류</option>
+              <option value="점검">점검</option>
+              <option value="교체">교체</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>예상 회수일</label>
+            <input type="date" name="expected_return_date" class="form-control">
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:15px">
+          <label>비고</label>
+          <input type="text" name="fault_notes" class="form-control" placeholder="장애 상세 내용...">
+        </div>
+        <div class="form-group" style="margin-bottom:15px">
+          <label>대상 자산</label>
+          <select id="faultAssetSelect" name="asset_id" class="form-control" onchange="loadFaultModules(this.value)">
+            <option value="">-- 자산 선택 --</option>
+          </select>
+        </div>
+        <input type="hidden" name="modules" id="faultModulesInput">
+        <div id="faultModulesArea" style="display:none">
+          <table style="width:100%; font-size:0.9em">
+            <thead>
+              <tr>
+                <th>소유</th>
+                <th>유형</th>
+                <th>모델</th>
+                <th>수량</th>
+                <th>처리</th>
+              </tr>
+            </thead>
+            <tbody id="faultModulesBody"></tbody>
+          </table>
+          <p class="text-muted" style="margin-top:8px; font-size:0.85em">※ "장비실" 선택 시 부품현황에 자동 반영됩니다.</p>
+        </div>
+        <div id="faultNoModules" style="display:none; color:#888; padding:20px; text-align:center">
+          이 자산에 등록된 모듈이 없습니다.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" onclick="closeFaultReturnModal()">취소</button>
+        <button type="submit" class="btn btn-warning" id="faultSubmitBtn" disabled>장애반납 처리</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Lending Photo Modal -->
+<div id="lendingPhotoModal" class="modal-overlay" style="display:none">
+  <div class="modal-content" style="max-width:700px">
+    <div class="modal-header">
+      <h3 id="lendingPhotoTitle">대여 사진</h3>
+      <button class="modal-close" onclick="closeLendingPhotoModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div id="lendingPhotoGallery" style="display:flex; flex-wrap:wrap; gap:10px; min-height:60px;"></div>
+      <div id="lendingPhotoEmpty" style="display:none; color:#888; padding:20px; text-align:center;">등록된 사진이 없습니다.</div>
+      <div style="margin-top:15px; border-top:1px solid #eee; padding-top:15px;">
+        <label class="btn btn-primary" style="cursor:pointer;">
+          📷 사진 추가
+          <input type="file" id="lendingPhotoInput" multiple accept="image/*" style="display:none;" onchange="handleLendingPhotoUpload(this)">
+        </label>
+        <span id="lendingPhotoProgress" style="margin-left:10px; display:none; color:#666;">업로드 중...</span>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-outline" onclick="closeLendingPhotoModal()">닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lending Photo Lightbox -->
+<div id="lendingPhotoLightbox" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.9); z-index:2000; cursor:pointer; align-items:center; justify-content:center;" onclick="closeLendingPhotoLightbox()">
+  <img id="lendingPhotoLightboxImg" src="" style="max-width:90%; max-height:90%; object-fit:contain; border-radius:4px;">
+</div>
+
+<style>
+.modal-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; display:flex; align-items:center; justify-content:center; }
+.modal-content { background:#fff; border-radius:8px; width:90%; box-shadow:0 4px 20px rgba(0,0,0,0.3); }
+.modal-header { display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee; }
+.modal-header h3 { margin:0; }
+.modal-close { background:none; border:none; font-size:1.5em; cursor:pointer; color:#666; }
+.modal-body { padding:20px; max-height:60vh; overflow-y:auto; }
+.modal-footer { padding:15px 20px; border-top:1px solid #eee; text-align:right; display:flex; gap:10px; justify-content:flex-end; }
+</style>
+
+<script>
+let faultReturnLendingId = null;
+let faultReturnModules = [];
+
+function showFaultReturnModal(lendingId, counterparty) {
+  faultReturnLendingId = lendingId;
+  document.getElementById('faultReturnForm').action = '/lendings/' + lendingId + '/fault-return';
+  document.getElementById('faultModulesArea').style.display = 'none';
+  document.getElementById('faultNoModules').style.display = 'none';
+  document.getElementById('faultSubmitBtn').disabled = true;
+  document.getElementById('faultModulesBody').innerHTML = '';
+  faultReturnModules = [];
+
+  // Load vendor assets
+  const sel = document.getElementById('faultAssetSelect');
+  sel.innerHTML = '<option value="">-- 로딩중... --</option>';
+
+  fetch('/lendings/vendor-assets?counterparty=' + encodeURIComponent(counterparty))
+    .then(r => r.json())
+    .then(data => {
+      sel.innerHTML = '<option value="">-- 자산 선택 --</option>';
+      (data.assets || []).forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = (a.management_number || a.model_name || 'ID:' + a.id) + (a.status === 'maintenance' ? ' [점검중]' : '');
+        sel.appendChild(opt);
+      });
+      if ((data.assets || []).length === 0) {
+        sel.innerHTML = '<option value="">-- 해당 업체 자산 없음 --</option>';
+      }
+    })
+    .catch(() => {
+      sel.innerHTML = '<option value="">-- 조회 실패 --</option>';
+    });
+
+  document.getElementById('faultReturnModal').style.display = 'flex';
+}
+
+function loadFaultModules(assetId) {
+  const area = document.getElementById('faultModulesArea');
+  const noMod = document.getElementById('faultNoModules');
+  const tbody = document.getElementById('faultModulesBody');
+  const btn = document.getElementById('faultSubmitBtn');
+
+  if (!assetId) {
+    area.style.display = 'none';
+    noMod.style.display = 'none';
+    btn.disabled = true;
+    return;
+  }
+
+  tbody.innerHTML = '<tr><td colspan="5" style="text-align:center">로딩중...</td></tr>';
+  area.style.display = '';
+  noMod.style.display = 'none';
+
+  fetch('/lendings/fault-return-modules/' + assetId)
+    .then(r => r.json())
+    .then(data => {
+      faultReturnModules = data.modules || [];
+      if (faultReturnModules.length === 0) {
+        area.style.display = 'none';
+        noMod.style.display = '';
+        btn.disabled = false; // 모듈 없어도 장애반납 가능
+        return;
+      }
+      tbody.innerHTML = '';
+      faultReturnModules.forEach((m, i) => {
+        const ownerLabel = m.owner === 'company' ? '🏢자사' : '🏭업체';
+        const ownerDetail = m.owner !== 'company' && m.owner_vendor_name ? ' (' + m.owner_vendor_name + ')' : '';
+        const typeLabels = { cpu:'CPU', memory:'메모리', disk:'디스크', network:'네트워크', raid:'RAID', gpu:'GPU', psu:'PSU', cable:'케이블' };
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + ownerLabel + ownerDetail + '</td>' +
+          '<td>' + (typeLabels[m.module_type] || m.module_type) + '</td>' +
+          '<td title="' + (m.specification || '') + '">' + (m.model || '-') + '</td>' +
+          '<td>' + m.count + '</td>' +
+          '<td>' +
+            '<label style="margin-right:8px"><input type="radio" name="mod_action_' + i + '" value="keep" checked onchange="updateFaultModules()"> 장비실</label>' +
+            '<label><input type="radio" name="mod_action_' + i + '" value="send" onchange="updateFaultModules()"> 업체</label>' +
+          '</td>';
+        tbody.appendChild(tr);
+      });
+      btn.disabled = false;
+      updateFaultModules();
+    })
+    .catch(() => {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:red">모듈 조회 실패</td></tr>';
+    });
+}
+
+function updateFaultModules() {
+  const result = faultReturnModules.map((m, i) => {
+    const radios = document.querySelectorAll('input[name="mod_action_' + i + '"]');
+    let action = 'keep';
+    radios.forEach(r => { if (r.checked) action = r.value; });
+    return { id: m.id, action: action };
+  });
+  document.getElementById('faultModulesInput').value = JSON.stringify(result);
+}
+
+function closeFaultReturnModal() {
+  document.getElementById('faultReturnModal').style.display = 'none';
+}
+
+document.getElementById('faultReturnForm').addEventListener('submit', function(e) {
+  updateFaultModules();
+  if (!confirm('장애반납 처리하시겠습니까?\n자산 상태가 "점검중"으로 변경됩니다.')) {
+    e.preventDefault();
+  }
+});
+
+// --- Lending Photo Modal ---
+var currentLendingPhotoId = null;
+
+function openLendingPhotoModal(lendingId, counterparty) {
+  currentLendingPhotoId = lendingId;
+  document.getElementById('lendingPhotoTitle').textContent = (counterparty || '대여') + ' - 사진';
+  document.getElementById('lendingPhotoModal').style.display = 'flex';
+  loadLendingPhotos();
+}
+
+function closeLendingPhotoModal() {
+  document.getElementById('lendingPhotoModal').style.display = 'none';
+  currentLendingPhotoId = null;
+}
+
+function loadLendingPhotos() {
+  var gallery = document.getElementById('lendingPhotoGallery');
+  var empty = document.getElementById('lendingPhotoEmpty');
+  gallery.innerHTML = '<span style="color:#888">로딩 중...</span>';
+  empty.style.display = 'none';
+
+  fetch('/api/photos/lending/' + currentLendingPhotoId)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      gallery.innerHTML = '';
+      if (!data.photos || data.photos.length === 0) {
+        empty.style.display = '';
+        return;
+      }
+      data.photos.forEach(function(p) {
+        var div = document.createElement('div');
+        div.style.cssText = 'position:relative; width:160px; height:120px; border:1px solid #ddd; border-radius:4px; overflow:hidden;';
+        div.innerHTML =
+          '<img src="' + p.file_path + '" style="width:100%; height:100%; object-fit:cover; cursor:pointer;" onclick="openLendingPhotoLightbox(\'' + p.file_path + '\')" title="' + (p.original_name || '') + '">' +
+          '<button onclick="deleteLendingPhoto(' + p.id + ')" style="position:absolute; top:2px; right:2px; background:rgba(0,0,0,0.6); color:#fff; border:none; border-radius:50%; width:22px; height:22px; cursor:pointer; font-size:14px; line-height:22px; text-align:center;" title="삭제">&times;</button>';
+        gallery.appendChild(div);
+      });
+    })
+    .catch(function() {
+      gallery.innerHTML = '<span style="color:red">사진 로드 실패</span>';
+    });
+}
+
+function handleLendingPhotoUpload(input) {
+  if (!input.files || input.files.length === 0) return;
+  var formData = new FormData();
+  for (var i = 0; i < input.files.length; i++) {
+    formData.append('photos', input.files[i]);
+  }
+  var progress = document.getElementById('lendingPhotoProgress');
+  progress.style.display = 'inline';
+
+  fetch('/api/photos/lending/' + currentLendingPhotoId, { method: 'POST', body: formData })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      progress.style.display = 'none';
+      input.value = '';
+      if (data.error) { alert('업로드 실패: ' + data.error); return; }
+      loadLendingPhotos();
+    })
+    .catch(function() {
+      progress.style.display = 'none';
+      input.value = '';
+      alert('업로드 중 오류가 발생했습니다.');
+    });
+}
+
+function deleteLendingPhoto(photoId) {
+  if (!confirm('이 사진을 삭제하시겠습니까?')) return;
+  fetch('/api/photos/' + photoId, { method: 'DELETE' })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { alert('삭제 실패: ' + data.error); return; }
+      loadLendingPhotos();
+    })
+    .catch(function() { alert('삭제 중 오류가 발생했습니다.'); });
+}
+
+function openLendingPhotoLightbox(src) {
+  document.getElementById('lendingPhotoLightboxImg').src = src;
+  document.getElementById('lendingPhotoLightbox').style.display = 'flex';
+}
+
+function closeLendingPhotoLightbox() {
+  document.getElementById('lendingPhotoLightbox').style.display = 'none';
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    if (document.getElementById('lendingPhotoLightbox').style.display === 'flex') {
+      closeLendingPhotoLightbox();
+    } else if (document.getElementById('lendingPhotoModal').style.display === 'flex') {
+      closeLendingPhotoModal();
+    } else if (document.getElementById('faultReturnModal').style.display === 'flex') {
+      closeFaultReturnModal();
+    }
+  }
+});
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
