@@ -1,0 +1,124 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>입고 신청 상세 #<%= request.id %></h1>
+    <a href="/vendor-intake" class="btn btn-outline">목록으로</a>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="card">
+        <h3>업체 정보</h3>
+        <table class="detail-table">
+            <tr><th>업체명</th><td><%= request.company_name || '-' %></td></tr>
+            <tr><th>담당자</th><td><%= request.contact_name || '-' %></td></tr>
+            <tr><th>연락처</th><td><%= request.contact_phone || '-' %></td></tr>
+            <tr><th>이메일</th><td><%= request.contact_email || '-' %></td></tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>장비 정보</h3>
+        <table class="detail-table">
+            <tr>
+                <th>장비 유형</th>
+                <td>
+                    <% const eqLabels = {server:'서버',storage:'스토리지',switch:'스위치',other:'기타'}; %>
+                    <%= eqLabels[request.equipment_type] || request.equipment_type || '-' %>
+                </td>
+            </tr>
+            <tr><th>모델명</th><td><%= request.model_name || '-' %></td></tr>
+            <tr><th>제조사</th><td><%= request.manufacturer || '-' %></td></tr>
+            <tr><th>시리얼</th><td><%= request.serial_number || '-' %></td></tr>
+            <tr><th>U 사이즈</th><td><%= request.rack_unit_size || 1 %>U</td></tr>
+            <tr><th>수량</th><td><%= request.quantity || 1 %></td></tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>입고 요구사항</h3>
+        <table class="detail-table">
+            <tr><th>용도/목적</th><td><%= request.purpose || '-' %></td></tr>
+            <tr><th>입고 예정일</th><td><%= request.expected_start || '-' %></td></tr>
+            <tr><th>반출 예정일</th><td><%= request.expected_end || '-' %></td></tr>
+            <tr><th>전력 요구</th><td><%= request.power_requirement || '-' %></td></tr>
+            <tr><th>네트워크 요구</th><td><%= request.network_requirement || '-' %></td></tr>
+            <tr><th>비고</th><td><%= request.notes || '-' %></td></tr>
+        </table>
+    </div>
+
+    <div class="card">
+        <h3>관리 상태</h3>
+        <table class="detail-table">
+            <tr>
+                <th>상태</th>
+                <td>
+                    <% if (request.status === 'draft') { %>
+                    <span class="badge badge-secondary">미작성</span>
+                    <% } else if (request.status === 'pending') { %>
+                    <span class="badge badge-warning">검토중</span>
+                    <% } else if (request.status === 'approved') { %>
+                    <span class="badge badge-success">승인</span>
+                    <% } else if (request.status === 'rejected') { %>
+                    <span class="badge badge-danger">반려</span>
+                    <% } %>
+                </td>
+            </tr>
+            <tr><th>토큰</th><td style="font-size:12px;word-break:break-all;"><%= request.token %></td></tr>
+            <tr><th>신청일</th><td><%= request.submitted_at || '-' %></td></tr>
+            <tr><th>검토일</th><td><%= request.reviewed_at || '-' %></td></tr>
+            <tr><th>연결 자산</th><td><%= request.asset_id ? '#' + request.asset_id : '-' %></td></tr>
+            <tr><th>관리자 메모</th><td><%= request.admin_notes || '-' %></td></tr>
+        </table>
+
+        <% if (request.status === 'draft') { %>
+        <div style="margin-top:12px;">
+            <button type="button" class="btn btn-info btn-sm" onclick="copyLink('<%= request.token %>')">입고 링크 복사</button>
+        </div>
+        <% } %>
+
+        <% if (request.status === 'pending') { %>
+        <div style="margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0;">
+            <form method="POST" action="/vendor-intake/<%= request.id %>/approve" style="margin-bottom:8px;">
+                <div class="form-group">
+                    <label>관리자 메모 (승인)</label>
+                    <textarea name="admin_notes" class="form-control" rows="2" placeholder="승인 시 메모..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-success">승인</button>
+            </form>
+            <form method="POST" action="/vendor-intake/<%= request.id %>/reject">
+                <div class="form-group">
+                    <label>관리자 메모 (반려)</label>
+                    <textarea name="admin_notes" class="form-control" rows="2" placeholder="반려 사유..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-danger">반려</button>
+            </form>
+        </div>
+        <% } %>
+    </div>
+</div>
+
+<div style="margin-top:16px;">
+    <form method="POST" action="/vendor-intake/<%= request.id %>/delete" style="display:inline" onsubmit="return confirm('이 신청을 삭제하시겠습니까?')">
+        <button type="submit" class="btn btn-danger btn-sm">신청 삭제</button>
+    </form>
+</div>
+
+<style>
+.detail-table { width:100%; border-collapse:collapse; }
+.detail-table th { text-align:left; padding:6px 8px; color:#64748b; font-size:13px; width:30%; vertical-align:top; }
+.detail-table td { padding:6px 8px; font-size:14px; }
+.detail-table tr + tr { border-top:1px solid #f1f5f9; }
+</style>
+
+<script>
+function copyLink(token) {
+    const url = location.origin + '/intake/' + token;
+    navigator.clipboard.writeText(url).then(() => {
+        alert('링크가 복사되었습니다:\n' + url);
+    }).catch(() => {
+        prompt('아래 링크를 복사하세요:', url);
+    });
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
