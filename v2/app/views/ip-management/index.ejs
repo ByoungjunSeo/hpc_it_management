@@ -1,0 +1,54 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>IP 관리</h1>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value"><%= totalStats.total %></div>
+        <div class="stat-label">전체 IP</div>
+    </div>
+    <div class="stat-card success">
+        <div class="stat-value"><%= totalStats.available %></div>
+        <div class="stat-label">사용 가능</div>
+    </div>
+    <div class="stat-card info">
+        <div class="stat-value"><%= totalStats.assigned %></div>
+        <div class="stat-label">할당됨</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value"><%= totalStats.reserved %></div>
+        <div class="stat-label">예약됨</div>
+    </div>
+</div>
+
+<% appConfig.networkZones.forEach(zone => { %>
+<div class="card">
+    <div class="card-header">
+        <h2><%= zone.label %> 네트워크</h2>
+    </div>
+    <div class="subnet-list">
+        <% subnetStats.filter(s => s.network_zone === zone.value).forEach(s => { %>
+        <a href="/ip-management/subnet/<%= encodeURIComponent(s.subnet) %>" class="subnet-item">
+            <div class="subnet-info">
+                <strong><%= s.subnet %></strong>
+                <span class="text-muted"><%= appConfig.subnets.find(sub => sub.subnet === s.subnet)?.label || '' %></span>
+            </div>
+            <div class="subnet-bar">
+                <div class="progress-bar" style="width:200px; height:12px;">
+                    <div class="progress-fill" style="width:<%= s.total > 0 ? ((s.assigned + s.reserved) / s.total * 100) : 0 %>%; background:<%= (s.assigned + s.reserved) / s.total > 0.8 ? 'var(--danger)' : 'var(--primary)' %>;"></div>
+                </div>
+            </div>
+            <div class="subnet-counts">
+                <span class="badge badge-success"><%= s.available %> 가용</span>
+                <span class="badge badge-primary"><%= s.assigned %> 할당</span>
+                <span class="badge badge-secondary"><%= s.reserved %> 예약</span>
+            </div>
+        </a>
+        <% }) %>
+    </div>
+</div>
+<% }) %>
+
+<%- include('../partials/footer', { extraJs }) %>

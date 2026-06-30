@@ -40,6 +40,57 @@ const IpAddress = {
        FROM ip_addresses`
     );
     return rows[0];
+  },
+
+  async findBySubnet(subnet) {
+    const { rows } = await pool.query(
+      `SELECT ip.*, a.model_name as asset_model, a.asset_number, a.ownership as asset_ownership,
+              a.management_number as asset_mgmt_number,
+              a.assigned_user as asset_user, a.purpose as asset_purpose
+       FROM ip_addresses ip
+       LEFT JOIN assets a ON ip.asset_id = a.id
+       WHERE ip.subnet = $1`,
+      [subnet]
+    );
+    // Sort by last octet numerically
+    rows.sort((a, b) => {
+      const lastA = parseInt(a.ip_address.split('.').pop());
+      const lastB = parseInt(b.ip_address.split('.').pop());
+      return lastA - lastB;
+    });
+    return rows;
+  },
+
+  async getSubnetStats() {
+    const { rows } = await pool.query(
+      `SELECT subnet, network_zone,
+              COUNT(*) as total,
+              SUM(CASE WHEN allocation_type = 'available' THEN 1 ELSE 0 END) as available,
+              SUM(CASE WHEN allocation_type = 'assigned' THEN 1 ELSE 0 END) as assigned,
+              SUM(CASE WHEN allocation_type = 'reserved' THEN 1 ELSE 0 END) as reserved
+       FROM ip_addresses
+       GROUP BY subnet, network_zone
+       ORDER BY subnet`
+    );
+    return rows;
+  },
+
+  async release(ip) {
+    return pool.query(
+      `UPDATE ip_addresses SET allocation_type='available', asset_id=NULL, assigned_to=NULL,
+              description=NULL, updated_at=NOW()
+       WHERE ip_address=$1`,
+      [ip]
+    );
+  },
+
+  async updateAllocation(ip, data) {
+    return pool.query(
+      `UPDATE ip_addresses SET allocation_type=$1, asset_id=$2, assigned_to=$3,
+              description=$4, updated_at=NOW()
+       WHERE ip_address=$5`,
+      [data.allocation_type, data.asset_id || null, data.assigned_to || null, data.description || null, ip]
+    );
   }
 };
 

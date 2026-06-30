@@ -1,0 +1,163 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= subnetConfig.label %> (<%= subnet %>)</h1>
+    <a href="/ip-management" class="btn btn-secondary">IP 대시보드</a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>IP 그리드 (16 x 16)</h2>
+        <div class="ip-legend">
+            <span class="ip-legend-item"><span class="ip-dot available"></span> 사용 가능</span>
+            <span class="ip-legend-item"><span class="ip-dot assigned"></span> 자사 할당</span>
+            <span class="ip-legend-item"><span class="ip-dot vendor"></span> 업체 할당</span>
+            <span class="ip-legend-item"><span class="ip-dot reserved"></span> 예약</span>
+        </div>
+    </div>
+
+    <div class="ip-grid">
+        <% for (var row = 0; row < 16; row++) { %>
+        <div class="ip-grid-row">
+            <span class="ip-row-label"><%= row * 16 %></span>
+            <% for (var col = 0; col < 16; col++) { %>
+            <%
+                var idx = row * 16 + col;
+                var addr = addresses[idx];
+                var cellClass = 'available';
+                if (addr) {
+                    if (addr.allocation_type === 'assigned') {
+                        cellClass = addr.asset_ownership === 'vendor' ? 'vendor' : 'assigned';
+                    } else if (addr.allocation_type === 'reserved') {
+                        cellClass = 'reserved';
+                    }
+                }
+            %>
+            <div class="ip-cell <%= cellClass %>"
+                 data-ip="<%= addr ? addr.ip_address : '' %>"
+                 data-allocation="<%= addr ? addr.allocation_type : '' %>"
+                 data-assigned-to="<%= addr ? (addr.assigned_to || '') : '' %>"
+                 data-description="<%= addr ? (addr.description || '') : '' %>"
+                 data-asset-id="<%= addr ? (addr.asset_id || '') : '' %>"
+                 data-asset-model="<%= addr ? (addr.asset_model || '') : '' %>"
+                 data-asset-number="<%= addr ? (addr.asset_number || '') : '' %>"
+                 data-asset-mgmt="<%= addr ? (addr.asset_mgmt_number || '') : '' %>"
+                 data-asset-user="<%= addr ? (addr.asset_user || '') : '' %>"
+                 data-asset-purpose="<%= addr ? (addr.asset_purpose || '') : '' %>"
+                 data-asset-ownership="<%= addr ? (addr.asset_ownership || '') : '' %>"
+                 onclick="showIpDialog(this)"
+                 title="<%= addr ? addr.ip_address : '' %><%= addr && addr.assigned_to ? ' - ' + addr.assigned_to : '' %><%= addr && addr.asset_number ? ' [' + addr.asset_number + ']' : '' %>">
+                <span class="ip-num"><%= idx %></span>
+            </div>
+            <% } %>
+        </div>
+        <% } %>
+    </div>
+</div>
+
+<!-- IP Dialog Modal -->
+<div class="modal-overlay" id="ipDialog">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 id="ipDialogTitle">IP 관리</h3>
+            <button class="modal-close" onclick="closeModal('ipDialog')">&times;</button>
+        </div>
+        <!-- Asset info panel (read-only) -->
+        <div id="ipAssetInfo" style="display:none; margin-bottom:12px; padding:10px; background:#f8f9fa; border-radius:6px; border:1px solid #e0e0e0;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+                <tr id="ipInfoMgmt"><td style="padding:3px 8px; color:#666; width:90px;">관리번호</td><td id="ipInfoMgmtVal" style="padding:3px 8px; font-weight:600;"></td></tr>
+                <tr id="ipInfoModel"><td style="padding:3px 8px; color:#666;">모델명</td><td id="ipInfoModelVal" style="padding:3px 8px;"></td></tr>
+                <tr id="ipInfoOwnership"><td style="padding:3px 8px; color:#666;">소유</td><td id="ipInfoOwnershipVal" style="padding:3px 8px;"></td></tr>
+                <tr id="ipInfoUser"><td style="padding:3px 8px; color:#666;">사용자</td><td id="ipInfoUserVal" style="padding:3px 8px;"></td></tr>
+                <tr id="ipInfoPurpose"><td style="padding:3px 8px; color:#666;">용도</td><td id="ipInfoPurposeVal" style="padding:3px 8px;"></td></tr>
+            </table>
+            <div style="margin-top:8px;">
+                <a href="#" id="ipAssetLink" class="btn btn-sm btn-outline" target="_blank">자산 상세 보기</a>
+            </div>
+        </div>
+        <form id="ipForm" method="POST">
+            <div class="form-group">
+                <label>IP 주소</label>
+                <input type="text" id="ipAddr" class="form-control" readonly>
+            </div>
+            <div class="form-group">
+                <label>할당 상태</label>
+                <select name="allocation_type" id="ipAllocType" class="form-control" onchange="toggleIpFields()">
+                    <option value="available">사용 가능</option>
+                    <option value="assigned">할당</option>
+                    <option value="reserved">예약</option>
+                </select>
+            </div>
+            <div id="ipDetailFields">
+                <div class="form-group">
+                    <label>자산</label>
+                    <select name="asset_id" id="ipAssetId" class="form-control">
+                        <option value="">선택 안 함</option>
+                        <% assets.forEach(function(a) { %>
+                        <option value="<%= a.id %>"><%= a.asset_number || '' %> - <%= a.model_name || a.ip_address || 'ID:' + a.id %></option>
+                        <% }) %>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>할당 대상</label>
+                    <input type="text" name="assigned_to" id="ipAssignedTo" class="form-control" placeholder="사용자 또는 장비명">
+                </div>
+                <div class="form-group">
+                    <label>설명</label>
+                    <input type="text" name="description" id="ipDesc" class="form-control">
+                </div>
+            </div>
+            <div class="btn-group mt-2">
+                <button type="submit" class="btn btn-primary">저장</button>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('ipDialog')">취소</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function showIpDialog(cell) {
+    var ip = cell.dataset.ip;
+    if (!ip) return;
+
+    document.getElementById('ipDialogTitle').textContent = ip;
+    document.getElementById('ipAddr').value = ip;
+    document.getElementById('ipAllocType').value = cell.dataset.allocation || 'available';
+    document.getElementById('ipAssignedTo').value = cell.dataset.assignedTo || '';
+    document.getElementById('ipDesc').value = cell.dataset.description || '';
+    document.getElementById('ipAssetId').value = cell.dataset.assetId || '';
+    document.getElementById('ipForm').action = '/ip-management/ip/' + ip;
+
+    // Asset info panel
+    var assetId = cell.dataset.assetId;
+    var infoPanel = document.getElementById('ipAssetInfo');
+    if (assetId) {
+        var ownershipMap = { company: '자사', vendor: '업체' };
+        var setText = function(id, val) {
+            var el = document.getElementById(id);
+            var row = el.closest('tr');
+            if (val) { el.textContent = val; row.style.display = ''; }
+            else { row.style.display = 'none'; }
+        };
+        setText('ipInfoMgmtVal', cell.dataset.assetMgmt);
+        setText('ipInfoModelVal', cell.dataset.assetModel);
+        setText('ipInfoOwnershipVal', ownershipMap[cell.dataset.assetOwnership] || cell.dataset.assetOwnership);
+        setText('ipInfoUserVal', cell.dataset.assetUser);
+        setText('ipInfoPurposeVal', cell.dataset.assetPurpose);
+        document.getElementById('ipAssetLink').href = '/assets/' + assetId;
+        infoPanel.style.display = '';
+    } else {
+        infoPanel.style.display = 'none';
+    }
+
+    toggleIpFields();
+    openModal('ipDialog');
+}
+
+function toggleIpFields() {
+    var type = document.getElementById('ipAllocType').value;
+    document.getElementById('ipDetailFields').style.display = type === 'available' ? 'none' : '';
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
