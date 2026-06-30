@@ -1,11 +1,9 @@
 const { pool } = require('../config/database');
+const { fixRowDates } = require('../utils/dateFix');
 
 function fixDates(row) {
-  if (!row) return row;
-  ['loan_date', 'return_date', 'created_at'].forEach(k => {
-    if (row[k] instanceof Date) row[k] = row[k].toISOString();
-  });
-  return row;
+  return fixRowDates(row, ['loan_date', 'return_date'],
+    ['loan_date', 'return_date', 'created_at']);
 }
 
 const Lending = {

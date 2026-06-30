@@ -1,13 +1,10 @@
 const { pool } = require('../config/database');
 const crypto = require('crypto');
+const { fixRowDates } = require('../utils/dateFix');
 
-// pg returns Date objects for timestamps; views expect strings (.substring etc.)
 function fixDates(row) {
-  if (!row) return row;
-  ['submitted_at', 'reviewed_at', 'created_at', 'updated_at'].forEach(k => {
-    if (row[k] instanceof Date) row[k] = row[k].toISOString();
-  });
-  return row;
+  return fixRowDates(row, ['expected_start', 'expected_end'],
+    ['expected_start', 'expected_end', 'submitted_at', 'reviewed_at', 'created_at', 'updated_at']);
 }
 
 const VendorIntake = {

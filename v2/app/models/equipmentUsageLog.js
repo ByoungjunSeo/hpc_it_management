@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { fixRowDates } = require('../utils/dateFix');
 
 // v2 event_type → Korean label mapping (dashboard.ejs expects Korean keys)
 const EVENT_TYPE_LABEL = {
@@ -16,11 +17,11 @@ const EquipmentUsageLog = {
        ORDER BY COALESCE(event_date, created_at) DESC, id DESC
        LIMIT $1`, [limit]
     );
-    // Map event_type to Korean 'status' for view compatibility
-    return rows.map(r => ({
-      ...r,
-      status: EVENT_TYPE_LABEL[r.event_type] || r.event_type
-    }));
+    // Fix DATE columns + map event_type to Korean 'status' for view compatibility
+    return rows.map(r => {
+      fixRowDates(r, ['event_date', 'usage_date'], ['event_date', 'usage_date', 'created_at']);
+      return { ...r, status: EVENT_TYPE_LABEL[r.event_type] || r.event_type };
+    });
   },
 
   async countByStatus() {
