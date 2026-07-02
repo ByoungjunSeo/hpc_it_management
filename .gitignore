@@ -34,3 +34,7 @@ Thumbs.db
 v2/scripts/dryrun-eul-output.json
 v2/scripts/*-output.json
 v2/app/public/uploads/
+app/data/
+*.xlsx
+*.pdf
+*.pptx
