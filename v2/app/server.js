@@ -74,7 +74,7 @@ app.use(requireLogin);
 
 app.use('/api/photos', require('./routes/photos'));
 app.use('/', require('./routes/index'));
-// app.use('/assets', require('./routes/assets'));
+app.use('/assets', require('./routes/assets'));
 app.use('/rooms', require('./routes/serverRooms'));
 // app.use('/racks', require('./routes/racks'));
 // app.use('/computing-modules', (req, res) => res.redirect('/module-inventory?tab=installed'));

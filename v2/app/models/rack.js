@@ -79,6 +79,47 @@ const Rack = {
     return rows[0].id;
   },
 
+  async findAll() {
+    const { rows } = await pool.query(
+      `SELECT r.*, sr.name as room_name
+       FROM racks r
+       LEFT JOIN server_rooms sr ON r.room_id = sr.id
+       ORDER BY sr.name, r.name`
+    );
+    return rows;
+  },
+
+  async findById(id) {
+    const { rows } = await pool.query('SELECT * FROM racks WHERE id = $1', [id]);
+    return rows[0] || null;
+  },
+
+  async findByLinkedAsset(assetId) {
+    const { rows } = await pool.query(
+      `SELECT r.*, sr.name as room_name
+       FROM racks r
+       LEFT JOIN server_rooms sr ON r.room_id = sr.id
+       WHERE r.linked_asset_id = $1`, [assetId]
+    );
+    return rows[0] || null;
+  },
+
+  async update(id, data) {
+    return pool.query(
+      `UPDATE racks SET room_id=$1, name=$2, total_units=$3, row_position=$4, col_position=$5,
+       description=$6, rack_type=$7, switch_slots=$8, updated_at=NOW()
+       WHERE id=$9`,
+      [data.room_id, data.name, data.total_units || 42,
+       data.row_position || 1, data.col_position || 1,
+       data.description || null, data.rack_type || 'standard',
+       data.switch_slots || 0, id]
+    );
+  },
+
+  async delete(id) {
+    return pool.query('DELETE FROM racks WHERE id = $1', [id]);
+  },
+
   async getUsageStats() {
     const { rows: [base] } = await pool.query(
       'SELECT COUNT(*) as total_racks, COALESCE(SUM(total_units),0) as total_units FROM racks'

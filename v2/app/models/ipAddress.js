@@ -84,6 +84,33 @@ const IpAddress = {
     );
   },
 
+  async syncAssetIps(assetId, ipList) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Release all IPs currently assigned to this asset
+      await client.query(
+        `UPDATE ip_addresses SET allocation_type='available', asset_id=NULL, assigned_to=NULL, updated_at=NOW()
+         WHERE asset_id=$1`, [assetId]
+      );
+      // Assign new list
+      for (const ip of ipList) {
+        if (ip && ip.trim()) {
+          await client.query(
+            `UPDATE ip_addresses SET allocation_type='assigned', asset_id=$1, updated_at=NOW()
+             WHERE ip_address=$2`, [assetId, ip.trim()]
+          );
+        }
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
   async updateAllocation(ip, data) {
     return pool.query(
       `UPDATE ip_addresses SET allocation_type=$1, asset_id=$2, assigned_to=$3,

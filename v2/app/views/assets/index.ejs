@@ -1,0 +1,190 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>자산 관리</h1>
+    <div class="btn-group">
+        <a href="/assets/vendor" class="btn btn-warning">업체 장비</a>
+    </div>
+</div>
+
+<div class="card">
+    <form class="filters" method="GET" action="/assets">
+        <div class="form-group">
+            <label>유형</label>
+            <select name="asset_type" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% appConfig.assetTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= filters.asset_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>소유</label>
+            <select name="ownership" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% appConfig.ownershipTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= filters.ownership === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>상태</label>
+            <select name="status" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% appConfig.assetStatuses.forEach(t => { %>
+                <option value="<%= t.value %>" <%= filters.status === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>서버실</label>
+            <%
+              const assetLocLabels = {};
+              appConfig.locationTypes.forEach(t => { assetLocLabels[t.value] = t.label; });
+            %>
+            <select name="room_id" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% rooms.forEach(r => { %>
+                <option value="<%= r.id %>" <%= filters.room_id == r.id ? 'selected' : '' %>><%= r.name %> (<%= assetLocLabels[r.location_type] || r.location_type %>)</option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>검색</label>
+            <input type="text" name="search" class="form-control" placeholder="자산번호, 모델, S/N..." value="<%= filters.search || '' %>">
+        </div>
+        <div class="form-group">
+            <button type="submit" class="btn btn-primary">검색</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th class="sortable" data-col="0">관리번호 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="1">자산번호 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="2">유형 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="3">소유 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="4">모델명 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="5">서버실 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="6">랙 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="7">U위치 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="8">IP <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="9">사용자 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="10">용도 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="11">상태 <span class="sort-icon"></span></th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody id="assetTableBody">
+                <% if (assets.length === 0) { %>
+                <tr><td colspan="13" class="text-center text-muted">등록된 자산이 없습니다.</td></tr>
+                <% } %>
+                <% assets.forEach(a => { %>
+                <tr>
+                    <td data-sort="<%= a.management_number || '' %>"><a href="/assets/<%= a.id %>"><%= a.management_number || '-' %></a></td>
+                    <td data-sort="<%= a.asset_number || '' %>"><%= a.asset_number || '-' %></td>
+                    <td data-sort="<%= a.asset_type %>"><span class="badge badge-<%= a.asset_type %>"><%= appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type %></span></td>
+                    <td data-sort="<%= a.ownership %>"><span class="badge badge-<%= a.ownership %>"><%= a.ownership === 'company' ? '자사' : '업체' %></span></td>
+                    <td data-sort="<%= a.model_name || '' %>"><%= a.model_name || '-' %></td>
+                    <td data-sort="<%= a.room_name || '' %>"><%= a.room_name || '-' %></td>
+                    <td data-sort="<%= a.rack_name || '' %>"><%= a.rack_name || '-' %></td>
+                    <td data-sort="<%= a.rack_unit_start || 99999 %>"><% if (a.rack_unit_start) {
+                        const su = Math.floor((a.rack_unit_start-1)/3)+1;
+                        const sh = ((a.rack_unit_start-1)%3)+1;
+                        const endSlot = a.rack_unit_start+(a.rack_unit_size||3)-1;
+                        const eu = Math.floor((endSlot-1)/3)+1;
+                        const eh = ((endSlot-1)%3)+1;
+                    %>U<%= su %>(<%= sh %>)<% if ((a.rack_unit_size||3) > 1) { %>-U<%= eu %>(<%= eh %>)<% } %><% } else { %>-<% } %></td>
+                    <td data-sort="<%= a.ip_address || '' %>"><%= a.ip_address || '-' %></td>
+                    <td data-sort="<%= a.assigned_user || '' %>"><%= a.assigned_user || '-' %></td>
+                    <td data-sort="<%= a.purpose || '' %>"><%= a.purpose || '-' %></td>
+                    <td data-sort="<%= a.status %>"><span class="badge badge-<%= a.status === 'active' ? 'success' : a.status === 'returned' ? 'info' : a.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === a.status)?.label || a.status %></span></td>
+                    <td>
+                        <a href="/assets/<%= a.id %>/edit" class="btn btn-sm btn-outline">수정</a>
+                        <form method="POST" action="/assets/<%= a.id %>/delete" style="display:inline;" onsubmit="return confirm('정말 이 자산을 삭제하시겠습니까?\n<%= (a.management_number || a.asset_number || a.model_name || '').replace(/'/g, '') %>')">
+                            <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                        </form>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted mt-1">총 <%= assets.length %>건</p>
+</div>
+
+<style>
+.sortable { cursor: pointer; user-select: none; position: relative; }
+.sortable:hover { background: #e2e8f0; }
+.sort-icon { font-size: 10px; opacity: 0.3; margin-left: 2px; }
+.sort-icon::after { content: '▲▼'; }
+.sortable.asc .sort-icon { opacity: 1; }
+.sortable.asc .sort-icon::after { content: '▲'; }
+.sortable.desc .sort-icon { opacity: 1; }
+.sortable.desc .sort-icon::after { content: '▼'; }
+</style>
+
+<script>
+function naturalCompare(a, b) {
+    var re = /(\d+)|(\D+)/g, m, ax = [], bx = [];
+    while (m = re.exec(a)) ax.push(m[1] ? parseInt(m[1]) : m[2]);
+    re.lastIndex = 0;
+    while (m = re.exec(b)) bx.push(m[1] ? parseInt(m[1]) : m[2]);
+    for (var i = 0; i < Math.max(ax.length, bx.length); i++) {
+        if (i >= ax.length) return -1;
+        if (i >= bx.length) return 1;
+        var va = ax[i], vb = bx[i];
+        var an = typeof va === 'number', bn = typeof vb === 'number';
+        if (an && bn) { if (va !== vb) return va - vb; }
+        else if (an !== bn) { return an ? -1 : 1; }
+        else { var c = va.localeCompare(vb, 'ko'); if (c !== 0) return c; }
+    }
+    return 0;
+}
+
+(function() {
+    var currentCol = -1;
+    var currentDir = '';
+
+    document.querySelectorAll('th.sortable').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var col = parseInt(this.dataset.col);
+            var dir;
+            if (currentCol === col) {
+                dir = currentDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                dir = 'asc';
+            }
+            currentCol = col;
+            currentDir = dir;
+
+            // Update header styles
+            document.querySelectorAll('th.sortable').forEach(function(h) {
+                h.classList.remove('asc', 'desc');
+            });
+            this.classList.add(dir);
+
+            // Sort rows
+            var tbody = document.getElementById('assetTableBody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort(function(a, b) {
+                var cellA = a.cells[col];
+                var cellB = b.cells[col];
+                if (!cellA || !cellB) return 0;
+                var valA = cellA.dataset.sort || cellA.textContent.trim();
+                var valB = cellB.dataset.sort || cellB.textContent.trim();
+                var cmp = naturalCompare(valA, valB);
+                return dir === 'asc' ? cmp : -cmp;
+            });
+
+            rows.forEach(function(row) { tbody.appendChild(row); });
+        });
+    });
+})();
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>
