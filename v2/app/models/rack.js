@@ -120,6 +120,13 @@ const Rack = {
     return pool.query('DELETE FROM racks WHERE id = $1', [id]);
   },
 
+  async updatePosition(id, row, col) {
+    return pool.query(
+      'UPDATE racks SET row_position=$1, col_position=$2, updated_at=CURRENT_TIMESTAMP WHERE id=$3',
+      [row, col, id]
+    );
+  },
+
   async getUsageStats() {
     const { rows: [base] } = await pool.query(
       'SELECT COUNT(*) as total_racks, COALESCE(SUM(total_units),0) as total_units FROM racks'
