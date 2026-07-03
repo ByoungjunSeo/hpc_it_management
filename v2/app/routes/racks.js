@@ -49,24 +49,25 @@ function ipmiPowerStatus(ip, user, pass) {
   });
 }
 
-function ipmiPowerControl(ip, user, pass, action) {
-  const validActions = ['on', 'off', 'reset', 'cycle', 'status'];
-  if (!validActions.includes(action)) {
-    return Promise.resolve({ success: false, message: '잘못된 액션: ' + action });
-  }
-  return new Promise((resolve) => {
-    execFile('ipmitool', ['-I', 'lanplus', '-H', ip, '-U', user, '-P', pass, 'chassis', 'power', action],
-      { timeout: 10000 },
-      (err, stdout, stderr) => {
-        if (err) {
-          resolve({ success: false, message: '명령 실행 실패: ' + (stderr || err.message) });
-          return;
-        }
-        resolve({ success: true, message: stdout.trim() });
-      }
-    );
-  });
-}
+// [BUG-2 트랙 이관] ipmiPowerControl — 전원제어는 신기능 트랙(BUG-2)에서 제공 예정
+// function ipmiPowerControl(ip, user, pass, action) {
+//   const validActions = ['on', 'off', 'reset', 'cycle', 'status'];
+//   if (!validActions.includes(action)) {
+//     return Promise.resolve({ success: false, message: '잘못된 액션: ' + action });
+//   }
+//   return new Promise((resolve) => {
+//     execFile('ipmitool', ['-I', 'lanplus', '-H', ip, '-U', user, '-P', pass, 'chassis', 'power', action],
+//       { timeout: 10000 },
+//       (err, stdout, stderr) => {
+//         if (err) {
+//           resolve({ success: false, message: '명령 실행 실패: ' + (stderr || err.message) });
+//           return;
+//         }
+//         resolve({ success: true, message: stdout.trim() });
+//       }
+//     );
+//   });
+// }
 
 // Switch slots API - get occupied switch slots for immersion rack
 router.get('/:id/switch-slots', async (req, res) => {
@@ -138,82 +139,9 @@ router.get('/:id/power-status', async (req, res) => {
   }
 });
 
-// IPMI power control for a single asset
-router.post('/:id/power-control', async (req, res) => {
-  try {
-    const rack = await Rack.findById(req.params.id);
-    if (!rack) return res.status(404).json({ error: 'Rack not found' });
-
-    const { assetId, action } = req.body;
-    if (!assetId || !action) return res.status(400).json({ error: 'assetId와 action이 필요합니다.' });
-
-    const validActions = ['on', 'off', 'reset', 'cycle'];
-    if (!validActions.includes(action)) return res.status(400).json({ error: '잘못된 액션: ' + action });
-
-    const asset = await Asset.findById(assetId);
-    if (!asset) return res.status(404).json({ error: 'Asset not found' });
-
-    const { rows: bmcRows } = await pool.query(
-      "SELECT ip_address FROM asset_ips WHERE asset_id = $1 AND ip_type = 'bmc' LIMIT 1",
-      [assetId]
-    );
-    const bmcIp = bmcRows[0];
-
-    if (!bmcIp || !bmcIp.ip_address) {
-      return res.status(400).json({ error: 'BMC IP가 등록되지 않았습니다.' });
-    }
-
-    const { rows: credRows } = await pool.query(
-      "SELECT username, password FROM asset_credentials WHERE asset_id = $1 AND credential_type = 'bmc' LIMIT 1",
-      [assetId]
-    );
-    const bmcCred = credRows[0];
-
-    if (!bmcCred) {
-      return res.status(400).json({ error: 'BMC 계정이 등록되지 않았습니다.' });
-    }
-
-    const result = await ipmiPowerControl(bmcIp.ip_address, bmcCred.username, bmcCred.password || '', action);
-
-    // Get updated power status after control
-    let status = null;
-    if (result.success) {
-      // Brief delay for state to settle
-      await new Promise(r => setTimeout(r, 1000));
-      // BUG: v1 references undefined 'user'/'pass' here — faithful porting (not fixed)
-      const statusResult = await ipmiPowerStatus(bmcIp.ip_address, bmcCred.username, bmcCred.password || '');
-      status = statusResult.status;
-    }
-
-    const actionLabels = { on: '전원 켜기', off: '전원 끄기', reset: '재시작', cycle: '전원 순환' };
-    AuditLog.log(req, {
-      action: 'power_control',
-      targetType: 'asset',
-      targetId: assetId,
-      targetLabel: asset.management_number || asset.model_name || ('Asset #' + assetId),
-      details: {
-        rack_id: rack.id,
-        rack_name: rack.name,
-        bmc_ip: bmcIp.ip_address,
-        power_action: action,
-        action_label: actionLabels[action],
-        success: result.success,
-        message: result.message,
-        new_status: status
-      }
-    });
-
-    res.json({
-      success: result.success,
-      action: action,
-      status: status,
-      message: result.success
-        ? actionLabels[action] + ' 완료'
-        : '실패: ' + result.message
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// IPMI power control — stub (BUG-2 신기능 트랙 이관)
+router.post('/:id/power-control', requireMaintenance, async (req, res) => {
+  res.status(503).json({ success: false, error: '전원제어는 BUG-2 신기능 트랙에서 제공 예정' });
 });
 
 // Rack detail - 42U visualization
