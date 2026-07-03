@@ -88,7 +88,7 @@ AI 서버 3,4,5,6 선택 → 전원 탭 → 끄기 클릭 시 AI 3,4번이 안 �
 ---
 
 ## BUG-4: audit_logs 변경 이력에 [object Object] 노출
-- 상태: 미처리 | 방침: (나) 이식 시 수정 | 단계: B-4d (asset 수정 기록부)
+- 상태: 종결(수정 불요, ad36abc) | 사유: v2 스키마 구조적 소멸(details 단일 JSONB)
 - 관련(v1): asset 수정 시 audit 기록 호출부, audit_logs 저장 로직, audit 뷰
 - 관련(v2): app/models/auditLog.js, views/audit-log/index.ejs
 
@@ -111,6 +111,11 @@ before/after를 사람이 읽게 표시. 예: 변경된 필드만 "필드명: �
 - 기존 이전된 audit_logs 데이터에 이미 [object Object] 문자열로 박혀있을 수 있음 →
   과거 데이터는 보정 어려울 수 있고(이미 손실), 신규 기록부터 올바르게 남기는 것이 현실적.
   과거 데이터 보정 여부는 이식 시 별도 판단.
+
+BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
+사유: v2 audit_logs가 before_value/after_value 2컬럼 → details 단일 JSONB로
+재설계됨(B-2.8a). before/after가 details 안에 valid JSON으로 저장되어
+[object Object] 발생 물리적 불가. 라우트는 충실이식했으나 v2 스키마상 재현 불가.
 
 ---
 
@@ -180,7 +185,7 @@ before/after를 사람이 읽게 표시. 예: 변경된 필드만 "필드명: �
 | BUG-1 비고 손실 | (나) 수정 | B-4d | 사용자 비고 보존 |
 | BUG-2 전원 끄기 | 신기능(예외) | 보류 | no_cred 규명 → 신기능 트랙 |
 | BUG-3 이동 UI | (나) 수정 | B-4d | CSS/EJS |
-| BUG-4 object Object | (나) 수정 | B-4d | v1 기존(pg 아님), 신규기록부터 |
+| BUG-4 object Object | 종결(불요) | — | v2 details 단일 JSONB로 구조적 소멸(ad36abc) |
 | BUG-5 선반 잔존 | (나) 수정 | B-4d(+B-4b) | 블레이드 선반/슬롯, 글루시스-007 |
 | BUG-6 스캔 전체기록/이력무정보 | (나) 수정 | B-4d(§5) | 변경분만 기록 + 비고에 변경내용 |
 

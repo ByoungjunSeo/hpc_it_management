@@ -316,6 +316,40 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
   fault-return 핸들러(6모델 대형 트랜잭션)는 B-4d 후보로 분리.
 - 제외(메뉴정리 가): requests, powerPanel, networkLayout.
 
+
+### B-4c 완료 + B-4d 진행
+
+**B-4c 완료** (5개 쓰기 라우트 이식·검증):
+- serverRooms(c592b0d) · vendorIntake(f7823f4) · ipManagement(d23cd90) · photos(9cdd202) · lendings(5fb9446)
+- 제외 3개(requests/powerPanel/networkLayout) + 미사용 5개(publicIntake/backup/excelUpload/gpuMonitoring/chat) 주석 유지.
+- lendings: 8EP 이식, fault-return 2개(6모델 대형 트랜잭션)는 B-4d로 스텁 분리.
+
+**B-4d 진행:**
+- B-4d-1: asset 모델 확장 14메서드 + 날짜밀림 스윕(공용 utils/dateFix.js, DATE/TIMESTAMP 분기, 4모델)(0218d2b)
+- B-4d-2.5: EUL append-only 트리거 제거 (방향1, b88e7de) — v1 동등 mutable EUL 복원, 자산삭제 회귀 해소.
+  이력불변은 마이그레이션 후 신기능 트랙으로 분리.
+- B-4d-2: assets 12EP 이식 (ad36abc) — fault-repair/module-action 503 스텁,
+  EUL동기화·prefill·auto-sync는 B-4d-6 유보.
+- BUG-4 종결 (v2 스키마 구조적 소멸 — 아래 BUG_TRACKING 참조).
+
+**B-4d 하위단계 분해 (확정 순서):**
+- B-4d-1(완료) → B-4d-2/3(assets/racks, 병렬가능) → B-4d-4(모듈모델) →
+  B-4d-5/6(moduleInventory/inventory, 병렬가능) → B-4d-7(discovery+§5, 최고위험) →
+  B-4d-8(fault-return 스텁 해제) → B-4d-9(기술부채 정리)
+
+**B-4d 후반 블로커/확인지점:**
+- EUL 이벤트소싱 매핑 (B-4d-5/6 선행 필수): v2 EUL 컬럼구조 상이
+  (event_type/JSONB, status·return_date·하드웨어컬럼 없음) + management_number당 다중행(최대18).
+  v1 상태전이 로직(markReturned/returnActiveByManagement/updateHardwareColumns) 매핑 설계 필요.
+- audit 스키마 v1(before/after 2컬럼) ≠ v2(details 단일 JSONB) — 개수검증만 함, 내용 동등성 미검증.
+- 삭제 후 이력조회: v2 asset_id=NULL vs v1 management_number 텍스트 연결 → B-4d-6 확인.
+- BUG-5: assets 저장(blade_slot 클리어) ↔ racks 렌더(shelfU) 불일치 → B-4d-3(racks) 이식 후 합동수정.
+
+**포팅 방법론 (B-4d 관통 원칙):**
+- 포팅 결함(v1엔 없던 v2 회귀, 예: 날짜밀림·삭제회귀) = 즉시 수정, 충실이식에 포함.
+- 기존 버그(BUG-1~6) = (a)충실이식→v1==v2 동등성 확인→커밋, (b)버그수정→별도 커밋.
+  단 BUG-6은 §5와 한 몸이라 B-4d-7 통합.
+
 ## 8. 작업 원칙 (유지)
 
 - 한 단계씩 잘게, 사용자 직접 검증 후 다음
