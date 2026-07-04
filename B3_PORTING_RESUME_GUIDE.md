@@ -363,6 +363,10 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 - 기존 버그(BUG-1~6) = (a)충실이식→v1==v2 동등성 확인→커밋, (b)버그수정→별도 커밋.
   단 BUG-6은 §5와 한 몸이라 B-4d-7 통합.
 
+### 날짜 헬퍼 중복 (B-4d-9 정리)
+- moduleInventoryLog.js가 자체 fixTimestamps 함수 정의 — 공용 utils/dateFix.js의 fixRowDates와 중복.
+  B-4d-9에서 fixRowDates(row, [], ['created_at'])로 공용화. 기능은 정상, 코드 정리만.
+
 ## 8. 작업 원칙 (유지)
 
 - 한 단계씩 잘게, 사용자 직접 검증 후 다음

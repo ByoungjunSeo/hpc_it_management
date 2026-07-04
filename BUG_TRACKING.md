@@ -26,7 +26,7 @@
 ---
 
 ## BUG-1: 부품 수량 수정 시 사용자 비고 손실
-- 상태: 미처리 | 방침: (나) 이식 시 수정 | 단계: B-4d
+- 상태: [완료] B-4d-5b | 방침: (나) 이식 시 수정 — update-storage 사용자 비고 보존
 - 관련(v1): app/routes/moduleInventory.js, app/models/moduleInventory.js,
   app/models/moduleInventoryLog.js (변경 이력 기록 위치)
 
@@ -201,7 +201,7 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 
 | 버그 | 방침 | 단계 | 비고 |
 |------|------|------|------|
-| BUG-1 비고 손실 | (나) 수정 | B-4d | 사용자 비고 보존 |
+| BUG-1 비고 손실 | [완료] B-4d-5b | 사용자 비고+자동메시지 결합 보존 |
 | BUG-2 전원 끄기 | 신기능(예외) | 보류 | no_cred 규명 → 신기능 트랙 |
 | BUG-3 이동 UI | (나) 수정 | B-4d | CSS/EJS |
 | BUG-4 object Object | 종결(불요) | — | v2 details 단일 JSONB로 구조적 소멸(ad36abc) |
