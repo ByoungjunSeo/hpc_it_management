@@ -218,14 +218,18 @@ router.post('/api/inventory/:id/update-storage', requireMaintenance, async (req,
 
     const updated = await ModuleInventory.findById(req.params.id);
 
-    // Log the change — BUG-1: notes 하드코딩 (v1 faithful)
+    // BUG-1 수정: 사용자 비고를 자동메시지와 결합 보존
+    const userNote = (req.body.notes || '').trim();
+    const autoMsg = '장비실 보관 수량 직접 수정: ' + oldStorage + '개 → ' + newStorage + '개';
+    const notes = userNote ? autoMsg + ' | ' + userNote : autoMsg;
+
     await ModuleInventoryLog.create({
       item_code: item.item_code,
       event_type: 'adjust',
       quantity_change: newStorage - oldStorage,
       user_id: req.session ? req.session.userId : null,
       username: req.session ? (req.session.displayName || req.session.username) : null,
-      notes: '장비실 보관 수량 직접 수정: ' + oldStorage + '개 → ' + newStorage + '개'
+      notes
     });
 
     await AuditLog.log(req, {
