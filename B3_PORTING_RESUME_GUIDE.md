@@ -219,6 +219,16 @@ express → getDb() → 디렉토리 생성(backups, photos)
 - blade_slot 표기 일관성 (글루시스-007 좌측/우측 vs 008 left/right)
 - TPC-SV-1U-06 모듈 등록 누락
 
+### 로그 테이블 cutover 델타 (B-7) — 실측 스냅샷 (2026-07-03)
+| 테이블 | v1 현재 | v2 이전시점 | 처리 |
+|--------|--------:|-----------:|------|
+| module_transfer_logs | 428 | 380 (id≤392 완전일치) | v1 id>392 델타 +48 추가 |
+| module_inventory_logs | 427 | 379 | 델타 +48 추가 |
+| audit_logs | 1399 | 1417 | ★ v2가 많음(검증 audit 누적). cutover 시 v2 테스트 audit 처리 방침 필요 — v1 운영분과 id 충돌 주의 |
+| equipment_usage_logs | 787 | 1036 | 이벤트소싱 이전(별개). v1 787→v2 1036은 정상(반납 이벤트 분리) |
+- transfer/inventory: id 기준 델타 재이전(단순 증가분).
+- audit_logs: v2 검증 중 누적된 테스트 audit(1435~) 존재. cutover 시 정리 or v1 재이전 방침 B-7에서 결정.
+
 ## 이식 기술부채 (B-4d에서 정리)
 
 ### B-4b에서 발생한 호환층 부채 (B-4d §5 전환 시 제거 대상)
@@ -331,6 +341,9 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 - B-4d-2: assets 12EP 이식 (ad36abc) — fault-repair/module-action 503 스텁,
   EUL동기화·prefill·auto-sync는 B-4d-6 유보.
 - BUG-4 종결 (v2 스키마 구조적 소멸 — 아래 BUG_TRACKING 참조).
+- B-4d-3: racks 10EP 이식(0777fe0) + power-control 스텁화(B-4d-3b, BUG-2 트랙, bde0854).
+  BUG-5 재현결과: 조건부 잠복·원인규명완료·미룸.
+- B-4d-4: 모듈 4모델 확장(26메서드, 트랜잭션 3종). getUsageByCode 유보(EUL, B-4d-5/6).
 
 **B-4d 하위단계 분해 (확정 순서):**
 - B-4d-1(완료) → B-4d-2/3(assets/racks, 병렬가능) → B-4d-4(모듈모델) →
