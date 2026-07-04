@@ -77,7 +77,7 @@ AI 서버 3,4,5,6 선택 → 전원 탭 → 끄기 클릭 시 AI 3,4번이 안 �
 ---
 
 ## BUG-3: 부품 이동 팝업 UI 깨짐
-- 상태: 미처리 | 방침: (나) 이식 시 수정 | 단계: B-4d
+- 상태: 원인규명완료·UI일괄점검 대기 | 방침: (나) 수정
 - 관련(v1): app/routes/moduleInventory.js (/modules/:id/transfer),
   부품현황 > 설치현황 > 이동 뷰/JS
 
@@ -91,6 +91,15 @@ AI 서버 3,4,5,6 선택 → 전원 탭 → 끄기 클릭 시 AI 3,4번이 안 �
 ### 이식 시 주의
 - 이동 기능은 module_transfer_logs에 기록(B-2.8a에서 380행 이전됨).
 - UI 깨짐이 단순 CSS/EJS면 이식 시 함께 수정. 큰 개편 필요 시 UI트랙(③)으로 분리 판단.
+
+### B-4d-5c 화면 재현 + 원인 규명 (UI 일괄점검으로 미룸)
+- 화면 재현 확인(2026-07-03): /module-inventory 설치현황 탭 "이동" 클릭 시
+  모듈 이동 팝업이 모달로 안 뜨고 테이블 위에 인라인으로 풀림(배경 딤 없음).
+- 구조는 정상: transferModal이 modal-overlay 클래스 + openModal() 사용(index.ejs L902,938).
+  adjustModal/usageModal/modulePhotoModal도 동일 구조.
+- 추정 원인: .modal-overlay 기본 display:none 누락 또는 openModal의 .active 토글 불일치
+  (index.ejs L342-350 CSS). 공통 문제면 모달 4개 전부 해당 → CSS 1곳 수정으로 일괄 해결 가능.
+- 처리: 순수 UI/CSS라 화면 확인 필요. B-4d 라우트 이식 완료 후 UI 일괄점검 세션에서 수정.
 
 ---
 

@@ -218,6 +218,12 @@ express → getDb() → 디렉토리 생성(backups, photos)
 - vendor_intake_requests id=1 테스트데이터 삭제
 - blade_slot 표기 일관성 (글루시스-007 좌측/우측 vs 008 left/right)
 - TPC-SV-1U-06 모듈 등록 누락
+- [UI일괄점검] BUG-3: /module-inventory 이동 모달이 인라인으로 풀림. transferModal 구조는 정상
+  (modal-overlay + openModal, index.ejs L902/938). 추정: .modal-overlay 기본 display:none 누락
+  또는 openModal .active 토글 불일치(L342-350). 공통 문제면 모달 4개 전부 → CSS 1곳 수정으로 일괄해결.
+  화면 확인 필요, UI 세션에서 수정.
+- [UI일괄점검] 대여관리(/lendings) 상단 메뉴 링크 없음 — v1도 동일(header에 없고 footer 배열은
+  메뉴 아닌 목록판별용). 포팅 결함 아님. 메뉴 추가는 UI 개선 선택사항(필수 아님).
 
 ### 로그 테이블 cutover 델타 (B-7) — 실측 스냅샷 (2026-07-03)
 | 테이블 | v1 현재 | v2 이전시점 | 처리 |
