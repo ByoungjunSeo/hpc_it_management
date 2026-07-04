@@ -1,0 +1,262 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1><%= module ? '모듈 수정' : '모듈 등록' %></h1>
+    <a href="/module-inventory?tab=installed" class="btn btn-secondary">목록</a>
+</div>
+
+<form method="POST" action="<%= module ? '/module-inventory/modules/' + module.id : '/module-inventory/modules' %>" class="card">
+    <% if (typeof returnTo !== 'undefined' && returnTo) { %>
+    <input type="hidden" name="returnTo" value="<%= returnTo %>">
+    <% } %>
+    <div class="form-row">
+        <div class="form-group">
+            <label>서버 *</label>
+            <select name="asset_id" class="form-control" required>
+                <option value="">선택</option>
+                <% assets.forEach(a => { %>
+                <option value="<%= a.id %>"
+                    <%= (module && module.asset_id == a.id) || preselectedAssetId == a.id ? 'selected' : '' %>>
+                    <%= a.management_number || a.asset_number || '' %> - <%= a.model_name || a.ip_address || 'ID:' + a.id %>
+                </option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>모듈 유형 *</label>
+            <select name="module_type" id="moduleTypeSelect" class="form-control" required>
+                <% appConfig.moduleTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= module?.module_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>설치 유형</label>
+            <select name="is_onboard" class="form-control">
+                <option value="0" <%= module?.is_onboard ? '' : 'selected' %>>애드온</option>
+                <option value="1" <%= module?.is_onboard ? 'selected' : '' %>>온보드 (내장)</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- 부품 선택 영역 -->
+    <div class="form-row">
+        <div class="form-group" style="flex: 2;">
+            <label>부품 선택</label>
+            <select id="inventorySelect" class="form-control">
+                <option value="__manual__">수기 입력</option>
+            </select>
+        </div>
+        <div class="form-group" style="flex: 3;">
+            <div id="nextCodeInfo" style="display:none; padding: 8px 12px; margin-top: 22px; background: #f0f4ff; border: 1px solid #c5d2f0; border-radius: 4px; font-size: 0.9em;">
+                다음 코드: <strong id="nextCodeValue"></strong>
+                <span style="color: #666; margin-left: 8px;">(포맷: <code id="nextCodeFormat"></code>)</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>모델</label>
+            <input type="text" name="model" id="modelInput" class="form-control" value="<%= module?.model || '' %>" placeholder="예: Intel Xeon Gold 6348">
+        </div>
+        <div class="form-group">
+            <label>제조사</label>
+            <input type="text" name="manufacturer" id="manufacturerInput" class="form-control" value="<%= module?.manufacturer || '' %>">
+        </div>
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>용량</label>
+            <input type="text" name="capacity" id="capacityInput" class="form-control" value="<%= module?.capacity || '' %>" placeholder="예: 32GB, 1TB, 10GbE">
+        </div>
+        <div class="form-group">
+            <label>수량</label>
+            <input type="number" name="count" class="form-control" value="<%= module?.count || 1 %>" min="1">
+        </div>
+        <div class="form-group">
+            <label>슬롯 정보</label>
+            <input type="text" name="slot_info" class="form-control" value="<%= module?.slot_info || '' %>" placeholder="예: DIMM A1, Slot 0">
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>사양/스펙</label>
+        <input type="text" name="specification" id="specificationInput" class="form-control" value="<%= module?.specification || '' %>" placeholder="예: DDR4 3200MHz ECC">
+    </div>
+
+    <div class="form-row">
+        <div class="form-group">
+            <label>소유구분</label>
+            <select name="owner" id="ownerSelect" class="form-control" onchange="toggleVendorSelect()">
+                <option value="company" <%= (!module || module.owner === 'company') ? 'selected' : '' %>>자사</option>
+                <option value="vendor" <%= module?.owner === 'vendor' ? 'selected' : '' %>>업체</option>
+            </select>
+        </div>
+        <div class="form-group" id="vendorGroup" style="<%= module?.owner === 'vendor' ? '' : 'display:none;' %>">
+            <label>업체명</label>
+            <select name="owner_vendor_id" id="vendorSelect" class="form-control">
+                <option value="">선택</option>
+                <% if (typeof vendors !== 'undefined') { vendors.forEach(v => { %>
+                <option value="<%= v.id %>" <%= module?.owner_vendor_id == v.id ? 'selected' : '' %>><%= v.vendor_name %></option>
+                <% }); } %>
+            </select>
+        </div>
+    </div>
+
+    <div class="form-group">
+        <label>비고</label>
+        <textarea name="notes" class="form-control"><%= module?.notes || '' %></textarea>
+    </div>
+
+    <div class="btn-group mt-2">
+        <button type="submit" class="btn btn-primary"><%= module ? '수정' : '등록' %></button>
+        <a href="/module-inventory?tab=installed" class="btn btn-secondary">취소</a>
+    </div>
+</form>
+
+<script>
+function toggleVendorSelect() {
+    var ownerSelect = document.getElementById('ownerSelect');
+    var vendorGroup = document.getElementById('vendorGroup');
+    vendorGroup.style.display = ownerSelect.value === 'vendor' ? '' : 'none';
+    if (ownerSelect.value !== 'vendor') {
+        document.getElementById('vendorSelect').value = '';
+    }
+}
+
+(function() {
+    var allInventoryItems = <%- JSON.stringify(inventoryItems || []) %>;
+    var isEditMode = <%= module ? 'true' : 'false' %>;
+
+    var moduleTypeSelect = document.getElementById('moduleTypeSelect');
+    var inventorySelect = document.getElementById('inventorySelect');
+    var nextCodeInfo = document.getElementById('nextCodeInfo');
+    var nextCodeValue = document.getElementById('nextCodeValue');
+    var nextCodeFormat = document.getElementById('nextCodeFormat');
+    var modelInput = document.getElementById('modelInput');
+    var manufacturerInput = document.getElementById('manufacturerInput');
+    var capacityInput = document.getElementById('capacityInput');
+    var specificationInput = document.getElementById('specificationInput');
+
+    function setFieldsReadonly(readonly) {
+        [modelInput, manufacturerInput, capacityInput, specificationInput].forEach(function(el) {
+            if (readonly) {
+                el.setAttribute('readonly', 'readonly');
+                el.style.backgroundColor = '#f5f5f5';
+            } else {
+                el.removeAttribute('readonly');
+                el.style.backgroundColor = '';
+            }
+        });
+    }
+
+    function updateInventoryDropdown() {
+        var selectedType = moduleTypeSelect.value;
+        var filtered = allInventoryItems.filter(function(item) {
+            return item.module_type === selectedType;
+        });
+
+        // Clear and rebuild options
+        inventorySelect.innerHTML = '';
+        var manualOpt = document.createElement('option');
+        manualOpt.value = '__manual__';
+        manualOpt.textContent = '수기 입력';
+        inventorySelect.appendChild(manualOpt);
+
+        filtered.forEach(function(item) {
+            var opt = document.createElement('option');
+            opt.value = item.id;
+            var label = item.item_code || '';
+            if (item.model) label += ' - ' + item.model;
+            if (item.manufacturer) label += ' (' + item.manufacturer + ')';
+            if (item.capacity) label += ' [' + item.capacity + ']';
+            opt.textContent = label;
+            opt.dataset.model = item.model || '';
+            opt.dataset.manufacturer = item.manufacturer || '';
+            opt.dataset.capacity = item.capacity || '';
+            opt.dataset.specification = item.specification || '';
+            inventorySelect.appendChild(opt);
+        });
+
+        // In edit mode or if no items, default to manual
+        inventorySelect.value = '__manual__';
+    }
+
+    function fetchNextCode() {
+        var selectedType = moduleTypeSelect.value;
+        fetch('/module-inventory/api/next-code/' + encodeURIComponent(selectedType))
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (data.error) {
+                    nextCodeInfo.style.display = 'none';
+                    return;
+                }
+                nextCodeValue.textContent = data.nextCode;
+                nextCodeFormat.textContent = data.format;
+                // Show only when in manual mode
+                if (inventorySelect.value === '__manual__') {
+                    nextCodeInfo.style.display = '';
+                }
+            })
+            .catch(function() {
+                nextCodeInfo.style.display = 'none';
+            });
+    }
+
+    function onInventoryChange() {
+        var val = inventorySelect.value;
+        if (val === '__manual__') {
+            // Manual input: clear fields (unless edit mode on first load)
+            if (!isEditMode || inventorySelect.dataset.initialized === 'true') {
+                modelInput.value = '';
+                manufacturerInput.value = '';
+                capacityInput.value = '';
+                specificationInput.value = '';
+            }
+            setFieldsReadonly(false);
+            nextCodeInfo.style.display = '';
+        } else {
+            // Auto-fill from selected option
+            var selected = inventorySelect.options[inventorySelect.selectedIndex];
+            modelInput.value = selected.dataset.model;
+            manufacturerInput.value = selected.dataset.manufacturer;
+            capacityInput.value = selected.dataset.capacity;
+            specificationInput.value = selected.dataset.specification;
+            setFieldsReadonly(true);
+            nextCodeInfo.style.display = 'none';
+        }
+        inventorySelect.dataset.initialized = 'true';
+    }
+
+    function onModuleTypeChange() {
+        updateInventoryDropdown();
+        fetchNextCode();
+        // When type changes, reset to manual and clear
+        if (!isEditMode || inventorySelect.dataset.initialized === 'true') {
+            modelInput.value = '';
+            manufacturerInput.value = '';
+            capacityInput.value = '';
+            specificationInput.value = '';
+        }
+        setFieldsReadonly(false);
+        nextCodeInfo.style.display = '';
+    }
+
+    // Event listeners
+    moduleTypeSelect.addEventListener('change', onModuleTypeChange);
+    inventorySelect.addEventListener('change', onInventoryChange);
+
+    // Initial setup
+    updateInventoryDropdown();
+    fetchNextCode();
+    if (isEditMode) {
+        // Edit mode: keep existing values, stay on manual
+        setFieldsReadonly(false);
+        nextCodeInfo.style.display = 'none';
+    }
+})();
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

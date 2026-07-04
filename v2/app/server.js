@@ -84,7 +84,7 @@ app.use('/ip-management', require('./routes/ipManagement'));
 app.use('/offices', require('./routes/offices'));
 app.use('/storage', require('./routes/storage'));
 app.use('/lendings', require('./routes/lendings'));
-// app.use('/module-inventory', require('./routes/moduleInventory'));
+app.use('/module-inventory', require('./routes/moduleInventory'));
 app.use('/vendor-intake', require('./routes/vendorIntake'));
 // app.use('/requests', require('./routes/requests'));
 // app.use('/excel', require('./routes/excelUpload'));

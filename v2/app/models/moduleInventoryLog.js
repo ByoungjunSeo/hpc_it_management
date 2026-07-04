@@ -1,5 +1,13 @@
 const { pool } = require('../config/database');
 
+// pg returns timestamp as Date object; v1 views expect ISO string (.replace('T',' '))
+function fixTimestamps(row) {
+  if (row && row.created_at instanceof Date) {
+    row.created_at = row.created_at.toISOString();
+  }
+  return row;
+}
+
 const ModuleInventoryLog = {
   async create(data) {
     const { rows } = await pool.query(`
@@ -41,7 +49,7 @@ const ModuleInventoryLog = {
       ORDER BY created_at DESC
       LIMIT $2
     `, [code, l]);
-    return rows;
+    return rows.map(fixTimestamps);
   },
 
   async findByAsset(assetId) {
@@ -50,7 +58,7 @@ const ModuleInventoryLog = {
       WHERE asset_id = $1 OR from_asset_id = $1 OR to_asset_id = $1
       ORDER BY created_at DESC
     `, [assetId]);
-    return rows;
+    return rows.map(fixTimestamps);
   },
 
   async findAll(filters = {}, limit = 200) {
@@ -71,7 +79,7 @@ const ModuleInventoryLog = {
       params.push(filters.date_from);
     }
     if (filters.date_to) {
-      sql += ` AND created_at <= $${idx++} || ' 23:59:59'`;
+      sql += ` AND created_at <= ($${idx++})::date + interval '1 day' - interval '1 second'`;
       params.push(filters.date_to);
     }
     if (filters.search) {
@@ -84,7 +92,7 @@ const ModuleInventoryLog = {
     params.push(limit);
 
     const { rows } = await pool.query(sql, params);
-    return rows;
+    return rows.map(fixTimestamps);
   },
 
   async countByEventType() {
