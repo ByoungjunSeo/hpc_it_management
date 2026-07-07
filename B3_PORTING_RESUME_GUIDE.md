@@ -218,6 +218,9 @@ express → getDb() → 디렉토리 생성(backups, photos)
 - vendor_intake_requests id=1 테스트데이터 삭제
 - blade_slot 표기 일관성 (글루시스-007 좌측/우측 vs 008 left/right)
 - TPC-SV-1U-06 모듈 등록 누락
+- 마이그레이션 표식 notes 정리: equipment_usage_logs returned 행의
+  "[returned event migrated from return_date]" 문구가 상세 타임라인에 노출(6d 발견).
+  B-2.8b가 심은 데이터 — 일괄 제거 or 유지 방침 결정.
 - [UI일괄점검] BUG-3: /module-inventory 이동 모달이 인라인으로 풀림. transferModal 구조는 정상
   (modal-overlay + openModal, index.ejs L902/938). 추정: .modal-overlay 기본 display:none 누락
   또는 openModal .active 토글 불일치(L342-350). 공통 문제면 모달 4개 전부 → CSS 1곳 수정으로 일괄해결.
@@ -324,6 +327,10 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
    - v1에 audit가 없던 동작도 v2에서 보강(의도된 개선 — v1과 다른 것은 정상).
    - 단 BUG_TRACKING이 아니라 "공통 개선 원칙"으로 분류. 검증 시 audit 차이는 의도된 것.
    - 확인: serverRooms·vendorIntake 모두 audit 있음(일관성 OK).
+3. **타임스탬프 KST 표시 (v1 UTC quirk 미계승, 6d 확정)**:
+   - v1은 SQLite CURRENT_TIMESTAMP(UTC)를 그대로 표시 — 신규 기록 시각이 벽시계보다 9시간 이전으로 보임.
+   - v2는 utils/dateFix.js formatTimestamp(서버 로컬)로 통일: 마이그레이션 이전분은 v1 화면과
+     문자열 일치, 신규분은 실제 KST 벽시계. v1↔v2 신규기록 시각 차이는 의도된 개선(같은 순간의 표기 차).
 
 ### B-4c 남은 라우트 (순서)
 
@@ -365,18 +372,26 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
     이전 in_use 보존 + returned 신규행) / incoming 매핑(#3, status='입고'→event_type) / UPDATE(#13,
     행수 불변 내용정정) / DELETE(#15) / mapXxx→buildSnapshots JSONB 체인(#10 create·#13 update 양경로).
   - 검증은 전부 __TEST_xxx__ 마커 격리 후 정리 — 운영 행수(assets 172/eul 1036 등) 사전=사후 확인됨.
+  - 6d(1e330aa): 화면 필드 대조 완료 — detail 타임라인(날짜/사용자/용도/위치 v1 문자열 일치.
+    v1 1행→v2 2행 이벤트 분리 표시는 설계 의도), edit prefill(JSONB→flatten→폼 정상), index 표본
+    (v1 상위행 7월 데이터는 운영 델타, B-7 재이전 대상). returned 행은 "반납:"만 표시
+    (6a 보정 — 사용일은 인접 in_use 행에 있어 정보손실 없음 확인).
+    **타임스탬프 KST 수정**: toISOString UTC 표시로 이전 데이터가 v1 화면 대비 -9h 밀림 →
+    formatTimestamp(서버 로컬) 공용화로 수정 (dateFix.js + auditLog/moduleInventoryLog/photo 3모델).
+  - **→ B-4d-6 전체 완료** (설계→6a→6b→6c 18EP→6d 화면검증).
 
 **B-4d 하위단계 분해 (확정 순서):**
 - B-4d-1(완료) → B-4d-2/3(assets/racks, 완료) → B-4d-4(모듈모델, 완료) →
-  B-4d-5/6(moduleInventory/inventory, 완료) → **다음: B-4d-6d(뷰 4개 JSONB 평탄화 화면검증
-  — 뷰 파일은 6c에서 복사됨, 화면 필드 단위 v1↔v2 대조)** → B-4d-7(discovery+§5, 최고위험) →
+  B-4d-5/6(moduleInventory/inventory+EUL+화면검증, 완료) →
+  **다음: B-4d-7(discovery + §5 + BUG-6, 최고위험)** →
   B-4d-8(fault-return 스텁 해제) → B-4d-9(기술부채 정리)
 
 **B-4d 후반 블로커/확인지점:**
 - ~~EUL 이벤트소싱 매핑 (B-4d-5/6 선행 필수)~~ → **해소**: B-4d-6 설계·구현·실증 완료
   (B4D6_EUL_DESIGN.md + 위 6a~6c 기록 참조).
 - audit 스키마 v1(before/after 2컬럼) ≠ v2(details 단일 JSONB) — 개수검증만 함, 내용 동등성 미검증.
-- 삭제 후 이력조회: v2 asset_id=NULL vs v1 management_number 텍스트 연결 → B-4d-6 확인.
+- ~~삭제 후 이력조회~~ → **해소**(6d 검증): getHistory가 management_number 텍스트 기반이라
+  asset_id=NULL 무관 — assets에 없는 '매니-001' 이력이 v1과 동일 조회됨(입고 2건).
 - BUG-5: assets 저장(blade_slot 클리어) ↔ racks 렌더(shelfU) 불일치 → B-4d-3(racks) 이식 후 합동수정.
 
 **포팅 방법론 (B-4d 관통 원칙):**
