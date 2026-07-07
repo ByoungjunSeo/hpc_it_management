@@ -1,20 +1,93 @@
 const express = require('express');
 const router = express.Router();
+const EquipmentUsageLog = require('../models/equipmentUsageLog');
 const ModuleInventory = require('../models/moduleInventory');
+const ModuleInventoryLog = require('../models/moduleInventoryLog');
+const ServerRoom = require('../models/serverRoom');
+const Rack = require('../models/rack');
+const Asset = require('../models/asset');
+const AssetIp = require('../models/assetIp');
+const AssetCredential = require('../models/assetCredential');
+const ComputingModule = require('../models/computingModule');
+const Photo = require('../models/photo');
 const Vendor = require('../models/vendor');
 const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const { pool } = require('../config/database');
 const { generateVendorManagementNumber } = require('../utils/inventoryHelpers');
 
-// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17)만 구현.
-// EUL 접촉 11EP(#1,3,9,10,11,12,13,14,15,16,18)는 501 스텁 — B-4d-6c 후속 조각에서 구현.
+// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17) / 6c-B: 읽기 5EP(#1,9,11,12,16) 구현.
+// EUL 쓰기 6EP(#3,10,13,14,15,18)는 501 스텁 — B-4d-6c 후속 조각에서 구현.
 const notImplemented = (req, res) => {
   res.status(501).json({ error: '미구현 - B-4d-6c 후속 조각' });
 };
 
-// EP#1: Inventory list (EUL 읽기) — 스텁
-router.get('/', notImplemented);
+// EP#1: Inventory list (EUL 읽기 — 6a flatten이 status/개별컬럼 가상필드 제공)
+router.get('/', async (req, res, next) => {
+  try {
+    const tab = req.query.tab || 'equipment';
+
+    if (tab === 'module') {
+      // Module tab: load from module_inventory_logs
+      const moduleFilters = {
+        event_type: req.query.event_type,
+        item_code: req.query.item_code,
+        date_from: req.query.date_from,
+        date_to: req.query.date_to,
+        search: req.query.search
+      };
+      const moduleLogs = await ModuleInventoryLog.findAll(moduleFilters, 500);
+      const moduleCounts = await ModuleInventoryLog.countByEventType();
+      const itemCodes = await ModuleInventoryLog.getItemCodes();
+      const eventTypes = ['incoming', 'installed', 'removed', 'outgoing', 'adjust'];
+
+      res.render('inventory/index', {
+        title: '입출고 관리',
+        currentPath: '/inventory',
+        extraCss: null,
+        extraJs: null,
+        tab,
+        moduleLogs,
+        moduleCounts,
+        itemCodes,
+        eventTypes,
+        moduleFilters,
+        appConfig
+      });
+    } else {
+      // Equipment tab: equipment_usage_logs excluding modules
+      const filters = {
+        status: req.query.status,
+        room: req.query.room,
+        user_name: req.query.user_name,
+        ownership: req.query.ownership,
+        date_from: req.query.date_from,
+        date_to: req.query.date_to,
+        search: req.query.search
+      };
+      const logs = await EquipmentUsageLog.findAllEquipment(filters);
+      const counts = await EquipmentUsageLog.countByStatusEquipment();
+      const rooms = await EquipmentUsageLog.getRoomsEquipment();
+      const users = await EquipmentUsageLog.getUsersEquipment();
+
+      res.render('inventory/index', {
+        title: '입출고 관리',
+        currentPath: '/inventory',
+        extraCss: null,
+        extraJs: null,
+        tab,
+        logs,
+        counts,
+        rooms,
+        users,
+        filters,
+        appConfig
+      });
+    }
+  } catch (err) {
+    next(err);
+  }
+});
 
 // === Incoming Registration (입고 등록) ===
 
@@ -159,9 +232,47 @@ router.get('/api/modules/:type', async (req, res) => {
   }
 });
 
-// EP#16: Asset detail API (AJAX for auto-fill, EUL 읽기) — 스텁
+// EP#16: Asset detail API (AJAX for auto-fill)
 // ★ /api/* 구체 경로는 /:id 동적 경로보다 먼저 등록 (매칭 순서)
-router.get('/api/asset/:id', notImplemented);
+router.get('/api/asset/:id', async (req, res) => {
+  try {
+    const asset = await Asset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: 'Not found' });
+    const ips = await AssetIp.findByAsset(req.params.id);
+    const credentials = await AssetCredential.findByAsset(req.params.id);
+
+    // Include parent chassis info if this is a node asset
+    let parent = null;
+    if (asset.parent_asset_id) {
+      parent = await Asset.findById(asset.parent_asset_id);
+    }
+
+    // Include child nodes if this is a chassis
+    const children = await Asset.findChildren(asset.id);
+
+    // Include hardware data: try latest usage log hardware_json first, then computing_modules
+    let hardware = [];
+    if (asset.management_number) {
+      const latestLog = await EquipmentUsageLog.getLatestByManagement(asset.management_number);
+      if (latestLog && latestLog.hardware_json) {
+        try { hardware = JSON.parse(latestLog.hardware_json); } catch (e) {}
+      }
+    }
+    if (hardware.length === 0) {
+      // Fallback: build from computing_modules
+      const modules = await ComputingModule.findByAsset(asset.id);
+      modules.forEach(m => {
+        const item = { type: m.module_type, code: m.model || '', num: m.count || 1, ownership: m.owner || 'company' };
+        if (m.notes && m.module_type === 'psu') item.role = m.notes;
+        hardware.push(item);
+      });
+    }
+
+    res.json({ asset, ips, credentials, parent, children, hardware });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // EP#17: Component spec API (AJAX)
 router.get('/api/component/:code', async (req, res) => {
@@ -177,17 +288,157 @@ router.get('/api/component/:code', async (req, res) => {
 // EP#18: One-time migration: add default PSU entries (EUL 쓰기) — 스텁
 router.post('/api/migrate-psu', requireMaintenance, notImplemented);
 
-// EP#9: New usage registration form (EUL prefill) — 스텁
-router.get('/new', notImplemented);
+// EP#9: New usage registration form (EUL prefill)
+router.get('/new', async (req, res, next) => {
+  try {
+    const mgmt = req.query.mgmt;
+    let prefill = null;
+    if (mgmt) {
+      prefill = await EquipmentUsageLog.getLatestByManagement(mgmt);
+    }
+
+    const componentTypes = await ModuleInventory.findAll();
+    const serverRooms = await ServerRoom.findAll();
+    const racks = await Rack.findAll();
+    const assets = await Asset.findAll();
+    const moduleInventoryItems = await ModuleInventory.findAll();
+
+    res.render('inventory/form', {
+      title: '사용 등록',
+      currentPath: '/inventory',
+      extraCss: 'rack.css',
+      extraJs: null,
+      log: prefill,
+      isEdit: false,
+      componentTypes,
+      serverRooms,
+      racks,
+      assets,
+      moduleInventoryItems,
+      appConfig
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // EP#10: Create usage (EUL 쓰기 + 자산 동기화) — 스텁
 router.post('/', requireMaintenance, notImplemented);
 
-// EP#11: Equipment detail by management number (EUL 이력) — 스텁
-router.get('/equipment/:mgmt', notImplemented);
+// EP#11: Equipment detail by management number (EUL 이력 시퀀스)
+router.get('/equipment/:mgmt', async (req, res, next) => {
+  try {
+    const mgmt = req.params.mgmt;
+    const history = await EquipmentUsageLog.getHistory(mgmt);
+    if (history.length === 0) {
+      req.flash('error', '해당 관리번호의 기록이 없습니다.');
+      return res.redirect('/inventory');
+    }
+    const latest = history[history.length - 1];
 
-// EP#12: Edit form (EUL 읽기) — 스텁
-router.get('/:id/edit', notImplemented);
+    // Look up component specs from module_inventory
+    const componentSpecs = {};
+    // From hardware_json if present
+    if (latest.hardware_json) {
+      try {
+        const hwItems = JSON.parse(latest.hardware_json);
+        for (const h of hwItems) {
+          if (h.code && h.code !== '-' && !componentSpecs[h.code]) {
+            const spec = await ModuleInventory.findByCode(h.code);
+            if (spec) componentSpecs[h.code] = spec;
+          }
+        }
+      } catch (e) {}
+    }
+    // Also check legacy columns (flatten 가상필드)
+    const compFields = [
+      'cpu_type', 'mem1_type', 'mem2_type',
+      'disk1_part', 'disk2_part', 'disk3_part', 'disk4_part',
+      'nic1_type', 'nic2_type', 'nic3_type', 'nic4_type',
+      'raid_type', 'gpu1_type', 'gpu2_type'
+    ];
+    for (const f of compFields) {
+      const code = latest[f];
+      if (code && code !== '-' && !componentSpecs[code]) {
+        const spec = await ModuleInventory.findByCode(code);
+        if (spec) componentSpecs[code] = spec;
+      }
+    }
+
+    // 자산에 연결된 computing_modules 조회
+    const linkedAsset = await Asset.findByManagementNumber(mgmt);
+    const computingModules = linkedAsset ? await ComputingModule.findByAsset(linkedAsset.id) : [];
+    const moduleTransferLogs = linkedAsset ? await ModuleInventoryLog.findByAsset(linkedAsset.id) : [];
+    const detailPhotos = linkedAsset ? await Photo.findByAssetWithUsageLogs(linkedAsset.id, mgmt) : [];
+
+    res.render('inventory/equipment-detail', {
+      title: mgmt + ' 장비 상세',
+      currentPath: '/inventory',
+      extraCss: null,
+      extraJs: null,
+      mgmt,
+      latest,
+      history,
+      componentSpecs,
+      computingModules,
+      linkedAsset,
+      moduleTransferLogs,
+      detailPhotos,
+      appConfig
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// EP#12: Edit form (EUL 읽기, 수정 모드)
+router.get('/:id/edit', async (req, res, next) => {
+  try {
+    const log = await EquipmentUsageLog.findById(req.params.id);
+    if (!log) {
+      req.flash('error', '기록을 찾을 수 없습니다.');
+      return res.redirect('/inventory');
+    }
+    const componentTypes = await ModuleInventory.findAll();
+    const serverRooms = await ServerRoom.findAll();
+    const racks = await Rack.findAll();
+    const assets = await Asset.findAll();
+    const moduleInventoryItems = await ModuleInventory.findAll();
+
+    // Find linked asset to get blade_slot for switch slot pre-selection
+    let linkedAssetBladeSlot = '';
+    let linkedAssetId = null;
+    if (log.management_number) {
+      const linkedAsset = await Asset.findByManagementNumber(log.management_number);
+      if (linkedAsset) {
+        linkedAssetBladeSlot = linkedAsset.blade_slot || '';
+        linkedAssetId = linkedAsset.id;
+      }
+    }
+
+    const logPhotos = await Photo.findByEntity('equipment_usage', log.id);
+    res.render('inventory/form', {
+      title: '수정',
+      currentPath: '/inventory',
+      extraCss: 'rack.css',
+      extraJs: null,
+      log,
+      isEdit: true,
+      logPhotos,
+      componentTypes,
+      serverRooms,
+      racks,
+      assets,
+      moduleInventoryItems,
+      appConfig,
+      linkedAssetBladeSlot,
+      linkedAssetId,
+      returnTo: req.query.returnTo || req.get('Referer') || ''
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // EP#13: Update (EUL 쓰기) — 스텁
 router.post('/:id', requireMaintenance, notImplemented);

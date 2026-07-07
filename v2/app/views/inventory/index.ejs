@@ -1,0 +1,496 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>입출고 관리</h1>
+    <div class="btn-group">
+        <a href="/inventory/incoming" class="btn btn-success">+ 입고 등록</a>
+        <a href="/inventory/new" class="btn btn-primary">+ 사용 등록</a>
+    </div>
+</div>
+
+<!-- Tab Navigation -->
+<div class="tab-nav">
+    <a href="/inventory?tab=equipment" class="tab-btn <%= tab === 'equipment' ? 'active' : '' %>">장비 입출고</a>
+    <a href="/inventory?tab=module" class="tab-btn <%= tab === 'module' ? 'active' : '' %>">컴퓨팅 모듈 이력</a>
+</div>
+
+<% if (tab === 'module') { %>
+<!-- ==================== MODULE TAB ==================== -->
+
+<!-- Module Status Summary Cards -->
+<div class="stats-grid">
+    <div class="stat-card <%= !moduleFilters.event_type ? 'info' : '' %>" onclick="location.href='/inventory?tab=module'" style="cursor:pointer;">
+        <div class="stat-value"><%= moduleCounts.total || 0 %></div>
+        <div class="stat-label">전체</div>
+    </div>
+    <div class="stat-card <%= moduleFilters.event_type === 'incoming' ? 'info' : '' %>" onclick="location.href='/inventory?tab=module&event_type=incoming'" style="cursor:pointer;">
+        <div class="stat-value"><%= moduleCounts['incoming'] || 0 %></div>
+        <div class="stat-label">입고</div>
+    </div>
+    <div class="stat-card <%= moduleFilters.event_type === 'installed' ? 'info' : '' %>" onclick="location.href='/inventory?tab=module&event_type=installed'" style="cursor:pointer;">
+        <div class="stat-value"><%= moduleCounts['installed'] || 0 %></div>
+        <div class="stat-label">설치</div>
+    </div>
+    <div class="stat-card <%= moduleFilters.event_type === 'removed' ? 'info' : '' %>" onclick="location.href='/inventory?tab=module&event_type=removed'" style="cursor:pointer;">
+        <div class="stat-value"><%= moduleCounts['removed'] || 0 %></div>
+        <div class="stat-label">분리</div>
+    </div>
+    <div class="stat-card <%= moduleFilters.event_type === 'outgoing' ? 'info' : '' %>" onclick="location.href='/inventory?tab=module&event_type=outgoing'" style="cursor:pointer;">
+        <div class="stat-value"><%= moduleCounts['outgoing'] || 0 %></div>
+        <div class="stat-label">반출</div>
+    </div>
+    <div class="stat-card <%= moduleFilters.event_type === 'adjust' ? 'info' : '' %>" onclick="location.href='/inventory?tab=module&event_type=adjust'" style="cursor:pointer;">
+        <div class="stat-value"><%= moduleCounts['adjust'] || 0 %></div>
+        <div class="stat-label">조정</div>
+    </div>
+</div>
+
+<!-- Module Filters -->
+<div class="card">
+    <form class="filters" method="GET" action="/inventory">
+        <input type="hidden" name="tab" value="module">
+        <div class="form-group">
+            <label>이벤트유형</label>
+            <select name="event_type" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% eventTypes.forEach(et => { %>
+                <option value="<%= et %>" <%= moduleFilters.event_type === et ? 'selected' : '' %>><%= et === 'incoming' ? '입고' : et === 'installed' ? '설치' : et === 'removed' ? '분리' : et === 'outgoing' ? '반출' : '조정' %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>부품코드</label>
+            <select name="item_code" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% itemCodes.forEach(code => { %>
+                <option value="<%= code %>" <%= moduleFilters.item_code === code ? 'selected' : '' %>><%= code %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>시작일</label>
+            <input type="date" name="date_from" class="form-control" value="<%= moduleFilters.date_from || '' %>">
+        </div>
+        <div class="form-group">
+            <label>종료일</label>
+            <input type="date" name="date_to" class="form-control" value="<%= moduleFilters.date_to || '' %>">
+        </div>
+        <div class="form-group">
+            <label>검색</label>
+            <input type="text" name="search" class="form-control" placeholder="부품코드, 자산, 작업자, 비고..." value="<%= moduleFilters.search || '' %>">
+        </div>
+        <div class="form-group">
+            <button type="submit" class="btn btn-primary">검색</button>
+            <% if (moduleFilters.event_type || moduleFilters.item_code || moduleFilters.date_from || moduleFilters.date_to || moduleFilters.search) { %>
+            <a href="/inventory?tab=module" class="btn btn-secondary">초기화</a>
+            <% } %>
+        </div>
+    </form>
+</div>
+
+<!-- Module Table -->
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th class="sortable" data-col="0">이벤트 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="1">부품코드 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="2">수량변동 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="3">대상 자산 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="4">이동 정보 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="5">작업자 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="6">비고 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="7">일시 <span class="sort-icon"></span></th>
+                </tr>
+            </thead>
+            <tbody id="invTableBody">
+                <% if (moduleLogs.length === 0) { %>
+                <tr><td colspan="8" class="text-center text-muted">데이터가 없습니다.</td></tr>
+                <% } %>
+                <% moduleLogs.forEach(ml => { %>
+                <tr>
+                    <td data-sort="<%= ml.event_type || '' %>">
+                        <% if (ml.event_type === 'incoming') { %>
+                        <span class="badge badge-module-incoming">입고</span>
+                        <% } else if (ml.event_type === 'installed') { %>
+                        <span class="badge badge-module-installed">설치</span>
+                        <% } else if (ml.event_type === 'removed') { %>
+                        <span class="badge badge-module-removed">분리</span>
+                        <% } else if (ml.event_type === 'outgoing') { %>
+                        <span class="badge badge-module-outgoing">반출</span>
+                        <% } else if (ml.event_type === 'adjust') { %>
+                        <span class="badge badge-module-adjust">조정</span>
+                        <% } else { %>
+                        <span class="badge badge-secondary"><%= ml.event_type %></span>
+                        <% } %>
+                    </td>
+                    <td data-sort="<%= ml.item_code || '' %>">
+                        <% if (ml.item_code) { %>
+                        <a href="#" onclick="showItemDetail('<%= ml.item_code.replace(/'/g, "\\'") %>'); return false;" style="text-decoration:underline; cursor:pointer;"><strong><%= ml.item_code %></strong></a>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td data-sort="<%= ml.quantity_change || 0 %>">
+                        <% if (ml.quantity_change > 0) { %>
+                        <span style="color:#16a34a;font-weight:600;">+<%= ml.quantity_change %></span>
+                        <% } else if (ml.quantity_change < 0) { %>
+                        <span style="color:#dc2626;font-weight:600;"><%= ml.quantity_change %></span>
+                        <% } else { %>
+                        <span style="color:#6b7280;">0</span>
+                        <% } %>
+                    </td>
+                    <td data-sort="<%= ml.asset_label || '' %>">
+                        <% if (ml.asset_label) { %>
+                        <a href="/assets?search=<%= encodeURIComponent(ml.asset_label) %>"><%= ml.asset_label %></a>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td data-sort="<%= (ml.from_asset_label || '') + (ml.to_asset_label || '') %>">
+                        <% if (ml.from_asset_label && ml.to_asset_label) { %>
+                        <%= ml.from_asset_label %> → <%= ml.to_asset_label %>
+                        <% } else if (ml.from_asset_label) { %>
+                        <%= ml.from_asset_label %> →
+                        <% } else if (ml.to_asset_label) { %>
+                        → <%= ml.to_asset_label %>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td data-sort="<%= ml.username || '' %>"><%= ml.username || '-' %></td>
+                    <td data-sort="<%= ml.notes || '' %>" title="<%= ml.notes || '' %>"><%= ml.notes ? (ml.notes.length > 30 ? ml.notes.substring(0, 30) + '...' : ml.notes) : '-' %></td>
+                    <td data-sort="<%= ml.created_at || '' %>"><%= ml.created_at ? ml.created_at.replace('T', ' ').substring(0, 16) : '-' %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted mt-1">총 <%= moduleLogs.length %>건</p>
+</div>
+
+<% } else { %>
+<!-- ==================== EQUIPMENT TAB ==================== -->
+
+<!-- Status Summary Cards -->
+<div class="stats-grid">
+    <div class="stat-card <%= !filters.status ? 'info' : '' %>" onclick="location.href='/inventory'" style="cursor:pointer;">
+        <div class="stat-value"><%= counts.total || 0 %></div>
+        <div class="stat-label">전체</div>
+    </div>
+    <div class="stat-card <%= filters.status === '입고' ? 'info' : '' %>" onclick="location.href='/inventory?status=입고'" style="cursor:pointer;">
+        <div class="stat-value"><%= counts['입고'] || 0 %></div>
+        <div class="stat-label">입고</div>
+    </div>
+    <div class="stat-card <%= filters.status === '사용중' ? 'info' : '' %>" onclick="location.href='/inventory?status=사용중'" style="cursor:pointer;">
+        <div class="stat-value"><%= counts['사용중'] || 0 %></div>
+        <div class="stat-label">사용중</div>
+    </div>
+    <div class="stat-card <%= filters.status === '반납완료' ? 'info' : '' %>" onclick="location.href='/inventory?status=반납완료'" style="cursor:pointer;">
+        <div class="stat-value"><%= counts['반납완료'] || 0 %></div>
+        <div class="stat-label">반납완료</div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="card">
+    <form class="filters" method="GET" action="/inventory">
+        <input type="hidden" name="tab" value="equipment">
+        <div class="form-group">
+            <label>상태</label>
+            <select name="status" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <option value="입고" <%= filters.status === '입고' ? 'selected' : '' %>>입고</option>
+                <option value="사용중" <%= filters.status === '사용중' ? 'selected' : '' %>>사용중</option>
+                <option value="반납완료" <%= filters.status === '반납완료' ? 'selected' : '' %>>반납완료</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>소유</label>
+            <select name="ownership" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% appConfig.ownershipTypes.forEach(t => { %>
+                <option value="<%= t.value %>" <%= filters.ownership === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>장소</label>
+            <select name="room" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% rooms.forEach(r => { %>
+                <option value="<%= r %>" <%= filters.room === r ? 'selected' : '' %>><%= r %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>사용자</label>
+            <select name="user_name" class="form-control" onchange="this.form.submit()">
+                <option value="">전체</option>
+                <% users.forEach(u => { %>
+                <option value="<%= u %>" <%= filters.user_name === u ? 'selected' : '' %>><%= u %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>시작일</label>
+            <input type="date" name="date_from" class="form-control" value="<%= filters.date_from || '' %>">
+        </div>
+        <div class="form-group">
+            <label>종료일</label>
+            <input type="date" name="date_to" class="form-control" value="<%= filters.date_to || '' %>">
+        </div>
+        <div class="form-group">
+            <label>검색</label>
+            <input type="text" name="search" class="form-control" placeholder="관리번호, 모델, 사용자, 시험명..." value="<%= filters.search || '' %>">
+        </div>
+        <div class="form-group">
+            <button type="submit" class="btn btn-primary">검색</button>
+            <% if (filters.status || filters.room || filters.user_name || filters.ownership || filters.date_from || filters.date_to || filters.search) { %>
+            <a href="/inventory" class="btn btn-secondary">초기화</a>
+            <% } %>
+        </div>
+    </form>
+</div>
+
+<!-- Main Table -->
+<div class="card">
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th class="sortable" data-col="0">상태 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="1">소유 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="2">사용날짜 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="3">반입일자 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="4">관리번호 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="5">모델명 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="6">사용자 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="7">시험명 <span class="sort-icon"></span></th>
+                    <th class="sortable" data-col="8">장소 <span class="sort-icon"></span></th>
+                    <th>관리</th>
+                </tr>
+            </thead>
+            <tbody id="invTableBody">
+                <% if (logs.length === 0) { %>
+                <tr><td colspan="10" class="text-center text-muted">데이터가 없습니다.</td></tr>
+                <% } %>
+                <% logs.forEach(log => { %>
+                <tr>
+                    <td data-sort="<%= log.status || '' %>">
+                        <% if (log.status === '입고') { %>
+                        <span class="badge badge-secondary">입고</span>
+                        <% } else if (log.status === '사용중') { %>
+                        <span class="badge badge-success">사용중</span>
+                        <% } else if (log.status === '반납완료') { %>
+                        <span class="badge badge-warning">반납완료</span>
+                        <% } %>
+                    </td>
+                    <td data-sort="<%= log.ownership || '' %>">
+                        <% if (log.ownership === 'vendor') { %>
+                        <span class="badge badge-info">업체</span>
+                        <% } else { %>
+                        <span class="badge badge-secondary">자사</span>
+                        <% } %>
+                    </td>
+                    <td data-sort="<%= log.usage_date || '' %>"><%= log.usage_date || '-' %></td>
+                    <td data-sort="<%= log.return_date || '' %>"><%= log.return_date || '-' %></td>
+                    <td data-sort="<%= log.management_number || '' %>">
+                        <% if (log.management_number) { %>
+                        <a href="/inventory/equipment/<%= encodeURIComponent(log.management_number) %>"><strong><%= log.management_number %></strong></a>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td data-sort="<%= log.model_name || '' %>"><%= log.model_name || '-' %></td>
+                    <td data-sort="<%= log.user_name || '' %>"><%= log.user_name || '-' %></td>
+                    <td data-sort="<%= log.test_name || '' %>"><%= log.test_name || '-' %></td>
+                    <td data-sort="<%= [log.room, log.rack, log.unit].filter(Boolean).join('/') %>">
+                        <% if (log.room) { %>
+                        <%= log.room %><% if (log.rack) { %>/<%= log.rack %><% } %><% if (log.unit) { %>/<%= log.unit %><% } %>
+                        <% } else { %>-<% } %>
+                    </td>
+                    <td style="white-space:nowrap;">
+                        <% if (log.status === '사용중') { %>
+                        <form method="POST" action="/inventory/<%= log.id %>/return" style="display:inline" onsubmit="return confirm('반납 처리하시겠습니까?')">
+                            <input type="hidden" name="return_date" value="<%= new Date().toISOString().split('T')[0] %>">
+                            <button type="submit" class="btn btn-sm btn-warning">반납</button>
+                        </form>
+                        <% } %>
+                        <a href="/inventory/<%= log.id %>/edit" class="btn btn-sm btn-outline">수정</a>
+                        <form method="POST" action="/inventory/<%= log.id %>/delete" style="display:inline" onsubmit="return confirm('삭제하시겠습니까?')">
+                            <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                        </form>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-muted mt-1">총 <%= logs.length %>건</p>
+</div>
+
+<% } %>
+
+<style>
+.tab-nav { display:flex; gap:0; margin-bottom:16px; border-bottom:2px solid #e2e8f0; }
+.tab-btn { padding:10px 20px; text-decoration:none; color:#64748b; border-bottom:2px solid transparent; margin-bottom:-2px; font-weight:500; transition: color 0.15s; }
+.tab-btn.active { color:#3b82f6; border-bottom-color:#3b82f6; }
+.tab-btn:hover { color:#3b82f6; }
+
+.badge-module-incoming { background:#16a34a; color:#fff; }
+.badge-module-installed { background:#2563eb; color:#fff; }
+.badge-module-removed { background:#ea580c; color:#fff; }
+.badge-module-outgoing { background:#dc2626; color:#fff; }
+.badge-module-adjust { background:#6b7280; color:#fff; }
+
+.sortable { cursor: pointer; user-select: none; }
+.sortable:hover { background: #e2e8f0; }
+.sort-icon { font-size: 10px; opacity: 0.3; margin-left: 2px; }
+.sort-icon::after { content: '▲▼'; }
+.sortable.asc .sort-icon { opacity: 1; }
+.sortable.asc .sort-icon::after { content: '▲'; }
+.sortable.desc .sort-icon { opacity: 1; }
+.sortable.desc .sort-icon::after { content: '▼'; }
+</style>
+
+<script>
+function naturalCompare(a, b) {
+    var re = /(\d+)|(\D+)/g, m, ax = [], bx = [];
+    while (m = re.exec(a)) ax.push(m[1] ? parseInt(m[1]) : m[2]);
+    re.lastIndex = 0;
+    while (m = re.exec(b)) bx.push(m[1] ? parseInt(m[1]) : m[2]);
+    for (var i = 0; i < Math.max(ax.length, bx.length); i++) {
+        if (i >= ax.length) return -1;
+        if (i >= bx.length) return 1;
+        var va = ax[i], vb = bx[i];
+        var an = typeof va === 'number', bn = typeof vb === 'number';
+        if (an && bn) { if (va !== vb) return va - vb; }
+        else if (an !== bn) { return an ? -1 : 1; }
+        else { var c = va.localeCompare(vb, 'ko'); if (c !== 0) return c; }
+    }
+    return 0;
+}
+
+(function() {
+    var currentCol = -1;
+    var currentDir = '';
+
+    document.querySelectorAll('th.sortable').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var col = parseInt(this.dataset.col);
+            var dir;
+            if (currentCol === col) {
+                dir = currentDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                dir = 'asc';
+            }
+            currentCol = col;
+            currentDir = dir;
+
+            document.querySelectorAll('th.sortable').forEach(function(h) {
+                h.classList.remove('asc', 'desc');
+            });
+            this.classList.add(dir);
+
+            var tbody = document.getElementById('invTableBody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort(function(a, b) {
+                var cellA = a.cells[col];
+                var cellB = b.cells[col];
+                if (!cellA || !cellB) return 0;
+                var valA = cellA.dataset.sort || cellA.textContent.trim();
+                var valB = cellB.dataset.sort || cellB.textContent.trim();
+                var cmp = naturalCompare(valA, valB);
+                return dir === 'asc' ? cmp : -cmp;
+            });
+            rows.forEach(function(row) { tbody.appendChild(row); });
+        });
+    });
+})();
+</script>
+
+<!-- Item Detail Modal -->
+<div id="itemDetailModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; align-items:center; justify-content:center;">
+  <div style="background:#fff; border-radius:8px; width:92%; max-width:700px; max-height:85vh; overflow:auto; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-bottom:1px solid #eee; position:sticky; top:0; background:#fff; z-index:1;">
+      <h3 style="margin:0;" id="itemDetailTitle">부품 상세</h3>
+      <button onclick="document.getElementById('itemDetailModal').style.display='none'" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
+    </div>
+    <div id="itemDetailContent" style="padding:20px;">
+      <p class="text-muted">로딩 중...</p>
+    </div>
+  </div>
+</div>
+
+<script>
+function showItemDetail(code) {
+  var modal = document.getElementById('itemDetailModal');
+  var content = document.getElementById('itemDetailContent');
+  document.getElementById('itemDetailTitle').textContent = code;
+  content.innerHTML = '<p class="text-muted">로딩 중...</p>';
+  modal.style.display = 'flex';
+
+  Promise.all([
+    fetch('/module-inventory/api/usage/' + encodeURIComponent(code)).then(function(r) { return r.json(); }),
+    fetch('/module-inventory/api/history/' + encodeURIComponent(code)).then(function(r) { return r.json(); })
+  ]).then(function(results) {
+    var usage = results[0];
+    var history = results[1];
+    var spec = usage.spec || {};
+    var html = '';
+
+    // Inventory summary
+    html += '<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">';
+    html += '<div style="background:#f0fdf4; padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:#16a34a;">' + (spec.total_quantity || 0) + '</div><div style="font-size:11px; color:#64748b;">총수량</div></div>';
+    html += '<div style="background:#eff6ff; padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:#2563eb;">' + (spec.in_use_quantity || 0) + '</div><div style="font-size:11px; color:#64748b;">사용중</div></div>';
+    html += '<div style="background:#fefce8; padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:#ca8a04;">' + (spec.storage_quantity || 0) + '</div><div style="font-size:11px; color:#64748b;">장비실</div></div>';
+    html += '<div style="background:#f8fafc; padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:#64748b;">' + (spec.spare_quantity || 0) + '</div><div style="font-size:11px; color:#64748b;">여유</div></div>';
+    html += '</div>';
+
+    // Spec info
+    html += '<div style="font-size:13px; color:#475569; margin-bottom:14px;">';
+    if (spec.model) html += '<strong>모델:</strong> ' + spec.model + '&nbsp;&nbsp;';
+    if (spec.capacity) html += '<strong>용량:</strong> ' + spec.capacity + '&nbsp;&nbsp;';
+    if (spec.owner === 'vendor') html += '<span class="badge badge-info">업체</span>';
+    else html += '<span class="badge badge-secondary">자사</span>';
+    html += '</div>';
+
+    // Usage (installed on which assets)
+    if (usage.usage && usage.usage.length > 0) {
+      html += '<h4 style="margin:12px 0 6px; font-size:14px;">설치 현황</h4>';
+      html += '<table style="width:100%; font-size:13px; border-collapse:collapse;"><thead><tr style="background:#f8fafc;"><th style="padding:4px 8px; text-align:left; border-bottom:1px solid #e2e8f0;">자산</th><th style="padding:4px 8px; text-align:right; border-bottom:1px solid #e2e8f0;">수량</th></tr></thead><tbody>';
+      usage.usage.forEach(function(u) {
+        html += '<tr><td style="padding:4px 8px; border-bottom:1px solid #f1f5f9;"><a href="/assets/' + u.asset_id + '">' + (u.management_number || u.model_name || 'ID:' + u.asset_id) + '</a></td><td style="padding:4px 8px; text-align:right; border-bottom:1px solid #f1f5f9;">' + u.count + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+
+    // History logs
+    var eventLabels = { incoming: '입고', outgoing: '반출', installed: '설치', removed: '분리', transfer: '이동', adjust: '조정' };
+    var eventColors = { incoming: '#16a34a', outgoing: '#dc2626', installed: '#2563eb', removed: '#ea580c', transfer: '#6b7280', adjust: '#6b7280' };
+    if (history.logs && history.logs.length > 0) {
+      html += '<h4 style="margin:14px 0 6px; font-size:14px;">변경 이력</h4>';
+      html += '<table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr style="background:#f8fafc;"><th style="padding:4px 6px; text-align:left; border-bottom:1px solid #e2e8f0;">이벤트</th><th style="padding:4px 6px; text-align:right; border-bottom:1px solid #e2e8f0;">수량</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid #e2e8f0;">자산</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid #e2e8f0;">비고</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid #e2e8f0;">일시</th></tr></thead><tbody>';
+      history.logs.forEach(function(log) {
+        var evLabel = eventLabels[log.event_type] || log.event_type;
+        var evColor = eventColors[log.event_type] || '#6b7280';
+        var qtyStr = log.quantity_change > 0 ? '<span style="color:#16a34a;">+' + log.quantity_change + '</span>' : log.quantity_change < 0 ? '<span style="color:#dc2626;">' + log.quantity_change + '</span>' : '0';
+        var dateStr = log.created_at ? log.created_at.replace('T', ' ').substring(0, 16) : '-';
+        html += '<tr>';
+        html += '<td style="padding:3px 6px; border-bottom:1px solid #f1f5f9;"><span style="color:' + evColor + '; font-weight:600;">' + evLabel + '</span></td>';
+        html += '<td style="padding:3px 6px; text-align:right; border-bottom:1px solid #f1f5f9;">' + qtyStr + '</td>';
+        html += '<td style="padding:3px 6px; border-bottom:1px solid #f1f5f9;">' + (log.asset_label || '-') + '</td>';
+        html += '<td style="padding:3px 6px; border-bottom:1px solid #f1f5f9; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="' + (log.notes || '') + '">' + (log.notes || '-') + '</td>';
+        html += '<td style="padding:3px 6px; border-bottom:1px solid #f1f5f9; white-space:nowrap;">' + dateStr + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+    } else {
+      html += '<p class="text-muted" style="margin-top:12px;">변경 이력이 없습니다.</p>';
+    }
+
+    // Link to module inventory page
+    html += '<div style="margin-top:16px; text-align:right;"><a href="/module-inventory?search=' + encodeURIComponent(code) + '" class="btn btn-sm btn-outline">부품현황에서 보기 &rarr;</a></div>';
+
+    content.innerHTML = html;
+  }).catch(function(err) {
+    content.innerHTML = '<p style="color:#ef4444;">오류: ' + err.message + '</p>';
+  });
+}
+</script>
+
+<%- include('../partials/footer', { extraJs }) %>

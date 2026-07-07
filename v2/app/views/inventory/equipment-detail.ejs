@@ -1,0 +1,336 @@
+<%- include('../partials/header', { title, currentPath, extraCss }) %>
+
+<div class="page-header">
+    <h1>장비 상세: <%= mgmt %></h1>
+    <div class="btn-group">
+        <a href="/assets/new?from_inventory=<%= encodeURIComponent(mgmt) %>" class="btn btn-success">자산 등록</a>
+        <a href="/inventory/new?mgmt=<%= encodeURIComponent(mgmt) %>" class="btn btn-primary">+ 새 사용 등록</a>
+        <a href="/inventory" class="btn btn-secondary">목록</a>
+    </div>
+</div>
+
+<!-- Current Status -->
+<div class="card">
+    <div class="card-header"><h2>현재 상태</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>관리번호</label>
+            <p><strong><%= latest.management_number %></strong></p>
+        </div>
+        <div class="form-group">
+            <label>자산번호</label>
+            <p><%= latest.asset_number || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>모델명</label>
+            <p><%= latest.model_name || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>상태</label>
+            <p>
+                <% if (latest.status === '입고') { %>
+                <span class="badge badge-secondary">입고</span>
+                <% } else if (latest.status === '사용중') { %>
+                <span class="badge badge-success">사용중</span>
+                <% } else if (latest.status === '반납완료') { %>
+                <span class="badge badge-warning">반납완료</span>
+                <% } %>
+            </p>
+        </div>
+        <div class="form-group">
+            <label>소유구분</label>
+            <p>
+                <% if (latest.ownership === 'vendor') { %>
+                <span class="badge badge-info">업체</span>
+                <% } else { %>
+                <span class="badge badge-secondary">자사</span>
+                <% } %>
+            </p>
+        </div>
+    </div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>사용자</label>
+            <p><%= latest.user_name || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>시험명</label>
+            <p><%= latest.test_name || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>상세시험명</label>
+            <p><%= latest.test_detail || '-' %></p>
+        </div>
+        <div class="form-group">
+            <label>위치</label>
+            <p><%= [latest.room, latest.rack, latest.unit].filter(Boolean).join(' / ') || '-' %></p>
+        </div>
+    </div>
+</div>
+
+<!-- Network & Credentials -->
+<div class="card">
+    <div class="card-header"><h2>네트워크 / 접속 정보</h2></div>
+    <%
+      const ipTypeLabelMap = {};
+      appConfig.ipTypes.forEach(t => { ipTypeLabelMap[t.value] = t.label; });
+      let ipEntries = [];
+      if (latest.ips_json) {
+        try {
+          JSON.parse(latest.ips_json).forEach(ip => {
+            ipEntries.push({ label: ipTypeLabelMap[ip.purpose] || ip.purpose, value: ip.ip });
+          });
+        } catch(e) {}
+      }
+      if (ipEntries.length === 0) {
+        if (latest.ip1) ipEntries.push({ label: 'Management', value: latest.ip1 });
+        if (latest.ip2) ipEntries.push({ label: 'Management', value: latest.ip2 });
+        if (latest.ip3) ipEntries.push({ label: 'Management', value: latest.ip3 });
+        if (latest.ip4) ipEntries.push({ label: 'Management', value: latest.ip4 });
+        if (latest.bmc) ipEntries.push({ label: 'BMC', value: latest.bmc });
+        if (latest.ib1) ipEntries.push({ label: 'InfiniBand', value: latest.ib1 });
+        if (latest.ib2) ipEntries.push({ label: 'InfiniBand', value: latest.ib2 });
+      }
+    %>
+    <% if (ipEntries.length > 0) { %>
+    <div class="form-row">
+        <% ipEntries.forEach(ip => { %>
+        <div class="form-group">
+            <label><%= ip.label %></label>
+            <p><%= ip.value %></p>
+        </div>
+        <% }) %>
+    </div>
+    <% } else { %>
+    <p class="text-muted">IP 정보가 없습니다.</p>
+    <% } %>
+    <%
+      const credTypeLabels = { root: 'root', bmc: 'BMC/IPMI', os: 'OS', etc: '기타' };
+      let credList = [];
+      if (latest.credentials_json) {
+        try { credList = JSON.parse(latest.credentials_json); } catch(e) {}
+      }
+      if (credList.length === 0) {
+        if (latest.credential_root) { const p = latest.credential_root.split('/'); credList.push({ type: 'root', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
+        if (latest.credential_etc1) { const p = latest.credential_etc1.split('/'); credList.push({ type: 'etc', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
+        if (latest.credential_etc2) { const p = latest.credential_etc2.split('/'); credList.push({ type: 'etc', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
+      }
+      // Handle old format {type, value} → {type, username, password}
+      credList = credList.map(c => {
+        if (c.value && !c.username) { const p = c.value.split('/'); return { type: c.type, username: (p[0]||'').trim(), password: (p[1]||'').trim() }; }
+        return c;
+      });
+    %>
+    <% if (credList.length > 0) { %>
+    <div class="form-row">
+        <% credList.forEach(c => { %>
+        <div class="form-group">
+            <label><%= credTypeLabels[c.type] || c.type %> 계정</label>
+            <p><code><%= c.username || '' %></code> / <code><%= c.password || '' %></code></p>
+        </div>
+        <% }) %>
+    </div>
+    <% } else { %>
+    <div class="form-row">
+        <div class="form-group"><label>계정 정보</label><p class="text-muted">-</p></div>
+    </div>
+    <% } %>
+</div>
+
+<!-- Hardware Specs -->
+<div class="card">
+    <div class="card-header"><h2>하드웨어 구성</h2></div>
+    <%
+    const typeLabelsMap = { cpu: 'CPU', memory: '메모리', disk: '디스크', network: 'NIC', raid: 'RAID', gpu: 'GPU', psu: 'PSU', cable: '케이블' };
+    let activeHw = [];
+    if (latest.hardware_json) {
+      try {
+        const parsed = JSON.parse(latest.hardware_json);
+        activeHw = parsed.filter(h => h.code || h.num > 0).map(h => ({
+          label: typeLabelsMap[h.type] || h.type,
+          code: h.code,
+          num: h.num
+        }));
+      } catch(e) {}
+    }
+    if (activeHw.length === 0) {
+      const hwItems = [
+        { label: 'CPU', code: latest.cpu_type, num: latest.cpu_num },
+        { label: '메모리1', code: latest.mem1_type, num: latest.mem1_num },
+        { label: '메모리2', code: latest.mem2_type, num: latest.mem2_num },
+        { label: '디스크1', code: latest.disk1_part, num: latest.disk1_num },
+        { label: '디스크2', code: latest.disk2_part, num: latest.disk2_num },
+        { label: '디스크3', code: latest.disk3_part, num: latest.disk3_num },
+        { label: '디스크4', code: latest.disk4_part, num: latest.disk4_num },
+        { label: 'NIC1', code: latest.nic1_type, num: latest.nic1_num },
+        { label: 'NIC2', code: latest.nic2_type, num: latest.nic2_num },
+        { label: 'NIC3', code: latest.nic3_type, num: latest.nic3_num },
+        { label: 'NIC4', code: latest.nic4_type, num: latest.nic4_num },
+        { label: 'RAID', code: latest.raid_type, num: latest.raid_num },
+        { label: 'GPU1', code: latest.gpu1_type, num: latest.gpu1_num },
+        { label: 'GPU2', code: latest.gpu2_type, num: latest.gpu2_num }
+      ];
+      activeHw = hwItems.filter(h => h.code && h.code !== '-' && h.num > 0);
+    }
+    const _computingModules = typeof computingModules !== 'undefined' ? computingModules : [];
+    %>
+    <% if (activeHw.length > 0) { %>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>타입 코드</th>
+                    <th>수량</th>
+                    <th>상세 스펙</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% activeHw.forEach(h => { %>
+                <tr>
+                    <td><strong><%= h.label %></strong></td>
+                    <td><code><%= h.code %></code></td>
+                    <td><%= h.num %></td>
+                    <td>
+                        <% const spec = componentSpecs[h.code]; %>
+                        <% if (spec) { %>
+                        <span class="badge badge-info"><%= spec.module_type %></span>
+                        <%= spec.manufacturer || '' %> <%= spec.model || '' %>
+                        <% if (spec.capacity) { %>(<%= spec.capacity %>)<% } %>
+                        <% if (spec.specification) { %><br><small class="text-muted"><%= spec.specification %></small><% } %>
+                        <% } else { %>
+                        <span class="text-muted">-</span>
+                        <% } %>
+                    </td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% } else if (_computingModules.length === 0) { %>
+    <p class="text-muted" style="padding:8px 0;">하드웨어 정보가 없습니다.</p>
+    <% } %>
+    <% if (_computingModules.length > 0) { %>
+    <% if (activeHw.length > 0) { %><hr style="margin:12px 0;"><% } %>
+    <h3 style="font-size:14px; margin-bottom:8px; color:#475569;">자산 등록 모듈 (자산매칭)</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr>
+                    <th>유형</th>
+                    <th>소유</th>
+                    <th>제조사</th>
+                    <th>모델</th>
+                    <th>용량</th>
+                    <th>수량</th>
+                    <th>부품코드</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% _computingModules.forEach(m => { %>
+                <tr>
+                    <td><span class="badge badge-info"><%= typeLabelsMap[m.module_type] || m.module_type %></span></td>
+                    <td><% if (m.owner === 'vendor') { %><span class="badge badge-warning">업체<%= m.owner_vendor_name ? ' ('+m.owner_vendor_name+')' : '' %></span><% } else { %><span class="badge badge-secondary">자사</span><% } %></td>
+                    <td><%= m.manufacturer || '-' %></td>
+                    <td><%= m.model || '-' %></td>
+                    <td><%= m.capacity || '-' %></td>
+                    <td><%= m.count || 1 %></td>
+                    <td><% if (m.specification) { %><a href="/module-inventory?search=<%= encodeURIComponent(m.specification) %>"><code><%= m.specification %></code></a><% } else { %>-<% } %></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+    <% } %>
+    <% if (latest.os) { %>
+    <div class="form-group" style="margin-top:8px;">
+        <label>OS</label>
+        <p><%= latest.os %></p>
+    </div>
+    <% } %>
+</div>
+
+<%- include('../partials/photo-section', { entityType: 'asset', entityId: linkedAsset ? linkedAsset.id : 0, photos: typeof detailPhotos !== 'undefined' ? detailPhotos : [], editable: true }) %>
+
+<!-- Usage History Timeline -->
+<div class="card">
+    <div class="card-header"><h2>사용 이력 타임라인</h2></div>
+    <div class="timeline">
+        <% history.forEach((h, idx) => { %>
+        <div class="timeline-item" style="border-left: 3px solid <%= h.status === '사용중' ? 'var(--success)' : h.status === '반납완료' ? 'var(--warning, orange)' : 'var(--text-light, #999)' %>; padding-left: 16px; margin-bottom: 16px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                <% if (h.status === '입고') { %>
+                <span class="badge badge-secondary">입고</span>
+                <% } else if (h.status === '사용중') { %>
+                <span class="badge badge-success">사용중</span>
+                <% } else if (h.status === '반납완료') { %>
+                <span class="badge badge-warning">반납완료</span>
+                <% } %>
+                <span class="text-muted" style="font-size:13px;">
+                    <% if (h.usage_date) { %>사용: <%= h.usage_date %><% } %>
+                    <% if (h.return_date) { %> / 반납: <%= h.return_date %><% } %>
+                </span>
+                <a href="/inventory/<%= h.id %>/edit" class="btn btn-sm btn-outline" style="margin-left:auto; font-size:11px;">수정</a>
+            </div>
+            <div style="font-size:13px;">
+                <% if (h.user_name) { %><strong><%= h.user_name %></strong><% } %>
+                <% if (h.test_name) { %> - <%= h.test_name %><% } %>
+                <% if (h.test_detail) { %> (<%= h.test_detail %>)<% } %>
+            </div>
+            <% if (h.room || h.rack) { %>
+            <div style="font-size:12px; color:var(--text-light);">
+                위치: <%= [h.room, h.rack, h.unit].filter(Boolean).join(' / ') %>
+            </div>
+            <% } %>
+            <% if (h.notes) { %>
+            <div style="font-size:12px; color:var(--text-light);"><%= h.notes %></div>
+            <% } %>
+        </div>
+        <% }) %>
+    </div>
+</div>
+
+<% const _mtLogs = typeof moduleTransferLogs !== 'undefined' ? moduleTransferLogs : []; %>
+<% if (_mtLogs.length > 0) { %>
+<div class="card">
+    <div class="card-header"><h2>컴퓨팅 모듈 이력</h2></div>
+    <div class="timeline">
+        <%
+        const eventLabels = { incoming: '입고', installed: '설치', removed: '분리', outgoing: '반출', adjust: '조정', fault_return_keep: '장애반납(보관)', fault_return_vendor_keep: '장애반납(업체보관)' };
+        const eventColors = { incoming: '#16a34a', installed: '#2563eb', removed: '#ea580c', outgoing: '#dc2626', adjust: '#6b7280', fault_return_keep: '#d97706', fault_return_vendor_keep: '#d97706' };
+        %>
+        <% _mtLogs.forEach(ml => { %>
+        <div class="timeline-item" style="border-left: 3px solid <%= eventColors[ml.event_type] || '#999' %>; padding-left: 16px; margin-bottom: 12px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                <span class="badge" style="background:<%= eventColors[ml.event_type] || '#6b7280' %>; color:#fff;"><%= eventLabels[ml.event_type] || ml.event_type %></span>
+                <span style="font-size:13px; color:#64748b;"><%= ml.created_at ? ml.created_at.replace('T', ' ').substring(0, 16) : '' %></span>
+            </div>
+            <div style="font-size:13px;">
+                <code><%= ml.item_code || '-' %></code>
+                <% if (ml.quantity_change > 0) { %>
+                <span style="color:#16a34a; font-weight:600;">+<%= ml.quantity_change %></span>
+                <% } else if (ml.quantity_change < 0) { %>
+                <span style="color:#dc2626; font-weight:600;"><%= ml.quantity_change %></span>
+                <% } %>
+                <% if (ml.from_asset_label && ml.to_asset_label) { %>
+                <span style="color:#64748b;">(<%= ml.from_asset_label %> → <%= ml.to_asset_label %>)</span>
+                <% } else if (ml.to_asset_label) { %>
+                <span style="color:#64748b;">(→ <%= ml.to_asset_label %>)</span>
+                <% } else if (ml.from_asset_label) { %>
+                <span style="color:#64748b;">(<%= ml.from_asset_label %> →)</span>
+                <% } %>
+            </div>
+            <% if (ml.notes) { %>
+            <div style="font-size:12px; color:#94a3b8; margin-top:2px;"><%= ml.notes %></div>
+            <% } %>
+        </div>
+        <% }) %>
+    </div>
+</div>
+<% } %>
+
+<style>
+.timeline { display: flex; flex-direction: column; }
+</style>
+
+<%- include('../partials/footer', { extraJs }) %>
