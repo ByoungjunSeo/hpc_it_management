@@ -11,13 +11,14 @@ const AssetCredential = require('../models/assetCredential');
 const ComputingModule = require('../models/computingModule');
 const Photo = require('../models/photo');
 const Vendor = require('../models/vendor');
+const AuditLog = require('../models/auditLog');
 const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const { pool } = require('../config/database');
 const { generateVendorManagementNumber } = require('../utils/inventoryHelpers');
 
-// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17) / 6c-B: 읽기 5EP(#1,9,11,12,16) 구현.
-// EUL 쓰기 6EP(#3,10,13,14,15,18)는 501 스텁 — B-4d-6c 후속 조각에서 구현.
+// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17) / 6c-B: 읽기 5EP(#1,9,11,12,16) / 6c-C1: 반납·삭제(#14,15) 구현.
+// 남은 스텁: #3(입고),#10(사용등록),#13(수정) = 6c-C2~4 / #18(migrate-psu) = 일회성, v2 불필요로 스텁 확정.
 const notImplemented = (req, res) => {
   res.status(501).json({ error: '미구현 - B-4d-6c 후속 조각' });
 };
@@ -443,10 +444,46 @@ router.get('/:id/edit', async (req, res, next) => {
 // EP#13: Update (EUL 쓰기) — 스텁
 router.post('/:id', requireMaintenance, notImplemented);
 
-// EP#14: Return 반납 (EUL append) — 스텁
-router.post('/:id/return', requireMaintenance, notImplemented);
+// EP#14: Return 반납 — 설계 §5: 6a markReturned가 returned 이벤트 append INSERT (UPDATE 아님)
+router.post('/:id/return', requireMaintenance, async (req, res) => {
+  try {
+    const returnDate = req.body.return_date || new Date().toISOString().split('T')[0];
+    // Get usage log to find management_number
+    const log = await EquipmentUsageLog.findById(req.params.id);
+    await EquipmentUsageLog.markReturned(req.params.id, returnDate);
 
-// EP#15: Delete (EUL 삭제) — 스텁
-router.post('/:id/delete', requireMaintenance, notImplemented);
+    // Update linked asset: status → inactive, clear rack placement
+    if (log && log.management_number) {
+      const asset = await Asset.findByManagementNumber(log.management_number);
+      if (asset) {
+        await Asset.markReturned(asset.id);
+        await AuditLog.log(req, {
+          action: 'update', targetType: 'asset', targetId: asset.id,
+          targetLabel: log.management_number,
+          details: { reason: '반납처리', previousStatus: asset.status, previousRackId: asset.rack_id }
+        });
+      }
+    }
+
+    await AuditLog.log(req, { action: 'update', targetType: 'equipment_usage', targetId: req.params.id, targetLabel: '반납처리' });
+    req.flash('success', '반납 처리가 완료되었습니다.');
+  } catch (err) {
+    req.flash('error', '반납 실패: ' + err.message);
+  }
+  res.redirect(req.body.returnTo || req.get('Referer') || '/inventory');
+});
+
+// EP#15: Delete — 설계 §5: DELETE 충실이식 (B-4d-2.5 트리거 제거로 가능)
+router.post('/:id/delete', requireMaintenance, async (req, res) => {
+  try {
+    await Photo.deleteByEntity('equipment_usage', parseInt(req.params.id));
+    await EquipmentUsageLog.delete(req.params.id);
+    await AuditLog.log(req, { action: 'delete', targetType: 'equipment_usage', targetId: req.params.id });
+    req.flash('success', '기록이 삭제되었습니다.');
+  } catch (err) {
+    req.flash('error', '삭제 실패: ' + err.message);
+  }
+  res.redirect(req.body.returnTo || req.get('Referer') || '/inventory');
+});
 
 module.exports = router;
