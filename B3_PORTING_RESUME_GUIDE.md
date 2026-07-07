@@ -350,16 +350,31 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 - B-4d-3: racks 10EP 이식(0777fe0) + power-control 스텁화(B-4d-3b, BUG-2 트랙, bde0854).
   BUG-5 재현결과: 조건부 잠복·원인규명완료·미룸.
 - B-4d-4: 모듈 4모델 확장(26메서드, 트랜잭션 3종). getUsageByCode 유보(EUL, B-4d-5/6).
+- B-4d-5: moduleInventory 16EP 이식(3300f61, §5 EUL동기화 제거·syncModulesToUsageLog 스텁) + BUG-1 수정(edc2b2d).
+- B-4d-6 (inventory + EUL 이벤트소싱, 완료):
+  - 설계 확정(6e1938d, B4D6_EUL_DESIGN.md): status↔event_type 매핑 + JSONB 3종 + 쓰기 하이브리드
+    (create=INSERT / 반납=append INSERT / update=UPDATE / delete=DELETE).
+  - 6a: EUL 모델 확장 — 읽기7+쓰기4, flatten(JSONB→v1 가상컬럼), STATUS_TO_EVENT (124d65e).
+  - 6b: 라우트 헬퍼 — mapHardware/Ips/CredsToCols, generateVendorManagementNumber async (7c2a00a).
+  - **6c: inventory 라우트 18EP 이식 완료 = 구현 17EP + 스텁확정 1EP(#18 migrate-psu, 일회성이라 v2 불필요)**:
+    - 6c-A(307e60e): 라우트 생성 + 무접촉 7EP(#2,4,5,6,7,8,17) + incoming-form 뷰 복사 + mount.
+    - 6c-B(c9d313f): 읽기 5EP(#1,9,11,12,16) + 뷰 3개 복사(index/form/equipment-detail).
+    - 6c-C1(c43dcfb): 반납#14·삭제#15. / 6c-C2(eb27887): 입고#3(재입고 reactivate, 다중노드, 모듈재고).
+    - 6c-C3(c857145): 사용등록#10(자동반납 + 자산동기화 200줄). / 6c-C4(e1d380b): 수정#13.
+  - 실증 완료: flatten 뱃지(읽기 목록/상세 status·개별컬럼 렌더) / append(수동반납#14·자동반납#10,
+    이전 in_use 보존 + returned 신규행) / incoming 매핑(#3, status='입고'→event_type) / UPDATE(#13,
+    행수 불변 내용정정) / DELETE(#15) / mapXxx→buildSnapshots JSONB 체인(#10 create·#13 update 양경로).
+  - 검증은 전부 __TEST_xxx__ 마커 격리 후 정리 — 운영 행수(assets 172/eul 1036 등) 사전=사후 확인됨.
 
 **B-4d 하위단계 분해 (확정 순서):**
-- B-4d-1(완료) → B-4d-2/3(assets/racks, 병렬가능) → B-4d-4(모듈모델) →
-  B-4d-5/6(moduleInventory/inventory, 병렬가능) → B-4d-7(discovery+§5, 최고위험) →
+- B-4d-1(완료) → B-4d-2/3(assets/racks, 완료) → B-4d-4(모듈모델, 완료) →
+  B-4d-5/6(moduleInventory/inventory, 완료) → **다음: B-4d-6d(뷰 4개 JSONB 평탄화 화면검증
+  — 뷰 파일은 6c에서 복사됨, 화면 필드 단위 v1↔v2 대조)** → B-4d-7(discovery+§5, 최고위험) →
   B-4d-8(fault-return 스텁 해제) → B-4d-9(기술부채 정리)
 
 **B-4d 후반 블로커/확인지점:**
-- EUL 이벤트소싱 매핑 (B-4d-5/6 선행 필수): v2 EUL 컬럼구조 상이
-  (event_type/JSONB, status·return_date·하드웨어컬럼 없음) + management_number당 다중행(최대18).
-  v1 상태전이 로직(markReturned/returnActiveByManagement/updateHardwareColumns) 매핑 설계 필요.
+- ~~EUL 이벤트소싱 매핑 (B-4d-5/6 선행 필수)~~ → **해소**: B-4d-6 설계·구현·실증 완료
+  (B4D6_EUL_DESIGN.md + 위 6a~6c 기록 참조).
 - audit 스키마 v1(before/after 2컬럼) ≠ v2(details 단일 JSONB) — 개수검증만 함, 내용 동등성 미검증.
 - 삭제 후 이력조회: v2 asset_id=NULL vs v1 management_number 텍스트 연결 → B-4d-6 확인.
 - BUG-5: assets 저장(blade_slot 클리어) ↔ racks 렌더(shelfU) 불일치 → B-4d-3(racks) 이식 후 합동수정.
