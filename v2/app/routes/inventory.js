@@ -16,10 +16,17 @@ const upload = require('../middleware/upload');
 const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const { pool } = require('../config/database');
-const { generateVendorManagementNumber } = require('../utils/inventoryHelpers');
+const IpAddress = require('../models/ipAddress');
+const {
+  generateVendorManagementNumber,
+  mapHardwareToCols,
+  mapIpsToCols,
+  mapCredsToCols,
+  normalizePurpose
+} = require('../utils/inventoryHelpers');
 
-// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17) / 6c-B: 읽기 5EP(#1,9,11,12,16) / 6c-C1: 반납·삭제(#14,15) / 6c-C2: 입고(#3) 구현.
-// 남은 스텁: #10(사용등록),#13(수정) = 6c-C3~4 / #18(migrate-psu) = 일회성, v2 불필요로 스텁 확정.
+// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17) / 6c-B: 읽기 5EP(#1,9,11,12,16) / 6c-C1: #14,15 / 6c-C2: #3 / 6c-C3: #10 구현.
+// 남은 스텁: #13(수정) = 6c-C4 / #18(migrate-psu) = 일회성, v2 불필요로 스텁 확정.
 const notImplemented = (req, res) => {
   res.status(501).json({ error: '미구현 - B-4d-6c 후속 조각' });
 };
@@ -620,8 +627,304 @@ router.get('/new', async (req, res, next) => {
   }
 });
 
-// EP#10: Create usage (EUL 쓰기 + 자산 동기화) — 스텁
-router.post('/', requireMaintenance, notImplemented);
+// EP#10: Create usage — 설계 §5: 이전 in_use 자동반납(returnActiveByManagement append) + 새 in_use INSERT
+router.post('/', requireMaintenance, async (req, res) => {
+  try {
+    const usageAssetType = req.body.usage_asset_type || '';
+    const moduleTypeValues = appConfig.moduleTypes.map(t => t.value);
+    const isModule = moduleTypeValues.includes(usageAssetType);
+
+    if (isModule) {
+      // Module usage registration
+      req.body.status = '사용중';
+      const id = await EquipmentUsageLog.create({
+        usage_date: req.body.usage_date || null,
+        management_number: req.body.management_number,
+        model_name: req.body.model_name || null,
+        ownership: req.body.ownership || 'company',
+        user_name: req.body.user_name || null,
+        test_name: req.body.test_name || null,
+        test_detail: req.body.test_detail || null,
+        room: req.body.room || null,
+        notes: req.body.notes || null,
+        status: '사용중'
+      });
+
+      // If target_asset_id is provided, create computing_module link
+      const targetAssetId = req.body.target_asset_id;
+      if (targetAssetId) {
+        await ComputingModule.create({
+          asset_id: parseInt(targetAssetId),
+          module_type: usageAssetType,
+          model: req.body.model_name || null,
+          manufacturer: null,
+          capacity: null,
+          count: 1,
+          specification: null,
+          slot_info: req.body.module_slot_info || null,
+          notes: req.body.management_number || null
+        });
+      }
+
+      // Recalculate module inventory in-use counts
+      await ModuleInventory.recalculateInUse();
+
+      // Log installed event
+      const usedItemCode = req.body.management_number;
+      if (usedItemCode) {
+        const targetAsset = targetAssetId ? await Asset.findById(parseInt(targetAssetId)) : null;
+        await ModuleInventoryLog.create({
+          item_code: usedItemCode,
+          event_type: 'installed',
+          asset_id: targetAssetId ? parseInt(targetAssetId) : null,
+          asset_label: targetAsset ? (targetAsset.management_number || targetAsset.asset_number || String(targetAssetId)) : null,
+          user_id: req.session.userId || null,
+          username: req.session.displayName || req.session.username || null,
+          notes: req.body.notes || null
+        });
+      }
+
+      await AuditLog.log(req, { action: 'create', targetType: 'module_usage', targetId: id, targetLabel: '부품사용등록: ' + (req.body.management_number || '') });
+    } else {
+      // Equipment usage registration
+      req.body.status = '사용중';
+      // Auto-return existing active usage for the same management_number
+      // ★ 설계 §5: returnActiveByManagement는 6a에서 returned 이벤트 append INSERT
+      const mgmt = req.body.management_number;
+      if (mgmt) {
+        const today = new Date().toISOString().split('T')[0];
+        await EquipmentUsageLog.returnActiveByManagement(mgmt, today);
+      }
+      // Map dynamic IP fields to DB columns (6b) — xxx_json은 6a buildSnapshots가 JSONB화
+      const ipCols = mapIpsToCols(req.body);
+      Object.assign(req.body, ipCols);
+      // Map dynamic hardware rows to JSON + legacy columns
+      const hwCols = mapHardwareToCols(req.body);
+      Object.assign(req.body, hwCols);
+      // Map dynamic credential rows to JSON + legacy columns
+      const credCols = mapCredsToCols(req.body);
+      Object.assign(req.body, credCols);
+      const id = await EquipmentUsageLog.create(req.body);
+
+      // Sync asset from usage registration (location, IPs, credentials, user, purpose)
+      if (mgmt) {
+        try {
+          const asset = await Asset.findByManagementNumber(mgmt);
+          if (asset) {
+            const roomName = req.body.room;
+            const rackName = req.body.rack;
+            const unitStr = req.body.unit;
+            let updateFields = {};
+
+            // Find room_id by name
+            if (roomName) {
+              const room = (await ServerRoom.findAll()).find(r => r.name === roomName);
+              if (room) updateFields.room_id = room.id;
+            }
+
+            // Infrastructure types (immersion_tank, cdu, chiller): room only, no rack placement
+            const infraAssetTypes = ['immersion_tank', 'cdu', 'chiller'];
+            if (infraAssetTypes.includes(asset.asset_type) || infraAssetTypes.includes(usageAssetType)) {
+              // Clear rack fields for infrastructure types
+              updateFields.rack_id = null;
+              updateFields.rack_unit_start = null;
+
+              // For immersion_tank: auto-create or update linked rack
+              if (asset.asset_type === 'immersion_tank' || usageAssetType === 'immersion_tank') {
+                const tankCapacityU = parseInt(req.body.tank_capacity_u) || 42;
+                const switchSlots = parseInt(req.body.switch_slots) || 0;
+                const roomId = updateFields.room_id || asset.room_id;
+
+                // Check if a linked rack already exists
+                let linkedRack = await Rack.findByLinkedAsset(asset.id);
+                if (linkedRack) {
+                  // Update existing linked rack
+                  await Rack.update(linkedRack.id, {
+                    name: linkedRack.name,
+                    room_id: roomId || linkedRack.room_id,
+                    total_units: tankCapacityU,
+                    row_position: linkedRack.row_position,
+                    col_position: linkedRack.col_position,
+                    description: linkedRack.description,
+                    rack_type: 'immersion',
+                    switch_slots: switchSlots
+                  });
+                } else if (roomId) {
+                  // Create new linked rack
+                  const tankName = (asset.model_name || asset.management_number || '액침탱크') + ' (탱크)';
+                  await Rack.create({
+                    room_id: roomId,
+                    name: tankName,
+                    total_units: tankCapacityU,
+                    row_position: 1,
+                    col_position: 1,
+                    description: '자산 ' + (asset.management_number || asset.id) + ' 연결 탱크',
+                    rack_type: 'immersion',
+                    linked_asset_id: asset.id,
+                    switch_slots: switchSlots
+                  });
+                }
+              }
+
+              // For CDU/chiller: link to parent infrastructure asset (tank or CDU)
+              const linkedInfraAssetId = parseInt(req.body.linked_infra_asset_id) || null;
+              if (linkedInfraAssetId && (asset.asset_type === 'cdu' || asset.asset_type === 'chiller' || usageAssetType === 'cdu' || usageAssetType === 'chiller')) {
+                updateFields.parent_asset_id = linkedInfraAssetId;
+                // Also sync room from parent if not set
+                if (!updateFields.room_id) {
+                  const parentInfra = await Asset.findById(linkedInfraAssetId);
+                  if (parentInfra && parentInfra.room_id) {
+                    updateFields.room_id = parentInfra.room_id;
+                  }
+                }
+              }
+            } else {
+            // Find rack_id by name (and room)
+            if (rackName) {
+              const allRacks = await Rack.findAll();
+              const rack = allRacks.find(r => r.name === rackName && (!updateFields.room_id || r.room_id === updateFields.room_id))
+                        || allRacks.find(r => r.name === rackName);
+              if (rack) {
+                updateFields.rack_id = rack.id;
+                if (!updateFields.room_id) updateFields.room_id = rack.room_id;
+              }
+            }
+
+            // Switch slot placement (for immersion tank switch slots)
+            const switchSlot = (req.body.switch_slot || '').trim();
+            if (switchSlot && switchSlot.match(/^SW\d+$/i)) {
+              // Place in switch slot instead of U position
+              updateFields.blade_slot = switchSlot;
+              updateFields.rack_unit_start = null;
+              updateFields.rack_unit_size = null;
+            } else {
+              // Parse unit string to slot
+              // Supports: "U5" "U5-U8" "U5H2" "U5H2-U8H1" "U5H2-U8" (H=hole 1~3)
+              if (unitStr) {
+                const startMatch = unitStr.match(/U(\d+)(?:H(\d))?/i);
+                if (startMatch) {
+                  const uStart = parseInt(startMatch[1]);
+                  const hStart = parseInt(startMatch[2]) || 1;
+                  const slotStart = (uStart - 1) * 3 + hStart;
+                  updateFields.rack_unit_start = slotStart;
+
+                  // Check for end range: second U marker
+                  const endMatch = unitStr.match(/U\d+(?:H\d)?[^U]*U(\d+)(?:H(\d))?/i);
+                  if (endMatch) {
+                    const uEnd = parseInt(endMatch[1]);
+                    const hEnd = parseInt(endMatch[2]) || 3;
+                    const slotEnd = (uEnd - 1) * 3 + hEnd;
+                    updateFields.rack_unit_size = slotEnd - slotStart + 1;
+                  }
+                }
+              }
+            }
+            } // end of else (non-infra types)
+
+            // Shelf size (in slots) - stored separately
+            const shelfSize = parseInt(req.body.shelf_size) || 0;
+
+            // Sync assigned_user and purpose
+            if (req.body.user_name) updateFields.assigned_user = req.body.user_name;
+            if (req.body.test_name) {
+              const tn = req.body.test_name.trim();
+              const td = (req.body.test_detail || '').trim();
+              if (td && td !== '-' && td !== tn) {
+                updateFields.purpose = tn + '(' + td + ')';
+              } else {
+                updateFields.purpose = tn;
+              }
+            }
+
+            if (Object.keys(updateFields).length > 0) {
+              await Asset.update(asset.id, { ...asset, ...updateFields });
+
+              // Save shelf_size
+              if (shelfSize >= 0) {
+                await pool.query('UPDATE assets SET shelf_size = $1 WHERE id = $2', [shelfSize, asset.id]);
+              }
+
+              // If this is a node, sync location to parent chassis
+              if (asset.parent_asset_id && (updateFields.room_id || updateFields.rack_id || updateFields.rack_unit_start)) {
+                const parentAsset = await Asset.findById(asset.parent_asset_id);
+                if (parentAsset) {
+                  const parentUpdate = { ...parentAsset };
+                  if (updateFields.room_id) parentUpdate.room_id = updateFields.room_id;
+                  if (updateFields.rack_id) parentUpdate.rack_id = updateFields.rack_id;
+                  if (updateFields.rack_unit_start) parentUpdate.rack_unit_start = updateFields.rack_unit_start;
+                  if (updateFields.rack_unit_size) parentUpdate.rack_unit_size = updateFields.rack_unit_size;
+                  await Asset.update(parentAsset.id, parentUpdate);
+                }
+              }
+            }
+
+            // Sync IPs → asset_ips table
+            const purposes = req.body['ip_purposes[]'] || req.body.ip_purposes || [];
+            const ipVals = req.body['ip_values[]'] || req.body.ip_values || [];
+            const ipIfaceTypes = req.body['ip_iface_types[]'] || req.body.ip_iface_types || [];
+            const ipSpeeds = req.body['ip_speeds[]'] || req.body.ip_speeds || [];
+            const pArr = Array.isArray(purposes) ? purposes : [purposes];
+            const vArr = Array.isArray(ipVals) ? ipVals : [ipVals];
+            const ifArr = Array.isArray(ipIfaceTypes) ? ipIfaceTypes : [ipIfaceTypes];
+            const spArr = Array.isArray(ipSpeeds) ? ipSpeeds : [ipSpeeds];
+            const assetIps = [];
+            for (let i = 0; i < pArr.length; i++) {
+              const purpose = normalizePurpose(pArr[i]);
+              const addr = (vArr[i] || '').trim();
+              if (!addr) continue;
+              let ipType = purpose;
+              let desc = '';
+              if (!['management', 'bmc', 'ib', 'data', 'os', 'other'].includes(ipType)) {
+                desc = purpose; // 커스텀 용도를 설명에 보존
+                ipType = 'other';
+              }
+              assetIps.push({ ip_address: addr, ip_type: ipType, description: desc, interface_type: (ifArr[i] || '').trim(), speed: (spArr[i] || '').trim() });
+            }
+            if (assetIps.length > 0) {
+              await AssetIp.deleteByAsset(asset.id);
+              await AssetIp.bulkCreate(asset.id, assetIps);
+              await IpAddress.syncAssetIps(asset.id, assetIps.map(ip => ip.ip_address));
+            }
+
+            // Sync credentials → asset_credentials table
+            const credTypes = req.body['cred_types[]'] || req.body.cred_types || [];
+            const credUsers = req.body['cred_usernames[]'] || req.body.cred_usernames || [];
+            const credPwds = req.body['cred_passwords[]'] || req.body.cred_passwords || [];
+            const ctArr = Array.isArray(credTypes) ? credTypes : [credTypes];
+            const cuArr = Array.isArray(credUsers) ? credUsers : [credUsers];
+            const cpArr = Array.isArray(credPwds) ? credPwds : [credPwds];
+            const assetCreds = [];
+            for (let i = 0; i < ctArr.length; i++) {
+              const cType = (ctArr[i] || '').trim();
+              const username = (cuArr[i] || '').trim();
+              const password = (cpArr[i] || '').trim();
+              if (!cType || !username) continue;
+              let credType = 'root';
+              if (cType === 'root') credType = 'root';
+              else if (cType === 'bmc') credType = 'bmc';
+              else credType = 'user';
+              assetCreds.push({ username, password, credential_type: credType, description: cType });
+            }
+            if (assetCreds.length > 0) {
+              await AssetCredential.deleteByAsset(asset.id);
+              await AssetCredential.bulkCreate(asset.id, assetCreds);
+            }
+          }
+        } catch (syncErr) {
+          console.error('자산 동기화 오류:', syncErr);
+        }
+      }
+
+      await AuditLog.log(req, { action: 'create', targetType: 'equipment_usage', targetId: id, targetLabel: '사용등록: ' + (req.body.management_number || '') });
+    }
+
+    req.flash('success', '사용 등록이 완료되었습니다.');
+    res.redirect(req.body.returnTo || '/inventory');
+  } catch (err) {
+    req.flash('error', '등록 실패: ' + err.message);
+    res.redirect('/inventory/new');
+  }
+});
 
 // EP#11: Equipment detail by management number (EUL 이력 시퀀스)
 router.get('/equipment/:mgmt', async (req, res, next) => {
