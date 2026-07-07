@@ -25,8 +25,8 @@ const {
   normalizePurpose
 } = require('../utils/inventoryHelpers');
 
-// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17) / 6c-B: 읽기 5EP(#1,9,11,12,16) / 6c-C1: #14,15 / 6c-C2: #3 / 6c-C3: #10 구현.
-// 남은 스텁: #13(수정) = 6c-C4 / #18(migrate-psu) = 일회성, v2 불필요로 스텁 확정.
+// B-4d-6c 이식 완료: 무접촉 7EP(#2,4,5,6,7,8,17) + 읽기 5EP(#1,9,11,12,16) + 쓰기 5EP(#3,10,13,14,15) = 17EP 구현.
+// #18(migrate-psu)만 501 스텁 확정 — v1 일회성 마이그레이션, v2 불필요 (설계 확정).
 const notImplemented = (req, res) => {
   res.status(501).json({ error: '미구현 - B-4d-6c 후속 조각' });
 };
@@ -1041,8 +1041,145 @@ router.get('/:id/edit', async (req, res, next) => {
   }
 });
 
-// EP#13: Update (EUL 쓰기) — 스텁
-router.post('/:id', requireMaintenance, notImplemented);
+// EP#13: Update — 설계 §5: 내용정정이므로 6a EUL.update = UPDATE (append 아님)
+router.post('/:id', requireMaintenance, async (req, res) => {
+  try {
+    // Map dynamic IP fields to DB columns (6b) — xxx_json은 6a buildSnapshots가 JSONB화
+    const ipCols = mapIpsToCols(req.body);
+    Object.assign(req.body, ipCols);
+    // Map dynamic hardware rows to JSON + legacy columns
+    const hwCols = mapHardwareToCols(req.body);
+    Object.assign(req.body, hwCols);
+    // Map dynamic credential rows to JSON + legacy columns
+    const credCols = mapCredsToCols(req.body);
+    Object.assign(req.body, credCols);
+    await EquipmentUsageLog.update(req.params.id, req.body);
+
+    // Sync switch slot and location changes back to asset
+    const log = await EquipmentUsageLog.findById(req.params.id);
+    if (log && log.management_number) {
+      const asset = await Asset.findByManagementNumber(log.management_number);
+      if (asset) {
+        const updateFields = {};
+
+        // Sync room
+        const roomName = req.body.room || '';
+        if (roomName) {
+          const rooms = await ServerRoom.findAll();
+          const room = rooms.find(r => r.name === roomName);
+          if (room) updateFields.room_id = room.id;
+        }
+
+        // Sync rack
+        const rackName = req.body.rack || '';
+        if (rackName) {
+          const allRacks = await Rack.findAll();
+          const rack = allRacks.find(r => r.name === rackName && (!updateFields.room_id || r.room_id === updateFields.room_id))
+                    || allRacks.find(r => r.name === rackName);
+          if (rack) {
+            updateFields.rack_id = rack.id;
+            if (!updateFields.room_id) updateFields.room_id = rack.room_id;
+          }
+        }
+
+        // Switch slot placement
+        const switchSlot = (req.body.switch_slot || '').trim();
+        if (switchSlot && switchSlot.match(/^SW\d+$/i)) {
+          updateFields.blade_slot = switchSlot;
+          updateFields.rack_unit_start = null;
+          updateFields.rack_unit_size = null;
+        } else {
+          // Parse unit string to slot
+          const unitStr = req.body.unit || '';
+          if (unitStr) {
+            const startMatch = unitStr.match(/U(\d+)(?:H(\d))?/i);
+            if (startMatch) {
+              const uStart = parseInt(startMatch[1]);
+              const hStart = parseInt(startMatch[2]) || 1;
+              updateFields.rack_unit_start = (uStart - 1) * 3 + hStart;
+              const endMatch = unitStr.match(/U\d+(?:H\d)?[^U]*U(\d+)(?:H(\d))?/i);
+              if (endMatch) {
+                const uEnd = parseInt(endMatch[1]);
+                const hEnd = parseInt(endMatch[2]) || 3;
+                updateFields.rack_unit_size = (uEnd - 1) * 3 + hEnd - updateFields.rack_unit_start + 1;
+              }
+            }
+          }
+          // Clear blade_slot if switching from SW slot to U position
+          if (asset.blade_slot && /^SW\d+$/i.test(asset.blade_slot)) {
+            updateFields.blade_slot = null;
+          }
+        }
+
+        // Sync user and purpose
+        if (req.body.user_name) updateFields.assigned_user = req.body.user_name;
+        if (req.body.test_name) {
+          const tn = req.body.test_name.trim();
+          const td = (req.body.test_detail || '').trim();
+          updateFields.purpose = (td && td !== '-' && td !== tn) ? tn + '(' + td + ')' : tn;
+        }
+
+        if (Object.keys(updateFields).length > 0) {
+          await Asset.update(asset.id, { ...asset, ...updateFields });
+        }
+
+        // Sync IPs → asset_ips table (v1 #13: normalizePurpose 없이, 빈 폼이면 전체 삭제 = 교체 시맨틱)
+        const purposes = req.body['ip_purposes[]'] || req.body.ip_purposes || [];
+        const ipVals = req.body['ip_values[]'] || req.body.ip_values || [];
+        const ipIfaceTypes = req.body['ip_iface_types[]'] || req.body.ip_iface_types || [];
+        const ipSpeeds = req.body['ip_speeds[]'] || req.body.ip_speeds || [];
+        const pArr = Array.isArray(purposes) ? purposes : [purposes];
+        const vArr = Array.isArray(ipVals) ? ipVals : [ipVals];
+        const ifArr = Array.isArray(ipIfaceTypes) ? ipIfaceTypes : [ipIfaceTypes];
+        const spArr = Array.isArray(ipSpeeds) ? ipSpeeds : [ipSpeeds];
+        const assetIps = [];
+        for (let i = 0; i < pArr.length; i++) {
+          const addr = (vArr[i] || '').trim();
+          if (!addr) continue;
+          assetIps.push({
+            ip_type: pArr[i] || 'management',
+            ip_address: addr,
+            interface_type: ifArr[i] || '',
+            speed: spArr[i] || ''
+          });
+        }
+        await AssetIp.deleteByAsset(asset.id);
+        if (assetIps.length > 0) {
+          await AssetIp.bulkCreate(asset.id, assetIps);
+        }
+
+        // Sync credentials → asset_credentials table
+        const credTypes = req.body['cred_types[]'] || req.body.cred_types || [];
+        const credUsers = req.body['cred_usernames[]'] || req.body.cred_usernames || [];
+        const credPasses = req.body['cred_passwords[]'] || req.body.cred_passwords || [];
+        const ctArr = Array.isArray(credTypes) ? credTypes : [credTypes];
+        const cuArr = Array.isArray(credUsers) ? credUsers : [credUsers];
+        const cpArr = Array.isArray(credPasses) ? credPasses : [credPasses];
+        const assetCreds = [];
+        for (let i = 0; i < ctArr.length; i++) {
+          if (!cuArr[i]) continue;
+          assetCreds.push({
+            credential_type: ctArr[i] || 'os',
+            username: cuArr[i],
+            password: cpArr[i] || ''
+          });
+        }
+        await AssetCredential.deleteByAsset(asset.id);
+        if (assetCreds.length > 0) {
+          await AssetCredential.bulkCreate(asset.id, assetCreds);
+        }
+      }
+    }
+
+    await AuditLog.log(req, { action: 'update', targetType: 'equipment_usage', targetId: req.params.id, targetLabel: req.body.management_number || '' });
+    req.flash('success', '수정이 완료되었습니다.');
+    const returnTo = req.body.returnTo;
+    res.redirect(returnTo || '/inventory');
+  } catch (err) {
+    req.flash('error', '수정 실패: ' + err.message);
+    res.redirect('/inventory/' + req.params.id + '/edit');
+  }
+});
 
 // EP#14: Return 반납 — 설계 §5: 6a markReturned가 returned 이벤트 append INSERT (UPDATE 아님)
 router.post('/:id/return', requireMaintenance, async (req, res) => {
