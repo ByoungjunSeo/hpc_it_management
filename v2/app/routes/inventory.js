@@ -12,13 +12,14 @@ const ComputingModule = require('../models/computingModule');
 const Photo = require('../models/photo');
 const Vendor = require('../models/vendor');
 const AuditLog = require('../models/auditLog');
+const upload = require('../middleware/upload');
 const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const { pool } = require('../config/database');
 const { generateVendorManagementNumber } = require('../utils/inventoryHelpers');
 
-// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17) / 6c-B: 읽기 5EP(#1,9,11,12,16) / 6c-C1: 반납·삭제(#14,15) 구현.
-// 남은 스텁: #3(입고),#10(사용등록),#13(수정) = 6c-C2~4 / #18(migrate-psu) = 일회성, v2 불필요로 스텁 확정.
+// B-4d-6c-A: 무접촉 7EP(#2,4,5,6,7,8,17) / 6c-B: 읽기 5EP(#1,9,11,12,16) / 6c-C1: 반납·삭제(#14,15) / 6c-C2: 입고(#3) 구현.
+// 남은 스텁: #10(사용등록),#13(수정) = 6c-C3~4 / #18(migrate-psu) = 일회성, v2 불필요로 스텁 확정.
 const notImplemented = (req, res) => {
   res.status(501).json({ error: '미구현 - B-4d-6c 후속 조각' });
 };
@@ -112,8 +113,304 @@ router.get('/incoming', async (req, res, next) => {
   }
 });
 
-// EP#3: POST /incoming - create incoming record (EUL 쓰기) — 스텁
-router.post('/incoming', requireMaintenance, notImplemented);
+// EP#3: POST /incoming - create incoming record
+// status='입고' → 6a EUL.create가 STATUS_TO_EVENT로 event_type='incoming' 매핑
+router.post('/incoming', requireMaintenance, upload.array('photos', 10), async (req, res) => {
+  try {
+    const assetType = req.body.asset_type;
+    const moduleTypeValues = appConfig.moduleTypes.map(t => t.value);
+    const isModule = moduleTypeValues.includes(assetType);
+    const today = new Date().toISOString().split('T')[0];
+    let baseMgmt;
+    let itemCode;
+
+    // Handle new vendor creation
+    let vendorId = req.body.vendor_id || null;
+    if (vendorId === '__new__' && req.body.new_vendor_name) {
+      vendorId = await Vendor.create({ vendor_name: req.body.new_vendor_name });
+    } else if (vendorId === '__new__') {
+      vendorId = null;
+    }
+
+    if (isModule) {
+      // Module incoming: upsert into module_inventory
+      itemCode = (req.body.management_number || '').trim();
+      const quantity = parseInt(req.body.quantity) || 1;
+
+      // 업체 부품인데 부품코드가 비어있으면 자동 생성
+      if (!itemCode && req.body.ownership === 'vendor' && vendorId) {
+        const vendor = await Vendor.findById(vendorId);
+        if (vendor) {
+          const typeLabels = { cpu: 'CPU', memory: '메모리', disk: '스토리지', network: '네트워크', raid: 'RAID', gpu: 'GPU', cable: '케이블', psu: 'PSU' };
+          const typeName = typeLabels[assetType] || assetType;
+          const prefix = vendor.vendor_name + '-' + typeName + '-';
+          const oldPrefix = vendor.vendor_name + '-부품-' + typeName + '-';
+          const { rows } = await pool.query(
+            'SELECT item_code FROM module_inventory WHERE item_code ILIKE $1 OR item_code ILIKE $2',
+            [prefix + '%', oldPrefix + '%']
+          );
+          let maxNum = 0;
+          for (const row of rows) {
+            const suffix = row.item_code.startsWith(oldPrefix) ? oldPrefix : prefix;
+            const num = parseInt(row.item_code.substring(suffix.length));
+            if (!isNaN(num) && num > maxNum) maxNum = num;
+          }
+          itemCode = prefix + String(maxNum + 1).padStart(3, '0');
+        }
+      }
+      const incomingAssetNumber = req.body.asset_number || null;
+
+      // Check if existing
+      const existing = await ModuleInventory.findByCode(itemCode);
+      const beforeTotal = existing ? existing.total_quantity : 0;
+      const beforeSpare = existing ? existing.spare_quantity : 0;
+
+      const moduleOwner = req.body.ownership || 'company';
+      const moduleVendorId = vendorId || null;
+
+      if (existing) {
+        // Increase total and spare quantities
+        await ModuleInventory.upsert({
+          module_type: assetType,
+          item_code: itemCode,
+          label: existing.label,
+          manufacturer: req.body.manufacturer || existing.manufacturer,
+          model: req.body.model_name || existing.model,
+          capacity: req.body.capacity || existing.capacity,
+          specification: req.body.specification || existing.specification,
+          total_quantity: existing.total_quantity + quantity,
+          in_use_quantity: existing.in_use_quantity,
+          spare_quantity: existing.spare_quantity + quantity,
+          storage_quantity: existing.storage_quantity + quantity,
+          asset_number: incomingAssetNumber,
+          owner: moduleOwner,
+          owner_vendor_id: moduleVendorId
+        });
+      } else {
+        // New module inventory entry
+        await ModuleInventory.upsert({
+          module_type: assetType,
+          item_code: itemCode,
+          label: req.body.model_name || itemCode,
+          manufacturer: req.body.manufacturer || null,
+          model: req.body.model_name || null,
+          capacity: req.body.capacity || null,
+          specification: req.body.specification || null,
+          total_quantity: quantity,
+          in_use_quantity: 0,
+          spare_quantity: quantity,
+          storage_quantity: quantity,
+          asset_number: incomingAssetNumber,
+          owner: moduleOwner,
+          owner_vendor_id: moduleVendorId
+        });
+      }
+
+      // Log incoming event
+      const afterTotal = beforeTotal + quantity;
+      const afterSpare = beforeSpare + quantity;
+      await ModuleInventoryLog.create({
+        item_code: itemCode,
+        event_type: 'incoming',
+        quantity_change: quantity,
+        before_total: beforeTotal,
+        after_total: afterTotal,
+        before_spare: beforeSpare,
+        after_spare: afterSpare,
+        asset_number: incomingAssetNumber,
+        user_id: req.session.userId || null,
+        username: req.session.displayName || req.session.username || null,
+        notes: req.body.notes || null
+      });
+
+      // Create incoming usage log
+      await EquipmentUsageLog.create({
+        usage_date: req.body.incoming_date || today,
+        management_number: itemCode,
+        model_name: req.body.model_name || null,
+        ownership: req.body.ownership || 'company',
+        status: '입고',
+        notes: req.body.notes || null
+      });
+
+      await AuditLog.log(req, { action: 'create', targetType: 'module_incoming', targetId: itemCode, targetLabel: '부품입고: ' + itemCode });
+    } else {
+      // Equipment incoming: create asset record(s)
+      const assetNumber = req.body.asset_number || null;
+      const nodeCount = parseInt(req.body.node_count) || 1;
+      const uSize = parseInt(req.body.u_size) || 1;
+      const rackUnitSize = uSize * 3;
+
+      // Auto-generate management_number for vendor equipment
+      baseMgmt = req.body.management_number;
+      if (req.body.ownership === 'vendor' && !baseMgmt) {
+        let vendorName = 'VND';
+        if (req.body.new_vendor_name && req.body.new_vendor_name.trim()) {
+          vendorName = req.body.new_vendor_name.trim();
+        } else if (vendorId) {
+          const v = await Vendor.findById(vendorId);
+          if (v) vendorName = v.vendor_name;
+        }
+        baseMgmt = await generateVendorManagementNumber(vendorName);
+      }
+
+      // Check if an existing asset with this management_number already exists (re-incoming)
+      const existingAsset = baseMgmt ? await Asset.findByManagementNumber(baseMgmt) : null;
+
+      if (existingAsset) {
+        // Re-incoming: reactivate existing asset (keep computing modules intact)
+        await Asset.reactivate(existingAsset.id);
+        // Update rack_unit_size from incoming U size
+        if (rackUnitSize > 0) {
+          await pool.query('UPDATE assets SET rack_unit_size = $1 WHERE id = $2', [rackUnitSize, existingAsset.id]);
+        }
+
+        await EquipmentUsageLog.create({
+          usage_date: req.body.incoming_date || today,
+          management_number: baseMgmt,
+          asset_number: assetNumber || existingAsset.asset_number,
+          model_name: req.body.model_name || existingAsset.model_name || null,
+          ownership: req.body.ownership || existingAsset.ownership || 'company',
+          status: '입고',
+          notes: (req.body.notes || '') + ' (재입고)'
+        });
+
+        await AuditLog.log(req, { action: 'update', targetType: 'asset_incoming', targetId: existingAsset.id, targetLabel: '재입고: ' + baseMgmt });
+      } else if (nodeCount > 1) {
+        // Multi-node blade server:
+        // 1. Create chassis (parent) asset with base management number
+        const chassisId = await Asset.create({
+          asset_number: assetNumber,
+          management_number: baseMgmt,
+          asset_type: assetType,
+          ownership: req.body.ownership || 'company',
+          vendor_id: vendorId,
+          model_name: req.body.model_name || null,
+          manufacturer: req.body.manufacturer || null,
+          serial_number: req.body.serial_number || null,
+          status: req.body.status || 'active',
+          purchase_date: req.body.purchase_date || null,
+          warranty_end: req.body.warranty_end || null,
+          rack_unit_size: rackUnitSize,
+          notes: (req.body.notes || '') + (req.body.notes ? ' ' : '') + '(' + nodeCount + '노드 섀시)'
+        });
+
+        await EquipmentUsageLog.create({
+          usage_date: req.body.incoming_date || today,
+          management_number: baseMgmt,
+          asset_number: assetNumber,
+          model_name: req.body.model_name || null,
+          ownership: req.body.ownership || 'company',
+          status: '입고',
+          notes: nodeCount + '노드 섀시 입고'
+        });
+
+        // 2. Create N node assets as children of the chassis
+        for (let i = 1; i <= nodeCount; i++) {
+          const nodeMgmt = baseMgmt + '-N' + i;
+
+          await Asset.create({
+            management_number: nodeMgmt,
+            asset_type: assetType,
+            ownership: req.body.ownership || 'company',
+            vendor_id: vendorId,
+            model_name: req.body.model_name || null,
+            manufacturer: req.body.manufacturer || null,
+            serial_number: null,
+            status: req.body.status || 'active',
+            purchase_date: req.body.purchase_date || null,
+            warranty_end: req.body.warranty_end || null,
+            parent_asset_id: chassisId,
+            notes: req.body.notes || null
+          });
+
+          await EquipmentUsageLog.create({
+            usage_date: req.body.incoming_date || today,
+            management_number: nodeMgmt,
+            model_name: req.body.model_name || null,
+            ownership: req.body.ownership || 'company',
+            status: '입고',
+            notes: baseMgmt + ' 섀시의 노드 ' + i
+          });
+        }
+
+        await AuditLog.log(req, { action: 'create', targetType: 'asset_incoming', targetId: chassisId, targetLabel: '장비입고(다중노드): ' + baseMgmt + ' (' + nodeCount + '노드)' });
+      } else {
+        // Single asset (existing behavior)
+        const assetId = await Asset.create({
+          asset_number: assetNumber,
+          management_number: baseMgmt,
+          asset_type: assetType,
+          ownership: req.body.ownership || 'company',
+          vendor_id: vendorId,
+          model_name: req.body.model_name || null,
+          manufacturer: req.body.manufacturer || null,
+          serial_number: req.body.serial_number || null,
+          status: req.body.status || 'active',
+          purchase_date: req.body.purchase_date || null,
+          warranty_end: req.body.warranty_end || null,
+          rack_unit_size: rackUnitSize,
+          notes: req.body.notes || null
+        });
+
+        await EquipmentUsageLog.create({
+          usage_date: req.body.incoming_date || today,
+          management_number: baseMgmt,
+          asset_number: assetNumber,
+          model_name: req.body.model_name || null,
+          ownership: req.body.ownership || 'company',
+          status: '입고',
+          notes: req.body.notes || null
+        });
+
+        await AuditLog.log(req, { action: 'create', targetType: 'asset_incoming', targetId: assetId, targetLabel: '장비입고: ' + (req.body.management_number || '') });
+      }
+    }
+
+    // Save uploaded photos
+    if (req.files && req.files.length > 0) {
+      const uploadedBy = req.session.displayName || req.session.username || null;
+      const baseMgmtForPhoto = baseMgmt !== undefined ? baseMgmt : req.body.management_number;
+      if (!isModule && baseMgmtForPhoto) {
+        const photoAsset = await Asset.findByManagementNumber(baseMgmtForPhoto);
+        if (photoAsset) {
+          await Photo.bulkCreate('asset', photoAsset.id, req.files, uploadedBy);
+        }
+      } else if (isModule) {
+        // For modules, attach to first asset that uses this item_code, or store as module photo
+        const itemCodeForPhoto = itemCode !== undefined ? itemCode : req.body.management_number;
+        const { rows: moduleAssetRows } = await pool.query(
+          'SELECT asset_id FROM computing_modules WHERE specification = $1 LIMIT 1',
+          [itemCodeForPhoto]
+        );
+        if (moduleAssetRows[0]) {
+          await Photo.bulkCreate('asset', moduleAssetRows[0].asset_id, req.files, uploadedBy);
+        } else {
+          // No asset linked yet — store as module photo with item_code as entity_id
+          await Photo.bulkCreate('module', 0, req.files, uploadedBy);
+        }
+      }
+    }
+
+    const nodeCount = parseInt(req.body.node_count) || 1;
+    let incomingAssetLink = '';
+    const baseMgmtFinal = baseMgmt !== undefined ? baseMgmt : req.body.management_number;
+    if (!isModule && baseMgmtFinal) {
+      const incomingAsset = await Asset.findByManagementNumber(baseMgmtFinal);
+      if (incomingAsset) {
+        incomingAssetLink = ' <a href="/assets/' + incomingAsset.id + '">자산 상세 &rarr;</a>';
+      }
+    }
+    const flashMsg = nodeCount > 1 && !isModule
+      ? '입고 등록이 완료되었습니다. (' + nodeCount + '개 노드 생성)' + incomingAssetLink
+      : '입고 등록이 완료되었습니다.' + incomingAssetLink;
+    req.flash('success', flashMsg);
+    res.redirect(req.body.returnTo || '/inventory');
+  } catch (err) {
+    req.flash('error', '입고 등록 실패: ' + err.message);
+    res.redirect('/inventory/incoming');
+  }
+});
 
 // EP#4: API: get next vendor management number (for preview)
 router.get('/api/vendor-mgmt-number', async (req, res) => {
