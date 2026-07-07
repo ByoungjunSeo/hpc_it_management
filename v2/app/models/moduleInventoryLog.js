@@ -1,9 +1,10 @@
 const { pool } = require('../config/database');
+const { formatTimestamp } = require('../utils/dateFix');
 
-// pg returns timestamp as Date object; v1 views expect ISO string (.replace('T',' '))
+// pg returns timestamp as Date object; v1 views expect local-time string (UTC ISO는 9h 밀림)
 function fixTimestamps(row) {
   if (row && row.created_at instanceof Date) {
-    row.created_at = row.created_at.toISOString();
+    row.created_at = formatTimestamp(row.created_at);
   }
   return row;
 }

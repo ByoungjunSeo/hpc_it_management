@@ -2,9 +2,11 @@ const { pool } = require('../config/database');
 const fs = require('fs');
 const path = require('path');
 
+const { formatTimestamp } = require('../utils/dateFix');
+
 function fixDates(row) {
   if (!row) return row;
-  if (row.uploaded_at instanceof Date) row.uploaded_at = row.uploaded_at.toISOString();
+  if (row.uploaded_at instanceof Date) row.uploaded_at = formatTimestamp(row.uploaded_at);
   return row;
 }
 

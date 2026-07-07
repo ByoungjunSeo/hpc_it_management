@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { formatTimestamp } = require('../utils/dateFix');
 
 const AuditLog = {
   async log(req, { action, targetType, targetId, targetLabel, details }) {
@@ -55,9 +56,9 @@ const AuditLog = {
 
     sql += ' ORDER BY created_at DESC LIMIT 500';
     const { rows } = await pool.query(sql, params);
-    // pg returns Date objects; views expect ISO string
+    // pg returns Date objects; views expect local-time string (UTC ISO는 9h 밀림)
     rows.forEach(r => {
-      if (r.created_at instanceof Date) r.created_at = r.created_at.toISOString();
+      if (r.created_at instanceof Date) r.created_at = formatTimestamp(r.created_at);
     });
     return rows;
   },
