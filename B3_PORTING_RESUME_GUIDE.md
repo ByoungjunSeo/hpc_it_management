@@ -327,6 +327,11 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
    - v1에 audit가 없던 동작도 v2에서 보강(의도된 개선 — v1과 다른 것은 정상).
    - 단 BUG_TRACKING이 아니라 "공통 개선 원칙"으로 분류. 검증 시 audit 차이는 의도된 것.
    - 확인: serverRooms·vendorIntake 모두 audit 있음(일관성 OK).
+3-1. **개선 트랙 후보 (B-4d-8/9 등록, 미착수)**:
+   - mi_log의 before/after_total이 recalc 전 산술값으로 기록되는 v1 quirk(충실이식 상태) —
+     post-recalc 값 기록으로 개선 여지.
+   - apply-asset·fault류(fault-repair/module-action/fault-return)의 비트랜잭션 순차 실행
+     (v2 모델 pool 개별 연결) — 원자성 강화(클라이언트 전달 리팩토링) 여지.
 3. **타임스탬프 KST 표시 (v1 UTC quirk 미계승, 6d 확정)**:
    - v1은 SQLite CURRENT_TIMESTAMP(UTC)를 그대로 표시 — 신규 기록 시각이 벽시계보다 9시간 이전으로 보임.
    - v2는 utils/dateFix.js formatTimestamp(서버 로컬)로 통일: 마이그레이션 이전분은 v1 화면과
@@ -378,7 +383,71 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
     (6a 보정 — 사용일은 인접 in_use 행에 있어 정보손실 없음 확인).
     **타임스탬프 KST 수정**: toISOString UTC 표시로 이전 데이터가 v1 화면 대비 -9h 밀림 →
     formatTimestamp(서버 로컬) 공용화로 수정 (dateFix.js + auditLog/moduleInventoryLog/photo 3모델).
+    사용자 브라우저 확인 완료(입출고/자산/랙/모듈). returned 행 "반납:"만 표시 방식 실사용 승인
+    → in_use↔returned 짝매칭 작업 불필요 확정.
   - **→ B-4d-6 전체 완료** (설계→6a→6b→6c 18EP→6d 화면검증).
+- **B-4d-7 (discovery 14EP + §5 + BUG-6) — 완결** (2026-07-08, 코드 커밋 대기):
+  - 정찰(2026-07-07): SSH=ssh2 라이브러리(자격증명 asset_credentials, fallback env),
+    스캔결과는 클라이언트 보관→apply body 재전송(서버 무상태), §5 이중기록=apply-asset
+    EUL 2건(vendor 분기)만, BUG-6 잔존결함(phantom PSU diff 비대칭) 발견.
+  - 7a: services 3종 이식(sshDiscovery/hardwareParser/specLookup) + SSH_DEFAULT_PASSWORD/OLLAMA env화.
+  - 7b: 읽기 6EP + 뷰/클라이언트JS. getUsageByCode는 EUL 보강 포함 전체 이식(in_use 치환).
+    v1↔v2 필드 대조 통과(차이는 운영 델타뿐). #11 평문 password 반환은 기술부채 등록.
+  - 7c: apply-asset(§5 EUL 제거 + BUG-6 A′/B) + register/link. 합성 페이로드 S1~S4 검증
+    (무변동 0건·notes 합성·vendor 자동입고 EUL 0건), 운영 mi 202행 diff 0 원복.
+  - 7d: 능동 5EP(scan-asset/ai-spec-lookup/scan/scan-range/apply). SSH 무접촉 실패경로 검증
+    (connect 이전 return 코드 증명 + ss -tn 0건), 선택로직 v1=v2 대조, #14 쓰기 템플릿 통과.
+    #12/#13에 입력검증 400 가드 추가(v1 미검증 크래시 방지, 계획된 이탈).
+  - **7e 실스캔 실증(입회)**: 대상 id=1096 TPC-SV-2U-23 — 스캔 성공(6모듈, 파싱실패 0),
+    **드리프트 0** → apply = S1 무변동 실데이터 재현: **mi_logs/transfer 신규 0건(BUG-6 A),
+    phantom PSU 0건(A′), EUL 1036 불변(§5) 실환경 확증**. 원복 완전(cm 7행 원본 id 포함 복원,
+    mi 202행 스냅샷 diff 0). audit 잔존 관례 1건(1517, 정리 후 총 1464 — B-7 정리 대상).
+  - 14EP 전체 이식 완료, 501 스텁 0. 검증 방법론: 능동 EP는 코드증명+실패경로, 실스캔은 입회 1회.
+- B-4d-8 (fault류 스텁 해제, 완료 — 커밋 대기):
+  - 8b: assets fault-repair/module-action 2EP — storage/transfer/vendor_send·vendor_return 분기,
+    __TEST_FR__ 검증(재고 복귀·이동쌍 로그·outgoing은 storage 미증가), EUL 불변.
+  - 8a: lendings fault-return 2EP + Lending.markFaultReturned(비고 병합 보존).
+    착수 전 검산: keep+자사의 total/spare 수동 증분은 recalculateInUse가 즉시 재유도
+    (total=storage+in_use, spare=storage)하는 dead write — 이중 집계 아님 확인 후 충실이식.
+    S1 수치 실증(total 5→5 불변), keep업체 tmp 코드 upsert 2회째 증가 분기 실증, EUL 불변.
+- B-4d-9 (기술부채 일괄, 완료 — 커밋 대기):
+  - assets.js §5 주석 스텁 → 영구 제거 종결(원칙 주석 1줄). /computing-modules 리다이렉트 복원.
+  - 날짜 래퍼 공용화 완료(29c6253 부채 해소 — moduleInventoryLog도 fixRowDates 위임) +
+    Date 직렬화 스윕: 미적용 7모델(user/serverRoom/rack/ipAddress/computingModule/assetIp/
+    assetCredential) 일괄 적용, v1↔v2 날짜 문자열 재대조 일치·UTC ISO 잔존 0.
+  - BUG-3 수정(모달 CSS 탭 분기 밖 이동 — BUG_TRACKING [완료] 참조). BUG-5는 결정 자료
+    정리 후 미룸 유지 권고(BUG_TRACKING 참조, 사용자 결정 대기).
+- B-4d-10 (§5 화면 전환 잔여, 완료 — 커밋 대기):
+  - 대시보드: EUL 호환층 3종 제거(getRecent/countByStatus/getMonthlyTrend가 event_type/
+    event_date 원형 반환, 한글 라벨은 dashboard.ejs 책임으로 이동). EVENT_TYPE_LABEL 상수는
+    flatten(inventory 충실이식 층) 전용으로 유지.
+  - 검증: v2 대시보드 수치가 마이그레이션 스냅샷과 수식 단위 일치 —
+    in_use 549 = 사용중@mig 293 + 반납@mig 256 / returned 256 = 반납@mig / 총 1036 = 780+256.
+    v1과의 차이는 전부 운영 델타(신규 12행 id 1201~1212 특정 + 반납 전이 6건, B-7 재이전 대상).
+    [동치 기대] 위젯(자산/랙/IP 통계) 전 항목 일치(총자산/서버 +2는 자산 델타 1192/1193).
+  - prefill: assets(+asset_ips) 1순위, 미등록/삭제 mgmt는 EUL 최신 이벤트 fallback
+    (flatten 가상컬럼으로 v1 계약 유지). 표본 2종(실존 자산=전 필드 v1 일치 / EUL-only=fallback 동작) 통과.
+  - **→ §5 화면 전환 4개 전부 소진: 입출고(B-4d-6) · 자산 prefill(B-4d-10) ·
+    디스커버리(B-4d-7c) · 대시보드(B-4d-10). 잔여 0.**
+
+## B-4d 단계 전체 완결 (2026-07-09)
+
+| 조각 | 내용 | 커밋 |
+|------|------|------|
+| B-4d-1 | asset 모델 14메서드 + 날짜밀림 스윕(dateFix.js) | 0218d2b |
+| B-4d-2 / 2.5 | assets 12EP / EUL append-only 트리거 제거 | ad36abc / b88e7de |
+| B-4d-3 / 3b | racks 10EP / power-control 스텁화(BUG-2 트랙) | 0777fe0 / bde0854 |
+| B-4d-4 | 모듈 4모델 26메서드 | (가이드 기재) |
+| B-4d-5 | moduleInventory 16EP + BUG-1 수정 | 3300f61 / edc2b2d |
+| B-4d-6 | inventory 18EP + EUL 이벤트소싱(설계~6d 화면검증) | 6e1938d~1e330aa |
+| B-4d-7 | discovery 14EP + §5 + BUG-6 + 입회 실스캔 | 커밋 대기 |
+| B-4d-8 | fault류 4EP(assets 2 + lendings 2) | 커밋 대기 |
+| B-4d-9 | 기술부채 일괄(§5 주석 종결·날짜 스윕·BUG-3) | 커밋 대기 |
+| B-4d-10 | 대시보드 §5 + prefill 전환 — §5 잔여 0 | 커밋 대기 |
+
+- 남은 스텁: racks power-control(BUG-2 신기능 트랙 확정) · inventory #18 migrate-psu(설계 확정)뿐.
+- **다음 단계: B-5 이후** — MIGRATION_PLAN 로드맵 확인 후 별도 세션에서 설계
+  (B-7 cutover 준비물: 로그 델타 재이전 §7 표 + EUL 델타(신규 12행+전이 6건) 방침 포함).
 
 **B-4d 하위단계 분해 (확정 순서):**
 - B-4d-1(완료) → B-4d-2/3(assets/racks, 완료) → B-4d-4(모듈모델, 완료) →
@@ -402,6 +471,38 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 ### 날짜 헬퍼 중복 (B-4d-9 정리)
 - moduleInventoryLog.js가 자체 fixTimestamps 함수 정의 — 공용 utils/dateFix.js의 fixRowDates와 중복.
   B-4d-9에서 fixRowDates(row, [], ['created_at'])로 공용화. 기능은 정상, 코드 정리만.
+  (6d에서 formatTimestamp 공용화로 일부 해소 — 잔여 래퍼만 정리 대상)
+
+### Date 무처리 직렬화 잔여분 (발견 시 fixRowDates 일괄 적용)
+- moduleInventory.findByCode의 updated_at UTC ISO 노출을 7b 대조에서 발견 → 7c에서 적용.
+- 다른 모델의 JSON 반환 경로에도 동일 잔여분 있을 수 있음 — v1↔v2 대조에서 발견되는 대로
+  fixRowDates(공용 dateFix.js) 일괄 적용. 스윕은 B-4d-9 후보.
+
+### legacy /apply 기본비번 assets 저장 (v1 충실이식)
+- discovery legacy POST /apply는 신규 자산 생성 시 ssh_password에 기본비번 저장(v1 L1029).
+- v2는 값 출처만 env(SSH_DEFAULT_PASSWORD) 경유로 변경, 저장 동작 자체는 v1 충실이식.
+  평문 저장 개선은 보안 트랙(아래 #11 평문 반환 건과 동일 계열).
+
+## 고도화 백로그 (마이그레이션 후 신기능 트랙)
+
+- 부품 모델명 정규화/별칭 매칭: 스캔 출력 원문↔item_code 매핑 저장, 관리자 선택 결과 학습.
+  7e 실증: spec 없는 PSU가 퍼지매칭으로 PSU-2550W-A에 오링크(임의 PSU 재고 링크) —
+  별칭 매칭 도입 시 우선 해소 대상.
+- 시리얼 기반 유닛 추적: 디스크/GPU 우선, 소유 혼재 해소, 재고 모델 개편 수반.
+- 부품 대여/차용 원장(part_loans): 소유×위치 이중 축 최소 구현.
+- module_inventory 소유 축 추가: 부품코드×소유자 단위.
+  실증 사례(8a): fault-return keep업체가 tmp 코드를 owner=company로 upsert —
+  업체품 자사 혼입 경로, 마이너스 재고 발생 경로 후보.
+- 마이너스 재고 실사: net-100-A(-2)/net-200-A(-1) — 실물 확인 후 원장 소급 기록.
+  실행 도구 초안 존재(scripts/inventory_count_*.js, 2026-05-22 세션 산출물, 미커밋·미실행 확인,
+  실사 계획 확정 시 v2 pg 버전 개작 후 커밋이 정석 경로).
+
+## 부품코드 발급 원칙
+
+1. 코드는 스펙 요약이 아닌 식별자 — 스펙은 속성 열에, 코드에 스펙 추가 금지.
+2. 신규 알파벳 발급 기준은 교환 가능성 — 파트넘버가 다르면 기본 분리, 교환 가능 확인 시에만 병합(괄호 리비전).
+3. 애매하면 분리(분리→병합은 쉽고 병합→분리는 이력이 섞임).
+4. 스펙 불명확 부품도 미상 상태로 코드 발급, 단 스캔 출력 원문 문자열을 속성에 보관.
 
 ## 8. 작업 원칙 (유지)
 

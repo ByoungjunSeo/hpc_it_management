@@ -77,7 +77,14 @@ AI 서버 3,4,5,6 선택 → 전원 탭 → 끄기 클릭 시 AI 3,4번이 안 �
 ---
 
 ## BUG-3: 부품 이동 팝업 UI 깨짐
-- 상태: 원인규명완료·UI일괄점검 대기 | 방침: (나) 수정
+- 상태: [완료] B-4d-9 (v2 수정. 최종 UI 확인은 사용자 브라우저 몫)
+  - 원인 확정: 모달 공통 CSS(.modal-overlay/.modal-content 등)가 index.ejs의
+    `activeTab === 'inventory'` 분기(L28~810) 안에만 있어, installed 탭(transferModal)에선
+    페이지 CSS가 통째로 미렌더 — main.css엔 .modal-overlay만 있고 .modal-content가 없어
+    콘텐츠가 스타일 없이 인라인으로 풀림. (추정했던 display:none 누락/토글 불일치 아님)
+  - 수정: 모달 CSS 블록을 탭 분기 밖 공통 위치로 이동. 검증: installed 탭 렌더에 CSS 1블록
+    포함 + inventory 탭 중복 없음(각 1). 모달 4개(adjust/usage/photo/transfer) 일괄 해소.
+- 방침: (나) 수정
 - 관련(v1): app/routes/moduleInventory.js (/modules/:id/transfer),
   부품현황 > 설치현황 > 이동 뷰/JS
 
@@ -166,6 +173,11 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 - 재현 안 됨(현재 v2): BUG-5 자산(server/storage/other/switch)은 저장측 클리어 대상
   (cdu/immersion_tank/chiller)이 아니라 위치 안 날아감. 운영 데이터에 발생 시나리오 0건.
 - 재현 조건: "비인프라 자산을 인프라 타입(cdu 등)으로 변경" 시 blade_slot/rack_unit 클리어.
+
+### B-4d-9 결정 자료 정리 → B-4d-10에서 미룸 확정
+- 지금 고치면: 렌더이중화(rooms/racks 두 곳) + blade_slot 표기 정규화(좌측/우측 vs left/right)
+  동반 수정 필요 — 국소 수정이 아님. 미루면: 발생 시나리오 0건 잠복 상태 유지(영향 없음).
+- **확정: 미룸 — cutover 후 UI 트랙에서 렌더 이중화 해소와 합동 처리.**
   v1 원본 스크린샷은 이 조작을 실제 했을 때 발생.
 - ★ 렌더 이중화: racks.js 라우트 uMap과 detail.ejs 뷰 slotMap이 독립 구축.
   수정 시 양쪽 정합 필요(한쪽만 고치면 불일치).
@@ -177,7 +189,14 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 ---
 
 ## BUG-6: 디스커버리 스캔 적용 시 변동 없는 모듈도 전부 "설치" 기록 + apply_scan 이력 무정보
-- 상태: 미처리 | 방침: (나) 이식 시 수정 | 단계: B-4d (discovery — §5 핵심과 직결)
+- 상태: [완료] B-4d-7c (v2 apply-asset 이식 시 수정, 합성 페이로드 S1~S4 검증 통과)
+  - (A) diff 기반 유지 + (A′) diff 신규측을 modulesToApply(PSU/메모리 보존본)로 교체 — 무변동 적용 시
+    이벤트 0건 + phantom PSU removed 0건 실증. fallback 메모리 경로의 PSU 보존 유실(v1 L393)도 함께 수정.
+  - (B) mi_logs notes 합성: `apply_scan (디스크 24->48)` / `apply_scan (메모리 4->2)` 형식 실증.
+  - 7e 실환경 실증(2026-07-08, 입회 실스캔 TPC-SV-2U-23): 드리프트 0 상태 apply → 신규 이벤트
+    0건 + phantom PSU 0건 + EUL 불변 — 합성 검증(7c)에 실스캔 실증(7e) 추가 완료.
+  - v1은 미수정(운영 보존) — v1 데이터의 기존 phantom 이력은 B-7 정리 후보.
+- 방침: (나) 이식 시 수정 | 단계: B-4d (discovery — §5 핵심과 직결)
 - 관련(v1): app/routes/discovery.js, app/models/computingModule.js,
   app/models/moduleTransferLog.js / inventoryLog 계열, 이력 기록부
 - 관련 자산: 글루시스-008-N1/N2 스캔 사례
@@ -204,6 +223,15 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 - discovery 이식은 B-4d의 §5 핵심 작업. BUG-6은 그 작업의 일부로 함께 처리.
 - 변경 감지(diff) 로직: 스캔 결과 vs 현재 computing_modules 비교 후, 차이나는 것만 반영.
 
+### BUG-6 보강 (B-4d-7 정찰 발견, 2026-07-07)
+- b56c430 이후 diff 기반 기록으로 (A) 부분 완화 확인. 단 잔존 결함:
+  diff 신규측이 modulesToApply(PSU/메모리 보존본)가 아닌 원본 modules(PSU 제거본)를
+  사용(discovery.js L634, L670) → 보존되는 PSU가 매 적용마다 phantom removed로 기록되는
+  비대칭. fallback 메모리 보존 경로(L389–402)도 동일. v1 데이터에 apply_scan PSU
+  removed 6건/installed 8건 실존 — 정황 부합.
+- v2 수정 방침(B-4d-7c에서 처리): (A′) diff 기준을 modulesToApply로 교체
+  (B) notes에 `apply_scan (타입 old->new)` 합성 — L735 지점.
+
 ---
 
 ## 분류 요약
@@ -212,10 +240,17 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 |------|------|------|------|
 | BUG-1 비고 손실 | [완료] B-4d-5b | 사용자 비고+자동메시지 결합 보존 |
 | BUG-2 전원 끄기 | 신기능(예외) | 보류 | no_cred 규명 → 신기능 트랙 |
-| BUG-3 이동 UI | (나) 수정 | B-4d | CSS/EJS |
+| BUG-3 이동 UI | [완료] B-4d-9 | 모달 CSS 탭분기 밖 이동, 4모달 일괄 (UI 최종확인: 사용자) |
 | BUG-4 object Object | 종결(불요) | — | v2 details 단일 JSONB로 구조적 소멸(ad36abc) |
-| BUG-5 선반 잔존 | (나) 수정 | B-4d 후반(잠복) | 원인규명완료·영향0건, 렌더이중화+표기정규화 동반 |
-| BUG-6 스캔 전체기록/이력무정보 | (나) 수정 | B-4d(§5) | 변경분만 기록 + 비고에 변경내용 |
+| BUG-5 선반 잔존 | 미룸 확정 | cutover 후 UI 트랙 | 원인규명완료·영향0건, 렌더이중화 해소와 합동 |
+
+> **B-4d 종료 시점 잔여 미해결 = BUG-2(신기능 트랙)·BUG-5(UI 트랙) 2건뿐.**
+> BUG-1/3/4/6은 전부 [완료]/종결.
+| BUG-6 스캔 전체기록/이력무정보 | [완료] B-4d-7c | 변경분만 기록(A·A′) + 비고 합성(B) 실증 |
+
+## 기술부채 (버그 아님 — 트랙 분류 대기)
+- discovery #11 GET /lookup-ip 응답에 자격증명 **평문 password 포함** (B-4d-7b 확인).
+  v1 동작 보존으로 v2도 동일 반환 — 보안 트랙 분류 대상(마스킹/권한 분리 등은 cutover 후 결정).
 
 ## 마이그레이션 범위 밖 (cutover 후 별도 트랙)
 - ③ UI 전반 개선
