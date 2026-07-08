@@ -25,6 +25,34 @@
     </a>
 </div>
 
+<%# BUG-3 수정(B-4d-9): 모달 CSS가 inventory 탭 분기 안에만 있어 installed 탭의
+    transferModal이 스타일 없이 인라인으로 풀림 → 탭 공통 위치로 이동 %>
+<style>
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.5); z-index: 1000;
+    display: none; align-items: center; justify-content: center;
+}
+.modal-overlay.active {
+    display: flex;
+}
+.modal-content {
+    background: var(--bg, #fff); border-radius: 8px; padding: 24px;
+    max-width: 900px; width: 90%; max-height: 80vh; overflow-y: auto;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border, #ddd);
+}
+.modal-header h3 { margin: 0; }
+.modal-close {
+    background: none; border: none; font-size: 28px; cursor: pointer;
+    color: var(--text-light, #999); padding: 4px 8px; line-height: 1;
+}
+.modal-close:hover { color: var(--danger, #e00); }
+</style>
+
 <% if (activeTab === 'inventory') { %>
 <!-- ===== Tab 1: 부품 재고 ===== -->
 
@@ -339,29 +367,7 @@ function closeModulePhotoLightbox() {
 </script>
 
 <style>
-.modal-overlay {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.5); z-index: 1000;
-    display: none; align-items: center; justify-content: center;
-}
-.modal-overlay.active {
-    display: flex;
-}
-.modal-content {
-    background: var(--bg, #fff); border-radius: 8px; padding: 24px;
-    max-width: 900px; width: 90%; max-height: 80vh; overflow-y: auto;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-}
-.modal-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border, #ddd);
-}
-.modal-header h3 { margin: 0; }
-.modal-close {
-    background: none; border: none; font-size: 28px; cursor: pointer;
-    color: var(--text-light, #999); padding: 4px 8px; line-height: 1;
-}
-.modal-close:hover { color: var(--danger, #e00); }
+<%# 모달 CSS는 BUG-3 수정으로 탭 공통 블록(파일 상단)으로 이동 %>
 .spec-info { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-light); }
 .spec-info span { background: var(--bg-alt, #f5f5f5); padding: 2px 8px; border-radius: 4px; }
 </style>

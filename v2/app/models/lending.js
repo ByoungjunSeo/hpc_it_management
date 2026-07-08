@@ -131,6 +131,18 @@ const Lending = {
     );
   },
 
+  // B-4d-8a: 장애반납 — 기존 notes 앞에 [장애반납] 사유 병합(비고 보존, BUG-1 계열 패턴)
+  async markFaultReturned(id, { reason, expected_return_date, fault_notes }) {
+    const { rows } = await pool.query('SELECT notes FROM lendings WHERE id = $1', [id]);
+    const lending = rows[0];
+    const existingNotes = lending && lending.notes ? '\n' + lending.notes : '';
+    const newNotes = `[장애반납] 사유: ${reason || '장애'}, 예상회수: ${expected_return_date || '미정'}${fault_notes ? '\n' + fault_notes : ''}${existingNotes}`;
+    return pool.query(
+      `UPDATE lendings SET status='returned', return_date=CURRENT_DATE, notes=$1 WHERE id=$2`,
+      [newNotes, id]
+    );
+  },
+
   async getStats() {
     const { rows } = await pool.query(`
       SELECT direction, status, COUNT(*) as count

@@ -1,5 +1,11 @@
 const crypto = require('crypto');
 const { pool } = require('../config/database');
+const { fixRowDates } = require('../utils/dateFix');
+
+// B-4d-9 Date 직렬화 스윕
+function fixDates(row) {
+  return fixRowDates(row, [], ['created_at']);
+}
 
 const SALT_LENGTH = 16;
 const ITERATIONS = 100000;
@@ -23,14 +29,14 @@ const User = {
     const { rows } = await pool.query(
       'SELECT id, username, role, display_name, created_at FROM users ORDER BY created_at'
     );
-    return rows;
+    return rows.map(fixDates);
   },
 
   async findById(id) {
     const { rows } = await pool.query(
       'SELECT id, username, role, display_name, created_at FROM users WHERE id = $1', [id]
     );
-    return rows[0];
+    return fixDates(rows[0] || null);
   },
 
   async findByUsername(username) {

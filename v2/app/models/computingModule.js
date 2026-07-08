@@ -1,4 +1,10 @@
 const { pool } = require('../config/database');
+const { fixRowDates } = require('../utils/dateFix');
+
+// B-4d-9 Date 직렬화 스윕
+function fixDates(row) {
+  return fixRowDates(row, [], ['created_at', 'updated_at']);
+}
 
 const ComputingModule = {
   async findAll(filters = {}) {
@@ -44,7 +50,7 @@ const ComputingModule = {
 
     sql += ' ORDER BY cm.asset_id, cm.module_type';
     const { rows } = await pool.query(sql, params);
-    return rows;
+    return rows.map(fixDates);
   },
 
   async findById(id) {
@@ -56,7 +62,7 @@ const ComputingModule = {
       LEFT JOIN vendor_info v ON cm.owner_vendor_id = v.id
       WHERE cm.id = $1
     `, [id]);
-    return rows[0] || null;
+    return fixDates(rows[0] || null);
   },
 
   async findByAsset(assetId) {
@@ -66,7 +72,7 @@ const ComputingModule = {
        LEFT JOIN vendor_info v ON cm.owner_vendor_id = v.id
        WHERE cm.asset_id = $1 ORDER BY cm.module_type, cm.id`, [assetId]
     );
-    return rows;
+    return rows.map(fixDates);
   },
 
   async create(data) {

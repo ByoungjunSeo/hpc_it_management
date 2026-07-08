@@ -1,4 +1,10 @@
 const { pool } = require('../config/database');
+const { fixRowDates } = require('../utils/dateFix');
+
+// B-4d-9 Date 직렬화 스윕
+function fixDates(row) {
+  return fixRowDates(row, [], ['created_at', 'updated_at']);
+}
 
 const Rack = {
   async findByRoom(roomId) {
@@ -86,12 +92,12 @@ const Rack = {
        LEFT JOIN server_rooms sr ON r.room_id = sr.id
        ORDER BY sr.name, r.name`
     );
-    return rows;
+    return rows.map(fixDates);
   },
 
   async findById(id) {
     const { rows } = await pool.query('SELECT * FROM racks WHERE id = $1', [id]);
-    return rows[0] || null;
+    return fixDates(rows[0] || null);
   },
 
   async findByLinkedAsset(assetId) {
@@ -101,7 +107,7 @@ const Rack = {
        LEFT JOIN server_rooms sr ON r.room_id = sr.id
        WHERE r.linked_asset_id = $1`, [assetId]
     );
-    return rows[0] || null;
+    return fixDates(rows[0] || null);
   },
 
   async update(id, data) {

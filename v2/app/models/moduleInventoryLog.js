@@ -1,12 +1,9 @@
 const { pool } = require('../config/database');
-const { formatTimestamp } = require('../utils/dateFix');
+const { fixRowDates } = require('../utils/dateFix');
 
-// pg returns timestamp as Date object; v1 views expect local-time string (UTC ISO는 9h 밀림)
+// B-4d-9: 자체 구현 제거 — 공용 fixRowDates로 일원화 (29c6253 기술부채 해소)
 function fixTimestamps(row) {
-  if (row && row.created_at instanceof Date) {
-    row.created_at = formatTimestamp(row.created_at);
-  }
-  return row;
+  return fixRowDates(row, [], ['created_at']);
 }
 
 const ModuleInventoryLog = {

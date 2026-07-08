@@ -1,5 +1,11 @@
 const { pool } = require('../config/database');
 const appConfig = require('../config/app');
+const { fixRowDates } = require('../utils/dateFix');
+
+// B-4d-9 Date 직렬화 스윕
+function fixDates(row) {
+  return fixRowDates(row, [], ['created_at', 'updated_at']);
+}
 
 const IpAddress = {
   async initializeSubnets() {
@@ -58,7 +64,7 @@ const IpAddress = {
       const lastB = parseInt(b.ip_address.split('.').pop());
       return lastA - lastB;
     });
-    return rows;
+    return rows.map(fixDates);
   },
 
   async getSubnetStats() {

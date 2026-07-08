@@ -1,11 +1,17 @@
 const { pool } = require('../config/database');
+const { fixRowDates } = require('../utils/dateFix');
+
+// B-4d-9 Date 직렬화 스윕
+function fixDates(row) {
+  return fixRowDates(row, [], ['created_at']);
+}
 
 const AssetCredential = {
   async findByAsset(assetId) {
     const { rows } = await pool.query(
       'SELECT * FROM asset_credentials WHERE asset_id = $1 ORDER BY credential_type, id', [assetId]
     );
-    return rows;
+    return rows.map(fixDates);
   },
 
   async bulkCreate(assetId, creds) {

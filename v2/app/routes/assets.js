@@ -11,6 +11,10 @@ const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
 const ComputingModule = require('../models/computingModule');
+const ModuleInventory = require('../models/moduleInventory');
+const ModuleInventoryLog = require('../models/moduleInventoryLog');
+const ModuleTransferLog = require('../models/moduleTransferLog');
+const moduleInventoryRouter = require('./moduleInventory');
 const Photo = require('../models/photo');
 const { pool } = require('../config/database');
 
@@ -78,9 +82,45 @@ router.get('/new', async (req, res) => {
 
     let prefill = null;
     let prefillIps = [];
-    // EUL prefill — v2 EUL has JSONB snapshots, not ip1~ip4 columns.
-    // Prefill from EUL deferred to B-4d-6 (EUL event-sourcing mapping).
-    // from_inventory param is accepted but no prefill data extracted.
+    if (req.query.from_inventory) {
+      // B-4d-10 §5: 현재상태 유일 소스인 assets(+asset_ips)를 1순위로 prefill.
+      // 자산 미등록/삭제(mgmt가 EUL에만 있는 경우)는 EUL 최신 이벤트로 복원 —
+      // 6a flatten이 ip1~ib2 가상컬럼을 제공하므로 v1 계약 그대로 유지.
+      const mgmt = req.query.from_inventory;
+      const existing = await Asset.findByManagementNumber(mgmt);
+      if (existing) {
+        prefill = {
+          management_number: existing.management_number || '',
+          asset_number: existing.asset_number || '',
+          model_name: existing.model_name || '',
+          ownership: existing.ownership || 'company'
+        };
+        prefillIps = (await AssetIp.findByAsset(existing.id)).map(ip => ({
+          ip_address: ip.ip_address,
+          ip_type: ip.ip_type || 'management',
+          description: ip.description || ''
+        }));
+      } else {
+        const EquipmentUsageLog = require('../models/equipmentUsageLog');
+        const invData = await EquipmentUsageLog.getLatestByManagement(mgmt);
+        if (invData) {
+          prefill = {
+            management_number: invData.management_number || '',
+            asset_number: invData.asset_number || '',
+            model_name: invData.model_name || '',
+            ownership: invData.ownership || 'company'
+          };
+          // flatten 가상컬럼(ip1~ip4/bmc/ib1/ib2) → prefillIps (v1 L85–91 계약)
+          if (invData.ip1) prefillIps.push({ ip_address: invData.ip1, ip_type: 'management', description: '' });
+          if (invData.ip2) prefillIps.push({ ip_address: invData.ip2, ip_type: 'management', description: '' });
+          if (invData.ip3) prefillIps.push({ ip_address: invData.ip3, ip_type: 'management', description: '' });
+          if (invData.ip4) prefillIps.push({ ip_address: invData.ip4, ip_type: 'management', description: '' });
+          if (invData.bmc) prefillIps.push({ ip_address: invData.bmc, ip_type: 'bmc', description: '' });
+          if (invData.ib1) prefillIps.push({ ip_address: invData.ib1, ip_type: 'ib', description: '' });
+          if (invData.ib2) prefillIps.push({ ip_address: invData.ib2, ip_type: 'ib', description: '' });
+        }
+      }
+    }
 
     const assets = await Asset.findAll();
     res.render('assets/form', {
@@ -332,14 +372,309 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Fault/Repair batch processing — stub (depends on ComputingModule/ModuleInventory/TransferLog: B-4d-3/4)
+// Fault/Repair batch processing (B-4d-8b, v1 L376–563 이식)
+// 트랜잭션 경계: v1은 better-sqlite3 transaction — v2 모델들이 pool 개별 연결이라 단일 트랜잭션
+// 불가, 순차 실행으로 이식(v2 lendings 트랜잭션 2종과 동일 관례). 원자성 강화는 개선 트랙.
 router.post('/:id/fault-repair', requireMaintenance, async (req, res) => {
-  res.status(503).json({ error: '장애/수리 처리는 B-4d-3/4에서 구현 예정입니다.' });
+  try {
+    const asset = await Asset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: '자산을 찾을 수 없습니다.' });
+
+    const { reason, notes, target_status, modules } = req.body;
+    if (!modules || !Array.isArray(modules)) {
+      return res.status(400).json({ error: '모듈 정보가 필요합니다.' });
+    }
+
+    const assetLabel = asset.management_number || asset.model_name || String(asset.id);
+    const userId = req.session.userId || null;
+    const username = req.session.displayName || req.session.username || null;
+    const transferLogs = [];
+    const affectedAssetIds = new Set();
+    affectedAssetIds.add(asset.id);
+
+    for (const m of modules) {
+      if (!m.id || m.action === 'keep') continue;
+
+      const mod = await ComputingModule.findById(m.id);
+      if (!mod || mod.asset_id !== asset.id) continue;
+
+      const itemCode = mod.specification || null;
+
+      if (m.action === 'storage') {
+        // Return to storage: increase storage_quantity (company + vendor)
+        if (itemCode) {
+          const inv = await ModuleInventory.findByCode(itemCode);
+          if (inv) {
+            const qty = parseInt(mod.count) || 1;
+            await pool.query(`
+              UPDATE module_inventory
+              SET storage_quantity = storage_quantity + $1,
+                  updated_at = CURRENT_TIMESTAMP
+              WHERE item_code = $2
+            `, [qty, itemCode]);
+
+            await ModuleInventoryLog.create({
+              item_code: itemCode,
+              event_type: 'removed',
+              quantity_change: qty,
+              asset_id: asset.id,
+              asset_label: assetLabel,
+              user_id: userId,
+              username: username,
+              notes: (reason || '장애/수리') + ' → 장비실 보관'
+            });
+          }
+        }
+        await ComputingModule.delete(m.id);
+        transferLogs.push({
+          module_type: mod.module_type,
+          model: mod.model,
+          capacity: mod.capacity,
+          count: mod.count,
+          owner: mod.owner,
+          owner_vendor_id: mod.owner_vendor_id,
+          from_asset_id: asset.id,
+          from_asset_label: assetLabel,
+          to_asset_id: null,
+          to_asset_label: '장비실',
+          reason: reason || '장애/수리',
+          user_id: userId,
+          username: username,
+          notes: notes || null
+        });
+
+      } else if (m.action === 'transfer' && m.to_asset_id) {
+        // Transfer to another asset
+        const toAsset = await Asset.findById(m.to_asset_id);
+        if (!toAsset) continue;
+        const toLabel = toAsset.management_number || toAsset.model_name || String(m.to_asset_id);
+
+        await ComputingModule.update(m.id, {
+          asset_id: parseInt(m.to_asset_id),
+          module_type: mod.module_type,
+          model: mod.model,
+          manufacturer: mod.manufacturer,
+          capacity: mod.capacity,
+          count: mod.count,
+          specification: mod.specification,
+          slot_info: mod.slot_info,
+          notes: mod.notes,
+          owner: mod.owner,
+          owner_vendor_id: mod.owner_vendor_id,
+          is_onboard: mod.is_onboard || 0
+        });
+        affectedAssetIds.add(parseInt(m.to_asset_id));
+
+        transferLogs.push({
+          module_type: mod.module_type,
+          model: mod.model,
+          capacity: mod.capacity,
+          count: mod.count,
+          owner: mod.owner,
+          owner_vendor_id: mod.owner_vendor_id,
+          from_asset_id: asset.id,
+          from_asset_label: assetLabel,
+          to_asset_id: parseInt(m.to_asset_id),
+          to_asset_label: toLabel,
+          reason: reason || '장애/수리',
+          user_id: userId,
+          username: username,
+          notes: notes || null
+        });
+
+        if (itemCode && (!mod.owner || mod.owner === 'company')) {
+          await ModuleInventoryLog.create({
+            item_code: itemCode,
+            event_type: 'removed',
+            quantity_change: parseInt(mod.count) || 1,
+            asset_id: asset.id,
+            asset_label: assetLabel,
+            user_id: userId,
+            username: username,
+            notes: '장애이동: ' + assetLabel + ' → ' + toLabel
+          });
+          await ModuleInventoryLog.create({
+            item_code: itemCode,
+            event_type: 'installed',
+            quantity_change: -(parseInt(mod.count) || 1),
+            asset_id: parseInt(m.to_asset_id),
+            asset_label: toLabel,
+            user_id: userId,
+            username: username,
+            notes: '장애이동: ' + assetLabel + ' → ' + toLabel
+          });
+        }
+
+      } else if (m.action === 'vendor_send') {
+        // Send to vendor: delete module
+        await ComputingModule.delete(m.id);
+        transferLogs.push({
+          module_type: mod.module_type,
+          model: mod.model,
+          capacity: mod.capacity,
+          count: mod.count,
+          owner: mod.owner,
+          owner_vendor_id: mod.owner_vendor_id,
+          from_asset_id: asset.id,
+          from_asset_label: assetLabel,
+          to_asset_id: null,
+          to_asset_label: '업체반출',
+          reason: reason || '장애/수리',
+          user_id: userId,
+          username: username,
+          notes: notes || null
+        });
+      }
+    }
+
+    // Bulk create transfer logs
+    if (transferLogs.length > 0) {
+      await ModuleTransferLog.bulkCreate(transferLogs);
+    }
+
+    // Update asset status
+    if (target_status) {
+      await pool.query('UPDATE assets SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [target_status, asset.id]);
+    }
+
+    // Recalculate inventory and sync usage logs (§5: sync는 recalculateInUse만 수행)
+    await ModuleInventory.recalculateInUse();
+    for (const aid of affectedAssetIds) {
+      await moduleInventoryRouter.syncModulesToUsageLog(aid);
+    }
+
+    await AuditLog.log(req, {
+      action: 'fault_repair',
+      targetType: 'asset',
+      targetId: asset.id,
+      targetLabel: assetLabel,
+      details: { reason, notes, target_status, module_count: modules.length }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Fault repair error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Individual module action — stub (depends on ComputingModule/ModuleInventory/TransferLog: B-4d-3/4)
+// Individual module action (storage / vendor_return) (B-4d-8b, v1 L566–686 이식, 순차 실행)
 router.post('/:id/module-action', requireMaintenance, async (req, res) => {
-  res.status(503).json({ error: '모듈 개별 처리는 B-4d-3/4에서 구현 예정입니다.' });
+  try {
+    const asset = await Asset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: '자산을 찾을 수 없습니다.' });
+
+    const { module_id, action, reason } = req.body;
+    if (!module_id || !['storage', 'vendor_return'].includes(action)) {
+      return res.status(400).json({ error: '잘못된 요청입니다.' });
+    }
+
+    const mod = await ComputingModule.findById(module_id);
+    if (!mod || mod.asset_id !== asset.id) {
+      return res.status(404).json({ error: '모듈을 찾을 수 없습니다.' });
+    }
+
+    const assetLabel = asset.management_number || asset.model_name || String(asset.id);
+    const userId = req.session.userId || null;
+    const username = req.session.displayName || req.session.username || null;
+    const itemCode = mod.specification || null;
+    const qty = parseInt(mod.count) || 1;
+
+    if (action === 'storage') {
+      // Return to storage: increase storage_quantity (company + vendor)
+      if (itemCode) {
+        const inv = await ModuleInventory.findByCode(itemCode);
+        if (inv) {
+          await pool.query(`
+            UPDATE module_inventory
+            SET storage_quantity = storage_quantity + $1,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE item_code = $2
+          `, [qty, itemCode]);
+
+          await ModuleInventoryLog.create({
+            item_code: itemCode,
+            event_type: 'removed',
+            quantity_change: qty,
+            asset_id: asset.id,
+            asset_label: assetLabel,
+            user_id: userId,
+            username: username,
+            notes: (reason || '개별처리') + ' → 장비실 보관'
+          });
+        }
+      }
+
+      await ComputingModule.delete(module_id);
+      await ModuleTransferLog.bulkCreate([{
+        module_type: mod.module_type,
+        model: mod.model,
+        capacity: mod.capacity,
+        count: mod.count,
+        owner: mod.owner,
+        owner_vendor_id: mod.owner_vendor_id,
+        from_asset_id: asset.id,
+        from_asset_label: assetLabel,
+        to_asset_id: null,
+        to_asset_label: '장비실',
+        reason: reason || '장비실 이동',
+        user_id: userId,
+        username: username,
+        notes: null
+      }]);
+
+    } else if (action === 'vendor_return') {
+      // Vendor return: delete module, log outgoing
+      if (itemCode) {
+        await ModuleInventoryLog.create({
+          item_code: itemCode,
+          event_type: 'outgoing',
+          quantity_change: qty,
+          asset_id: asset.id,
+          asset_label: assetLabel,
+          user_id: userId,
+          username: username,
+          notes: (reason || '업체 반납') + ' → 업체반출'
+        });
+      }
+
+      await ComputingModule.delete(module_id);
+      await ModuleTransferLog.bulkCreate([{
+        module_type: mod.module_type,
+        model: mod.model,
+        capacity: mod.capacity,
+        count: mod.count,
+        owner: mod.owner,
+        owner_vendor_id: mod.owner_vendor_id,
+        from_asset_id: asset.id,
+        from_asset_label: assetLabel,
+        to_asset_id: null,
+        to_asset_label: '업체반출',
+        reason: reason || '업체 반납',
+        user_id: userId,
+        username: username,
+        notes: null
+      }]);
+    }
+
+    // Recalculate inventory and sync usage logs (§5: sync는 recalculateInUse만 수행)
+    await ModuleInventory.recalculateInUse();
+    await moduleInventoryRouter.syncModulesToUsageLog(asset.id);
+
+    await AuditLog.log(req, {
+      action: 'module_action',
+      targetType: 'asset',
+      targetId: asset.id,
+      targetLabel: assetLabel,
+      details: { module_id, action, module_type: mod.module_type, model: mod.model }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Module action error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Restore from maintenance (수리완료/복귀)
@@ -575,11 +910,8 @@ router.post('/:id', requireMaintenance, async (req, res) => {
 
     const afterAsset = await Asset.findById(req.params.id);
 
-    // ===== 입출고 동기화 — v2 EUL JSONB 구조 불일치로 스텁 처리 =====
-    // v1은 ip1~ip4, bmc, ib1~ib2, credential_root 등 50+개 컬럼 직접 기록.
-    // v2 EUL은 event_type + JSONB 스냅샷(network_snapshot, credentials_snapshot 등).
-    // EUL 동기화는 B-4d-6 (이벤트소싱 매핑)에서 구현.
-    // ===== 입출고 동기화 끝 =====
+    // §5 확정(B-4d-9): v1의 assets→EUL 동기화는 영구 제거 — EUL은 이벤트 이력 전용,
+    // 현재상태의 유일 소스는 assets/asset_ips/asset_credentials/computing_modules.
 
     // BUG-4: v1 passes objects (before/after) without stringify — faithful porting
     AuditLog.log(req, { action: 'update', targetType: 'asset', targetId: req.params.id, targetLabel: req.body.asset_number || req.body.model_name, details: { before: beforeAsset, after: afterAsset } });

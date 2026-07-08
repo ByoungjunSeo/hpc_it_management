@@ -11,9 +11,10 @@ const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
 const { pool } = require('../config/database');
 
-// §5: EUL 하드웨어 동기 제거. 재고 재계산만 유지.
+// §5: EUL 하드웨어 동기 제거. 재고 재계산만 유지. (함수명은 v1 호환 유지 — 실동작은 recalc뿐)
 // v1: 50+컬럼 개별 동기 (EquipmentUsageLog.updateHardwareColumns / create)
 // v2: EUL은 JSONB 스냅샷 이벤트소싱 — 컬럼 동기 개념 없음. recalculateInUse만 호출.
+// 호출처: 본 라우트 + assets.js fault-repair/module-action(B-4d-8b).
 async function syncModulesToUsageLog(assetId) {
   await ModuleInventory.recalculateInUse();
 }

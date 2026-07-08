@@ -25,16 +25,17 @@
         <div class="stat-value"><%= usageCounts.total || 0 %></div>
         <div class="stat-label">입출고 전체</div>
     </div>
+    <%# B-4d-10: §5 호환층 제거 — event_type 원형 키 직접 사용 %>
     <div class="stat-card">
-        <div class="stat-value"><%= usageCounts['입고'] || 0 %></div>
+        <div class="stat-value"><%= usageCounts.incoming || 0 %></div>
         <div class="stat-label">입고</div>
     </div>
     <div class="stat-card success">
-        <div class="stat-value"><%= usageCounts['사용중'] || 0 %></div>
+        <div class="stat-value"><%= usageCounts.in_use || 0 %></div>
         <div class="stat-label">사용중</div>
     </div>
     <div class="stat-card warning">
-        <div class="stat-value"><%= usageCounts['반납완료'] || 0 %></div>
+        <div class="stat-value"><%= usageCounts.returned || 0 %></div>
         <div class="stat-label">반납완료</div>
     </div>
 </div>
@@ -104,16 +105,19 @@
         <p class="text-muted" style="padding:16px;">최근 활동이 없습니다.</p>
         <% } else { %>
         <div class="timeline">
+            <%# B-4d-10: §5 호환층 제거 — event_type/event_date 직접 사용 %>
             <% recentLogs.forEach(log => { %>
             <div class="timeline-item">
-                <% if (log.status === '입고') { %>
+                <% if (log.event_type === 'incoming') { %>
                 <span class="badge badge-secondary" style="min-width:55px;text-align:center;">입고</span>
-                <% } else if (log.status === '사용중') { %>
+                <% } else if (log.event_type === 'in_use') { %>
                 <span class="badge badge-success" style="min-width:55px;text-align:center;">사용중</span>
-                <% } else if (log.status === '반납완료') { %>
+                <% } else if (log.event_type === 'returned') { %>
                 <span class="badge badge-warning" style="min-width:55px;text-align:center;">반납완료</span>
+                <% } else { %>
+                <span class="badge badge-secondary" style="min-width:55px;text-align:center;"><%= log.event_type %></span>
                 <% } %>
-                <span class="timeline-date"><%= log.usage_date || log.return_date || '-' %></span>
+                <span class="timeline-date"><%= log.event_date || '-' %></span>
                 <% if (log.management_number) { %>
                 <a href="/inventory/equipment/<%= encodeURIComponent(log.management_number) %>"><strong><%= log.management_number %></strong></a>
                 <% } %>
@@ -463,18 +467,18 @@
 
     // --- Chart 7: Monthly Trend (Bar + Line) ---
     var trendRaw = <%- JSON.stringify(monthlyTrend) %>;
-    // Aggregate by month and status
+    // B-4d-10: §5 호환층 제거 — event_type 원형 키 직접 사용
     var monthSet = {};
     trendRaw.forEach(function(d) { monthSet[d.month] = true; });
     var months = Object.keys(monthSet).sort();
     var trendMap = {};
     trendRaw.forEach(function(d) {
         if (!trendMap[d.month]) trendMap[d.month] = {};
-        trendMap[d.month][d.status] = d.count;
+        trendMap[d.month][d.event_type] = parseInt(d.count);
     });
-    var incoming = months.map(function(m) { return (trendMap[m] && trendMap[m]['입고']) || 0; });
-    var inUse = months.map(function(m) { return (trendMap[m] && trendMap[m]['사용중']) || 0; });
-    var returned = months.map(function(m) { return (trendMap[m] && trendMap[m]['반납완료']) || 0; });
+    var incoming = months.map(function(m) { return (trendMap[m] && trendMap[m]['incoming']) || 0; });
+    var inUse = months.map(function(m) { return (trendMap[m] && trendMap[m]['in_use']) || 0; });
+    var returned = months.map(function(m) { return (trendMap[m] && trendMap[m]['returned']) || 0; });
     var monthLabels = months.map(function(m) { var parts = m.split('-'); return parts[1] + '월'; });
 
     if (months.length > 0) {

@@ -212,22 +212,18 @@ function processRow(row) {
 
 const EquipmentUsageLog = {
   // ═══════════════════════════════════════════════════
-  // Existing methods (B-4b dashboard — unchanged)
+  // Dashboard methods — B-4d-10에서 §5 호환층 3종 제거
+  // (한글 status 역매핑 / event_date AS usage_date 별칭 / fallback)
+  // → event_type/event_date 원형 반환, 라벨링은 뷰(dashboard.ejs) 책임
   // ═══════════════════════════════════════════════════
 
   async getRecent(limit = 10) {
     const { rows } = await pool.query(
-      `SELECT *,
-              event_date as usage_date
-       FROM equipment_usage_logs
+      `SELECT * FROM equipment_usage_logs
        ORDER BY COALESCE(event_date, created_at) DESC, id DESC
        LIMIT $1`, [limit]
     );
-    // Fix DATE columns + map event_type to Korean 'status' for view compatibility
-    return rows.map(r => {
-      fixRowDates(r, ['event_date', 'usage_date'], ['event_date', 'usage_date', 'created_at']);
-      return { ...r, status: EVENT_TYPE_LABEL[r.event_type] || r.event_type };
-    });
+    return rows.map(r => fixRowDates(r, ['event_date'], ['event_date', 'created_at']));
   },
 
   async countByStatus() {
@@ -236,8 +232,7 @@ const EquipmentUsageLog = {
     );
     const result = { total: 0 };
     rows.forEach(r => {
-      const label = EVENT_TYPE_LABEL[r.event_type] || r.event_type;
-      result[label] = parseInt(r.count);
+      result[r.event_type] = parseInt(r.count);
       result.total += parseInt(r.count);
     });
     return result;
@@ -252,11 +247,7 @@ const EquipmentUsageLog = {
        GROUP BY month, event_type
        ORDER BY month`
     );
-    // Map event_type to Korean 'status' for view compatibility
-    return rows.map(r => ({
-      ...r,
-      status: EVENT_TYPE_LABEL[r.event_type] || r.event_type
-    }));
+    return rows;
   },
 
   // ═══════════════════════════════════════════════════
