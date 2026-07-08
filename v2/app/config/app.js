@@ -139,7 +139,8 @@ module.exports = {
 
   ssh: {
     defaultUser: 'root',
-    defaultPassword: 'qwe123',
+    // 하드코딩 제거(B-4d-7a): 자격증명 없는 자산의 SSH 스캔 fallback — .env의 SSH_DEFAULT_PASSWORD
+    defaultPassword: process.env.SSH_DEFAULT_PASSWORD || '',
     defaultPort: 22,
     connectTimeout: 10000,
     maxConcurrent: 10

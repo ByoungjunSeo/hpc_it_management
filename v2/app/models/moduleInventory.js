@@ -1,4 +1,10 @@
 const { pool } = require('../config/database');
+const { fixRowDates } = require('../utils/dateFix');
+
+// B-4d-7c: Date 무처리 직렬화 잔여분 — JSON 반환 경로에 로컬시간 문자열 적용
+function fixDates(row) {
+  return fixRowDates(row, [], ['updated_at']);
+}
 
 // ── Helper: parse item_code into numeric sort key for capacity-based ordering ──
 function parseItemCodeSortKey(code) {
@@ -53,7 +59,7 @@ const ModuleInventory = {
     }
     sql += ' ORDER BY module_type, item_code';
     const { rows } = await pool.query(sql, params);
-    return rows.sort((a, b) => {
+    return rows.map(fixDates).sort((a, b) => {
       if (a.module_type !== b.module_type) return a.module_type.localeCompare(b.module_type);
       const ka = parseItemCodeSortKey(a.item_code);
       const kb = parseItemCodeSortKey(b.item_code);
@@ -81,10 +87,55 @@ const ModuleInventory = {
     const { rows } = await pool.query(
       'SELECT * FROM module_inventory WHERE item_code = $1', [itemCode]
     );
-    return rows[0] || null;
+    return fixDates(rows[0] || null);
   },
 
-  // [B-4d-6 유보] getUsageByCode — EUL 의존 (equipment_usage_logs status='사용중' 직접조회)
+  // B-4d-7b: v1 현행 전체 pg 전환 — 목록은 computing_modules JOIN assets,
+  // 행별 사용자/위치 보강은 EUL 최신 in_use 조회 (v1 status='사용중' → event_type='in_use' 치환)
+  async getUsageByCode(itemCode) {
+    // computing_modules에서 직접 사용 현황 조회 (specification 직접 매칭 + model 폴백)
+    const { rows: miRows } = await pool.query(
+      'SELECT model, module_type FROM module_inventory WHERE item_code = $1', [itemCode]
+    );
+    const mi = miRows[0];
+
+    let conditions = 'cm.specification = $1';
+    const params = [itemCode];
+    if (mi && mi.model) {
+      conditions += " OR ((cm.specification IS NULL OR cm.specification = '') AND cm.module_type = $2 AND cm.model = $3)";
+      params.push(mi.module_type, mi.model);
+    }
+
+    const { rows } = await pool.query(`
+      SELECT cm.id, cm.count, cm.module_type, cm.asset_id,
+             a.management_number, a.model_name
+      FROM computing_modules cm
+      JOIN assets a ON cm.asset_id = a.id
+      WHERE a.status = 'active'
+        AND (${conditions})
+      ORDER BY a.management_number
+    `, params);
+
+    const result = [];
+    for (const row of rows) {
+      const { rows: logRows } = await pool.query(
+        "SELECT user_name, room, rack, unit FROM equipment_usage_logs WHERE management_number = $1 AND event_type = 'in_use' ORDER BY id DESC LIMIT 1",
+        [row.management_number]
+      );
+      const log = logRows[0];
+      result.push({
+        id: row.id,
+        management_number: row.management_number,
+        model_name: row.model_name,
+        user_name: log ? log.user_name : null,
+        status: '사용중',
+        location: log ? [log.room, log.rack, log.unit].filter(Boolean).join('/') : '',
+        slot: row.module_type ? row.module_type.toUpperCase() : '',
+        count: row.count || 1
+      });
+    }
+    return result;
+  },
 
   async recalculateInUse() {
     // computing_modules에서 직접 사용량 집계 (자사+업체 모두, 활성 자산만)
@@ -155,7 +206,7 @@ const ModuleInventory = {
     const { rows } = await pool.query(
       'SELECT * FROM module_inventory WHERE id = $1', [id]
     );
-    return rows[0] || null;
+    return fixDates(rows[0] || null);
   },
 
   async updateField(id, field, value) {
@@ -220,7 +271,7 @@ const ModuleInventory = {
     const { rows } = await pool.query(
       'SELECT * FROM module_inventory ORDER BY module_type, item_code'
     );
-    return rows;
+    return rows.map(fixDates);
   },
 
   async adjustQuantity(id, quantityChange) {
