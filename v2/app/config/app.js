@@ -90,22 +90,28 @@ module.exports = {
     { value: 'aidc', label: 'AIDC' }
   ],
 
-  subnets: [
-    { subnet: '10.100.40.0/24', zone: 'office', label: 'Office-1' },
-    { subnet: '10.100.50.0/24', zone: 'office', label: 'Office-2' },
-    { subnet: '10.100.250.0/24', zone: 'hpc', label: 'HPC-1' },
-    { subnet: '10.100.251.0/24', zone: 'hpc', label: 'HPC-2' },
-    { subnet: '10.100.252.0/24', zone: 'hpc', label: 'HPC-3' },
-    { subnet: '10.100.230.0/24', zone: 'aidc', label: 'AIDC-1' },
-    { subnet: '10.100.231.0/24', zone: 'aidc', label: 'AIDC-2' },
-    { subnet: '10.100.232.0/24', zone: 'aidc', label: 'AIDC-3' },
-    { subnet: '10.100.233.0/24', zone: 'aidc', label: 'AIDC-4' }
-  ],
+  // B-5b \ubc30\ud3ec \uc124\uc815\ud654: \uc0ac\uc774\ud2b8\ubcc4 IP \ub300\uc5ed\uc740 .env\uc758 SUBNETS_JSON\uc5d0\uc11c \ub85c\ub4dc.
+  // \ubbf8\uc124\uc815 \uc2dc \ube48 \ubc30\uc5f4 \u2014 ip_addresses \uc790\ub3d9 \uc2dc\ub4dc\uac00 skip\ub418\uc5b4 \ub370\uc774\ud130 0 \uc0c1\ud0dc\ub85c \uae30\ub3d9.
+  // \ud615\uc2dd: [{"subnet":"10.100.40.0/24","zone":"office","label":"Office-1"}, ...]
+  subnets: (() => {
+    if (!process.env.SUBNETS_JSON) return [];
+    try {
+      const parsed = JSON.parse(process.env.SUBNETS_JSON);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.error('[config] SUBNETS_JSON \ud30c\uc2f1 \uc2e4\ud328 \u2014 \ube48 \uc11c\ube0c\ub137\uc73c\ub85c \uae30\ub3d9:', e.message);
+      return [];
+    }
+  })(),
 
-  lendingDirections: [
-    { value: 'outbound', label: 'TTA \u2192 \uc678\ubd80 (\ub300\uc5ec)' },
-    { value: 'inbound', label: '\uc678\ubd80 \u2192 TTA (\ucc28\uc785)' }
-  ],
+  // B-5b \ubc30\ud3ec \uc124\uc815\ud654: \uae30\uad00\uba85 \ub77c\ubca8 (\uae30\ubcf8 TTA \u2014 \uc6b0\ub9ac \uc778\uc2a4\ud134\uc2a4 \ubb34\uc601\ud5a5)
+  lendingDirections: (() => {
+    const org = process.env.LENDING_ORG_LABEL || 'TTA';
+    return [
+      { value: 'outbound', label: org + ' \u2192 \uc678\ubd80 (\ub300\uc5ec)' },
+      { value: 'inbound', label: '\uc678\ubd80 \u2192 ' + org + ' (\ucc28\uc785)' }
+    ];
+  })(),
 
   lendingStatuses: [
     { value: 'active', label: '\ub300\uc5ec\uc911' },
@@ -138,7 +144,7 @@ module.exports = {
   ],
 
   ssh: {
-    defaultUser: 'root',
+    defaultUser: process.env.SSH_DEFAULT_USER || 'root',
     // 하드코딩 제거(B-4d-7a): 자격증명 없는 자산의 SSH 스캔 fallback — .env의 SSH_DEFAULT_PASSWORD
     defaultPassword: process.env.SSH_DEFAULT_PASSWORD || '',
     defaultPort: 22,

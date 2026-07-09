@@ -1,0 +1,16 @@
+# 앱 이미지에서 제외 (B-5b)
+pgdata/
+backups/
+.env
+.env.example
+scripts/
+db/
+app/node_modules/
+app/public/uploads/photos/assets/*
+app/public/uploads/photos/modules/*
+app/public/uploads/photos/lendings/*
+docker-compose*.yml
+Dockerfile
+.dockerignore
+*.md
+*.tar

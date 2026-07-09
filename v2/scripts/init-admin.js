@@ -7,7 +7,7 @@
  *   node init-admin.js --reset   # admin 비밀번호 강제 재설정
  *
  * 환경변수:
- *   ADMIN_PASSWORD  — admin 비밀번호 (기본 'qwe123')
+ *   INITIAL_ADMIN_PASSWORD — admin 비밀번호 (B-5b: 키 통일 + fallback 제거 — 미설정 시 중단)
  *   POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD — DB 접속 (.env에서 로드)
  *
  * 해시 스킴: v1 app/models/user.js와 100% 동일
@@ -37,7 +37,12 @@ function hashPassword(password) {
 async function main() {
   const args = process.argv.slice(2);
   const reset = args.includes('--reset');
-  const password = process.env.ADMIN_PASSWORD || 'qwe123';
+  // B-5b: .env 키(INITIAL_ADMIN_PASSWORD)와 통일, 하드코딩 fallback 제거
+  const password = process.env.INITIAL_ADMIN_PASSWORD;
+  if (!password) {
+    console.error('오류: INITIAL_ADMIN_PASSWORD가 설정되지 않았습니다. .env에 추가 후 재실행하세요.');
+    process.exit(1);
+  }
 
   const pool = new Pool({
     host: '127.0.0.1',
