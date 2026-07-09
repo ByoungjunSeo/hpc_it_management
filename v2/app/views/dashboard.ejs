@@ -80,10 +80,26 @@
     </div>
 
     <!-- Chart 6: Rack Usage by Room (Stacked Horizontal Bar) - Full Width -->
-    <div class="chart-card full-width">
+    <%# B-T1: tui-rack 클래스/게이지 블록은 tui-theme.css 활성 시에만 표시(hidden 해제).
+        테마 <link> 제거 시 게이지는 hidden으로 숨고 기존 차트가 그대로 보임 = 완전 원복 %>
+    <div class="chart-card full-width tui-rack">
         <div class="card-header"><h3>서버실별 랙 사용률</h3></div>
         <div class="chart-wrap">
             <canvas id="chartRackUsage"></canvas>
+        </div>
+        <div class="tui-rack-gauges" hidden>
+            <% roomRackUsage.forEach(r => {
+                const total = r.total_units || 0;
+                const used = r.used_units || 0;
+                const pct = total > 0 ? Math.round(used / total * 100) : 0;
+                const lvl = pct >= 90 ? 'crit' : pct >= 70 ? 'warn' : '';
+            %>
+            <div class="tui-gauge-row">
+                <span class="tui-gauge-label"><%= r.room_name %></span>
+                <div class="tui-gauge-track"><div class="tui-gauge-fill <%= lvl %>" style="width:<%= pct %>%"></div></div>
+                <span class="tui-gauge-value"><%= used %>/<%= total %>U <%= String(pct).padStart(3, ' ') %>%</span>
+            </div>
+            <% }) %>
         </div>
     </div>
 
@@ -287,6 +303,34 @@
         amber: '#b45309'
     };
 
+    // B-T1: TUI 테마(tui-theme.css) 활성 시 차트 색상만 토큰 연동.
+    // 테마 <link> 제거 시 --tui-theme 미정의 → 원본 색 그대로 = 자동 원복. 구조 무변경.
+    var GRID_COLOR = '#f1f5f9';
+    var TITLE_COLOR = '#64748b';
+    (function() {
+        var cs = getComputedStyle(document.documentElement);
+        if (!cs.getPropertyValue('--tui-theme').trim()) return;
+        function tok(name, fb) { var v = cs.getPropertyValue(name).trim(); return v || fb; }
+        COLORS.primary = tok('--tui-green', COLORS.primary);
+        COLORS.primaryLight = tok('--tui-border-bright', COLORS.primaryLight);
+        COLORS.teal = tok('--tui-teal', COLORS.teal);
+        COLORS.purple = tok('--tui-magenta', COLORS.purple);
+        COLORS.orange = tok('--tui-orange', COLORS.orange);
+        COLORS.gray = tok('--tui-fg-dim', COLORS.gray);
+        COLORS.green = tok('--tui-green', COLORS.green);
+        COLORS.blue = tok('--tui-blue', COLORS.blue);
+        COLORS.yellow = tok('--tui-yellow', COLORS.yellow);
+        COLORS.red = tok('--tui-red', COLORS.red);
+        COLORS.lightGray = tok('--tui-border', COLORS.lightGray);
+        COLORS.cyan = tok('--tui-cyan', COLORS.cyan);
+        COLORS.amber = tok('--tui-yellow', COLORS.amber);
+        GRID_COLOR = tok('--tui-border', GRID_COLOR);
+        TITLE_COLOR = tok('--tui-fg-dim', TITLE_COLOR);
+        Chart.defaults.color = tok('--tui-fg-dim', Chart.defaults.color);
+        Chart.defaults.borderColor = GRID_COLOR;
+        Chart.defaults.font.family = tok('--tui-font', Chart.defaults.font.family);
+    })();
+
     var typeColors = [COLORS.primary, COLORS.teal, COLORS.cyan, COLORS.purple, COLORS.amber, COLORS.orange, COLORS.gray];
     var statusMap = {
         'active': { label: '운영중', color: COLORS.green },
@@ -375,7 +419,7 @@
                 responsive: true, maintainAspectRatio: false, indexAxis: 'y',
                 plugins: { legend: { display: false } },
                 scales: {
-                    x: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+                    x: { beginAtZero: true, grid: { color: GRID_COLOR } },
                     y: { grid: { display: false } }
                 }
             }
@@ -398,7 +442,7 @@
                 responsive: true, maintainAspectRatio: false, cutout: '55%',
                 plugins: {
                     legend: { position: 'bottom', labels: { padding: 8, font: { size: 11 } } },
-                    title: { display: true, text: '소유 구분', font: { size: 12, weight: '500' }, color: '#64748b' }
+                    title: { display: true, text: '소유 구분', font: { size: 12, weight: '500' }, color: TITLE_COLOR }
                 }
             }
         });
@@ -421,7 +465,7 @@
                 responsive: true, maintainAspectRatio: false, cutout: '55%',
                 plugins: {
                     legend: { position: 'bottom', labels: { padding: 8, font: { size: 11 } } },
-                    title: { display: true, text: 'IP 할당', font: { size: 12, weight: '500' }, color: '#64748b' }
+                    title: { display: true, text: 'IP 할당', font: { size: 12, weight: '500' }, color: TITLE_COLOR }
                 }
             }
         });
@@ -458,7 +502,7 @@
                     }
                 },
                 scales: {
-                    x: { stacked: true, beginAtZero: true, title: { display: true, text: 'U (Units)' }, grid: { color: '#f1f5f9' } },
+                    x: { stacked: true, beginAtZero: true, title: { display: true, text: 'U (Units)' }, grid: { color: GRID_COLOR } },
                     y: { stacked: true, grid: { display: false } }
                 }
             }
@@ -504,7 +548,7 @@
                 plugins: { legend: { position: 'top' } },
                 scales: {
                     x: { grid: { display: false } },
-                    y: { beginAtZero: true, grid: { color: '#f1f5f9' } }
+                    y: { beginAtZero: true, grid: { color: GRID_COLOR } }
                 }
             }
         });

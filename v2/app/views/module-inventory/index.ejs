@@ -12,15 +12,15 @@
 <!-- Tabs -->
 <div class="tabs" style="display:flex; gap:0; margin-bottom:20px; border-bottom:2px solid var(--border, #ddd);">
     <a href="/module-inventory?tab=inventory<%= selectedType ? '&type=' + selectedType : '' %><%= selectedOwner ? '&inv_owner=' + selectedOwner : '' %>"
-       class="tab-link" style="padding:10px 24px; font-weight:<%= activeTab === 'inventory' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'inventory' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'inventory' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
+       class="tab-link<%= activeTab === 'inventory' ? ' active' : '' %>" style="padding:10px 24px; font-weight:<%= activeTab === 'inventory' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'inventory' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'inventory' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
         부품 재고
     </a>
     <a href="/module-inventory?tab=installed<%= filters.module_type ? '&module_type=' + filters.module_type : '' %><%= filters.search ? '&search=' + encodeURIComponent(filters.search) : '' %>"
-       class="tab-link" style="padding:10px 24px; font-weight:<%= activeTab === 'installed' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'installed' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'installed' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
+       class="tab-link<%= activeTab === 'installed' ? ' active' : '' %>" style="padding:10px 24px; font-weight:<%= activeTab === 'installed' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'installed' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'installed' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
         설치 현황
     </a>
     <a href="/module-inventory?tab=history"
-       class="tab-link" style="padding:10px 24px; font-weight:<%= activeTab === 'history' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'history' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'history' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
+       class="tab-link<%= activeTab === 'history' ? ' active' : '' %>" style="padding:10px 24px; font-weight:<%= activeTab === 'history' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'history' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'history' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
         입출고 이력
     </a>
 </div>
@@ -61,10 +61,22 @@
     <div class="stat-card">
         <div class="stat-value"><%= s.total || 0 %></div>
         <div class="stat-label"><%= typeLabels[s.module_type] || s.module_type %> (총)</div>
-        <div class="mt-1" style="font-size:13px;">
+        <%# B-T1.5: tui-fallback=테마 없을 때 원본 표기, tui-stat-gauge=테마 있을 때만
+            표시(hidden 해제)되는 세그먼트 게이지. 테마 <link> 제거 시 자동 원복 %>
+        <div class="mt-1 tui-fallback" style="font-size:13px;">
             <span style="color:#6b7280;">장비실: <%= s.storage || 0 %></span> /
             <span style="color:var(--primary);">사용: <%= s.in_use || 0 %></span> /
             <span style="color:var(--success);">여유: <%= s.spare || 0 %></span>
+        </div>
+        <div class="tui-stat-gauge" hidden>
+            <%
+              const gTotal = s.total || 0;
+              const gUsed = s.in_use || 0;
+              const gPct = gTotal > 0 ? Math.round(gUsed / gTotal * 100) : 0;
+              const gLvl = gPct >= 90 ? 'crit' : gPct >= 70 ? 'warn' : '';
+            %>
+            <div class="tui-gauge-track"><div class="tui-gauge-fill <%= gLvl %>" style="width:<%= gPct %>%"></div></div>
+            <div class="tui-stat-gauge-nums">장비실 <%= s.storage || 0 %> · 사용 <%= gUsed %> · 여유 <%= s.spare || 0 %></div>
         </div>
     </div>
     <% }) %>

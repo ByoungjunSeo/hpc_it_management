@@ -251,11 +251,13 @@ document.querySelectorAll('.stg-tab').forEach(function(btn) {
   btn.addEventListener('click', function() {
     var tabId = this.dataset.tab;
     document.querySelectorAll('.stg-tab').forEach(function(b) {
+      b.classList.remove('active'); // B-T1.7: 테마 탭 상태용 클래스 토글 (테마 없으면 무해)
       b.style.fontWeight = '400';
       b.style.borderBottom = '2px solid transparent';
       b.style.color = '#64748b';
       b.style.background = '#f8fafc';
     });
+    this.classList.add('active'); // B-T1.7
     this.style.fontWeight = '600';
     this.style.borderBottom = '2px solid #3b82f6';
     this.style.color = '#3b82f6';

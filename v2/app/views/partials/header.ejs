@@ -8,6 +8,7 @@
     <% if (typeof extraCss !== 'undefined' && extraCss) { %>
     <link rel="stylesheet" href="/css/<%= extraCss %>?v=<%= Date.now() %>">
     <% } %>
+    <link rel="stylesheet" href="/css/tui-theme.css?v=<%= Date.now() %>"><%# B-T1 TUI 테마 — 이 줄 삭제 시 완전 원복 %>
 </head>
 <body>
     <nav class="navbar">
@@ -16,9 +17,9 @@
         </div>
         <ul class="nav-links">
             <li><a href="/" class="<%= currentPath === '/' ? 'active' : '' %>">대시보드</a></li>
-            <li><a href="/chat" class="<%= currentPath.startsWith('/chat') ? 'active' : '' %>">AI 채팅</a></li>
+            <%# v2.1 복원 대상 (AI채팅 — v1 정찰: Ollama 모델/데이터 접근 범위 확인 후 복원.
+                복원 시: <li><a href="/chat">AI 채팅</a></li> + currentPath /chat active 클래스) %>
             <li><a href="/inventory" class="<%= currentPath.startsWith('/inventory') ? 'active' : '' %>">입출고</a></li>
-            <li><a href="/requests" class="<%= currentPath.startsWith('/requests') ? 'active' : '' %>">신청서</a></li>
             <li class="nav-dropdown<%= currentPath.startsWith('/assets') || currentPath.startsWith('/module-inventory') ? ' dropdown-active' : '' %>">
                 <a href="#" class="nav-dropdown-toggle">자산 ▾</a>
                 <ul class="nav-dropdown-menu">
@@ -34,30 +35,20 @@
                     <li><a href="/storage" class="<%= currentPath.startsWith('/storage') ? 'active' : '' %>">장비실</a></li>
                 </ul>
             </li>
-            <li class="nav-dropdown<%= currentPath.startsWith('/power-panel') || currentPath.startsWith('/network-layout') || currentPath.startsWith('/ip-management') || currentPath.startsWith('/discovery') ? ' dropdown-active' : '' %>">
+            <li class="nav-dropdown<%= currentPath.startsWith('/ip-management') || currentPath.startsWith('/discovery') ? ' dropdown-active' : '' %>">
                 <a href="#" class="nav-dropdown-toggle">인프라 ▾</a>
                 <ul class="nav-dropdown-menu">
-                    <li><a href="/power-panel" class="<%= currentPath.startsWith('/power-panel') ? 'active' : '' %>">전력분전반</a></li>
-                    <li><a href="/network-layout" class="<%= currentPath.startsWith('/network-layout') ? 'active' : '' %>">네트워크</a></li>
                     <li><a href="/ip-management" class="<%= currentPath.startsWith('/ip-management') ? 'active' : '' %>">IP 관리</a></li>
                     <li><a href="/discovery" class="<%= currentPath.startsWith('/discovery') ? 'active' : '' %>">자산 매칭</a></li>
                 </ul>
             </li>
-            <li class="nav-dropdown<%= currentPath.startsWith('/gpu-monitoring') || currentPath.startsWith('/audit-log') ? ' dropdown-active' : '' %>">
-                <a href="#" class="nav-dropdown-toggle">모니터링 ▾</a>
-                <ul class="nav-dropdown-menu">
-                    <li><a href="/gpu-monitoring" class="<%= currentPath.startsWith('/gpu-monitoring') ? 'active' : '' %>">GPU 모니터링</a></li>
-                    <li><a href="/audit-log" class="<%= currentPath.startsWith('/audit-log') ? 'active' : '' %>">이력관리</a></li>
-                </ul>
-            </li>
+            <%# B-T2: GPU모니터링 제거로 단일 항목이 된 모니터링 드롭다운은 평탄화 %>
+            <li><a href="/audit-log" class="<%= currentPath.startsWith('/audit-log') ? 'active' : '' %>">이력관리</a></li>
             <% if (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') { %>
-            <li class="nav-dropdown<%= currentPath.startsWith('/backup') || currentPath.startsWith('/admin') ? ' dropdown-active' : '' %>">
-                <a href="#" class="nav-dropdown-toggle">관리 ▾</a>
-                <ul class="nav-dropdown-menu">
-                    <li><a href="/backup" class="<%= currentPath.startsWith('/backup') ? 'active' : '' %>">백업</a></li>
-                    <li><a href="/admin/users" class="<%= currentPath.startsWith('/admin') ? 'active' : '' %>">계정관리</a></li>
-                </ul>
-            </li>
+            <%# v2.1 복원 대상 (백업 UI — v1 이식 아닌 scripts/backup.sh 호출형 재설계.
+                복원 시: <li><a href="/backup">백업</a></li> + currentPath /backup active 클래스) %>
+            <%# B-T2: 백업 제거로 단일 항목이 된 관리 드롭다운은 평탄화 %>
+            <li><a href="/admin/users" class="<%= currentPath.startsWith('/admin') ? 'active' : '' %>">계정관리</a></li>
             <% } %>
         </ul>
         <div class="nav-search">
