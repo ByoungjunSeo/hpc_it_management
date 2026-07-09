@@ -430,6 +430,28 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
   - **→ §5 화면 전환 4개 전부 소진: 입출고(B-4d-6) · 자산 prefill(B-4d-10) ·
     디스커버리(B-4d-7c) · 대시보드(B-4d-10). 잔여 0.**
 
+## B-5b 클린 배포 패키지 (2026-07-10, 커밋 대기)
+
+- 목표: 타 팀 배포 가능한 자립형 Docker 패키지(데이터 0 → compose up 한 번).
+- 산출물: `Dockerfile`(멀티스테이지 node:18-bookworm-slim + ipmitool, 비루트, HEALTHCHECK node) +
+  `docker-entrypoint.sh`(bootstrap-admin→server) + `app/bootstrap-admin.js`(멱등 admin 시드) +
+  `docker-compose.prod.yml`(DB+app, named volume, healthcheck depends_on) + `.dockerignore` +
+  `scripts/backup.sh`/`restore.sh` + `DEPLOY.md`(리눅스/윈도우/스캔요건/백업/업데이트/문제해결).
+- 배포 결함 수정: ① init-admin/bootstrap 키를 INITIAL_ADMIN_PASSWORD로 통일 + qwe123 fallback 제거
+  (미설정 시 명확한 에러로 중단) ② subnets 하드코딩 → SUBNETS_JSON env(미설정 시 시드 skip) ③
+  lendingDirections/ssh.defaultUser env화(기본값 유지로 운영 무영향) ④ config/database.js PGHOST env화.
+  **운영 인스턴스 무영향 확증**: .env에 현 TTA 대역/라벨 반영 → config 로드 시 기존 9대역·'TTA' 동일.
+- 스모크(격리 스택 it-assets-dist, 5434/3002, down -v 정리): 스키마 21테이블 자동생성 + admin 자동시드
+  + SUBNETS_JSON 미설정 시 ip_addresses 0 + 신규설치(로그인→서버실→랙→자산+IP+자격→사진업로드) +
+  스캔 실패경로(404/400) + 재기동 영속성 + admin 미설정 기동중단(exit 1) + 백업→변형→복원 원복.
+  운영 스택(5433/:3000) 무영향 확인.
+- ★ **빌드 환경 제약**: 이 개발 서버는 deb.debian.org(apt) egress 차단(npm registry만 허용) →
+  ipmitool apt 설치 단계가 이 서버에서 빌드 불가. 정품 이미지는 인터넷/사내미러 있는 환경에서
+  빌드해 tar 전달(원래 배포 전제와 부합). 스모크는 ipmitool 라인 뺀 임시 이미지로 앱 레벨 검증(정리 완료).
+- 선택 등급 잔여(백로그): 뷰 placeholder '10.100.x' 일반화, discovery IP 우선순위 '10.' 하드코딩,
+  ip-management 서브넷 추가 UI 부재(현재 SUBNETS_JSON로만 주입), READ_ONLY 미들웨어(B-6용).
+- **다음: B-6** — 배포 검증(윈도우 실검증 포함) + 3단계 전환(READ_ONLY 미들웨어 작성).
+
 ## B-4d 단계 전체 완결 (2026-07-09)
 
 | 조각 | 내용 | 커밋 |
@@ -440,10 +462,11 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 | B-4d-4 | 모듈 4모델 26메서드 | (가이드 기재) |
 | B-4d-5 | moduleInventory 16EP + BUG-1 수정 | 3300f61 / edc2b2d |
 | B-4d-6 | inventory 18EP + EUL 이벤트소싱(설계~6d 화면검증) | 6e1938d~1e330aa |
-| B-4d-7 | discovery 14EP + §5 + BUG-6 + 입회 실스캔 | 커밋 대기 |
-| B-4d-8 | fault류 4EP(assets 2 + lendings 2) | 커밋 대기 |
-| B-4d-9 | 기술부채 일괄(§5 주석 종결·날짜 스윕·BUG-3) | 커밋 대기 |
-| B-4d-10 | 대시보드 §5 + prefill 전환 — §5 잔여 0 | 커밋 대기 |
+| B-4d-7 | discovery 14EP + §5 + BUG-6 + 입회 실스캔 | c422dd3 |
+| B-4d-8 | fault류 4EP(assets 2 + lendings 2) | 1682007 |
+| B-4d-9 | 기술부채 일괄(§5 주석 종결·날짜 스윕·BUG-3) | 1682007 |
+| B-4d-10 | 대시보드 §5 + prefill 전환 — §5 잔여 0 | 1682007 |
+| (docs) | B-4d-7~10 완결 기록 + BUG 클로징 | 1816c76 |
 
 - 남은 스텁: racks power-control(BUG-2 신기능 트랙 확정) · inventory #18 migrate-psu(설계 확정)뿐.
 - **다음 단계: B-5 이후** — MIGRATION_PLAN 로드맵 확인 후 별도 세션에서 설계
