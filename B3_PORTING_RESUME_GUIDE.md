@@ -470,7 +470,19 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
     (requests/power-panel/network-layout/backup/gpu-monitoring/chat), backup.sh 격리 컨테이너명 동작(env 오버라이드).
   - 배포 전달물 스펙: tar `it-assets-2.0.0.tar.gz`(약 83MB gzip) / 이미지 `it-assets:2.0.0`(253MB, amd64,
     11레이어, node 비루트, ipmitool 1.8.19 포함).
-- **다음: B-6c** — 윈도우 사무 PC Docker Desktop/Rancher 실검증(서병준 입회) + 3단계 전환 READ_ONLY 미들웨어.
+- 6c: 윈도우 사무 PC Docker Desktop 클린 설치 실검증(서병준) → 문서결함 5건 + UI/기능 발견물 11건.
+  후속 처리(커밋: docs 1 + fix 3 + docs 1):
+  - 문서결함 5건(DEPLOY.md): [DOC-1]윈도우 UTF-8 편집 안내 [DOC-2]로드 명령 파일명 통일
+    [DOC-3]postgres:16-alpine 오프라인 전달 누락(→ 앱만 뜨고 db 없어 종료의 원인)
+    [DOC-4]db healthy 대기 인과·진단 안내 [DOC-5]http:// 스킴 명시 + SSL 오류 항목.
+  - FIX-A(BUG-7): 랙 미리보기 hover 잔상 — JS 인라인 → CSS :hover(inv-rack-empty).
+  - FIX-B: 이력관리 대상유형 한글화 — appConfig.auditTargetTypeLabels 14종(DB 불변, 표시계층).
+  - FIX-C: 입출고 버튼 텍스트 기호(▼입고/▷사용/↺반납/✎수정/✕삭제, 이모지 변형 없는 문자).
+  - INV-1(IP 미반영)/INV-2(입고 섀시 보관뷰 미표시): 조사 결과 **v1 동일·회귀 아님**
+    (BUG_TRACKING 판정 기록). 각각 v2/V2.1_BACKLOG.md BL-5(→B-6e 승격)/BL-3로 이관.
+  - 나머지 발견물 + 개편 요구: v2/V2.1_BACKLOG.md 신설(BL-1~5).
+- **다음: B-6d(2.0.1 재빌드 — FIX 반영 이미지) / B-6e(IP 서브넷 관리 CRUD, INV-1 해소)
+  / 3단계 전환 READ_ONLY 미들웨어.** 윈도우 실검증은 2.0.1로 재수행.
 
 ## B-4d 단계 전체 완결 (2026-07-09)
 

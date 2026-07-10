@@ -234,6 +234,43 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 
 ---
 
+## BUG-7: 랙 미리보기 hover 잔상 (B-6c 윈도우 검증 발견)
+- 상태: [완료] B-6c (FIX-A) | 방침: (나) 수정
+- 관련(v2): app/views/inventory/form.ejs (사용등록 화면 랙 미리보기)
+
+### 증상
+사용 등록 화면의 랙 미리보기에서 빈 칸 위로 마우스를 올리면 흰색으로 바뀌고, mouseout
+후에도 원복되지 않아 마우스가 지나간 자리가 전부 흰색으로 남음(TUI 다크 테마).
+
+### 원인
+빈 칸 `<td>`에 인라인 `onmouseenter="this.style.background='#f0f9ff'"
+onmouseleave="this.style.background='#fff'"` — mouseout 복원이 **원래 색을 저장하지 않고
+'#fff' 하드코딩**이라 테마 배경과 어긋나 흰색 잔상이 남음.
+
+### 수정 (B-6c)
+3곳의 인라인 JS hover 제거 → `class="inv-rack-empty"` + `<style>.inv-rack-empty:hover
+{ background:#f0f9ff !important; }`. hover 해제 시 CSS 규칙이 사라져 원배경 자동 복귀
+(JS가 style을 안 건드림 = 잔상 원천 제거). onclick(빈 칸 클릭 → Unit 자동입력)은 보존.
+
+---
+
+## 조사 판정 기록 (B-6c 윈도우 검증 — 회귀 아님, 향후 재질문 방지)
+
+### INV-1: 사용등록 IP가 IP 관리 화면에 미반영 → [v1 동일 — 회귀 아님]
+- 사용등록 IP는 `asset_ips`에 정상 저장. IP 관리 화면은 `ip_addresses` 풀만 조회.
+- `IpAddress.syncAssetIps`는 v1·v2 동일하게 `UPDATE ... WHERE ip_address=` — 풀에 있는
+  IP만 assigned, 없으면 무효(INSERT 안 함). v1은 서브넷 2,304행 시딩이 전제라 안 드러남.
+- 클린 설치(SUBNETS_JSON 미설정 → 풀 0)에선 v1이든 v2든 자산 IP가 화면에 안 뜸.
+- 대응: v2/V2.1_BACKLOG.md **BL-5(→ B-6e 승격)** 서브넷 CRUD + 풀 자동생성 설계로 해소 예정.
+
+### INV-2: 입고 직후 블레이드 섀시가 보관 장비 뷰 미표시 → [v1 동일 — 회귀 아님]
+- 보관 장비 뷰는 v1·v2 동일 SQL `WHERE rack_id IS NULL AND status IN
+  ('inactive','decommissioned')`. 입고는 status 기본 'active' → active 미배치 자산은 제외.
+- 즉 입고 직후 섀시/노드는 v1에서도 이 뷰에 안 뜸(자산현황 /assets엔 뜸).
+- 대응: v2/V2.1_BACKLOG.md **BL-3(시설 모델 재설계)** 에서 "미배치" 정의 재검토 범위 포함.
+
+---
+
 ## 분류 요약
 
 | 버그 | 방침 | 단계 | 비고 |
@@ -243,10 +280,11 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 | BUG-3 이동 UI | [완료] B-4d-9 | 모달 CSS 탭분기 밖 이동, 4모달 일괄 (UI 최종확인: 사용자) |
 | BUG-4 object Object | 종결(불요) | — | v2 details 단일 JSONB로 구조적 소멸(ad36abc) |
 | BUG-5 선반 잔존 | 미룸 확정 | cutover 후 UI 트랙 | 원인규명완료·영향0건, 렌더이중화 해소와 합동 |
-
-> **B-4d 종료 시점 잔여 미해결 = BUG-2(신기능 트랙)·BUG-5(UI 트랙) 2건뿐.**
-> BUG-1/3/4/6은 전부 [완료]/종결.
 | BUG-6 스캔 전체기록/이력무정보 | [완료] B-4d-7c | 변경분만 기록(A·A′) + 비고 합성(B) 실증 |
+| BUG-7 랙 미리보기 hover 잔상 | [완료] B-6c | CSS :hover로 대체(FIX-A) |
+
+> **잔여 미해결 = BUG-2(신기능 트랙)·BUG-5(UI 트랙) 2건뿐.** BUG-1/3/4/6/7은 전부 [완료]/종결.
+> INV-1/INV-2는 조사 결과 v1 동일(회귀 아님) — 각각 BL-5(→B-6e)/BL-3 백로그로.
 
 ## 기술부채 (버그 아님 — 트랙 분류 대기)
 - discovery #11 GET /lookup-ip 응답에 자격증명 **평문 password 포함** (B-4d-7b 확인).
