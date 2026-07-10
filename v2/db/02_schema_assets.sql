@@ -146,6 +146,21 @@ CREATE INDEX idx_ip_addresses_subnet ON ip_addresses(subnet);
 CREATE INDEX idx_ip_addresses_zone ON ip_addresses(network_zone);
 CREATE INDEX idx_ip_addresses_allocation ON ip_addresses(allocation_type);
 
+-- B-6e: 서브넷 마스터 (UI CRUD). ip_addresses(subnet 문자열)와 느슨한 결합 — FK 없이
+-- 앱 로직으로 풀 생성/정리. cidr = ip_addresses.subnet 매칭. label/설명 메타 보관.
+CREATE TABLE subnets (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    cidr TEXT NOT NULL UNIQUE,
+    network_zone TEXT NOT NULL
+        CHECK(network_zone IN ('office', 'hpc', 'aidc')),
+    description TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by TEXT
+);
+
+CREATE INDEX idx_subnets_zone ON subnets(network_zone);
+
 -- =========================
 -- ALTER TABLE: 미뤄둔 FK 추가
 -- =========================
