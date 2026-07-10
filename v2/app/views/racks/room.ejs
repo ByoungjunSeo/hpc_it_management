@@ -33,7 +33,7 @@
         </div>
         <div class="room-stat room-stat-util">
             <div class="room-util-bar">
-                <div class="room-util-fill" style="width:<%= room.stats.utilization %>%"></div>
+                <div class="room-util-fill<%= room.stats.utilization >= 90 ? ' critical' : room.stats.utilization >= 70 ? ' warning' : '' %>" style="width:<%= room.stats.utilization %>%"></div>
             </div>
             <span class="room-stat-label"><%= room.stats.usedU %>/<%= room.stats.totalU %>U (<%= room.stats.utilization %>%)</span>
         </div>

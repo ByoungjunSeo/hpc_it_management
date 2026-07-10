@@ -370,6 +370,91 @@ body .room-section-header h2 a { color: var(--tui-green); text-decoration: none;
 body .room-section-header h2 a:hover { text-decoration: underline; }
 body .room-section-header > .text-muted { margin-right: auto; }   /* 위치 라벨까지 왼쪽, 액션 버튼은 오른쪽 정렬 */
 
+/* ============================================================
+   B-T3 — rack 시각화 TUI 폴리시 (rack.css 무수정, 전부 덮어쓰기)
+   레이아웃(rowspan 3단 홀 구조) 무접촉 — 색/보더/게이지만.
+   ============================================================ */
+
+/* 액침탱크 계열: 시안 토큰으로 톤 정합 (범례 스와치와 셀이 같은 규칙 공유) */
+:root { --immersion-color: var(--tui-cyan); }
+body .rack-type-badge.immersion,
+body .wide-rack[data-rack-type="immersion"] .wide-rack-header,
+body .rack-thumbnail[data-rack-type="immersion"] .rack-thumb-header,
+body .legend-color.immersion-legend {
+    background: linear-gradient(135deg, var(--tui-cyan), var(--tui-teal));
+    color: #0d110d;
+}
+body .wide-rack[data-rack-type="immersion"] { border-color: rgba(34,211,238,0.4); }
+
+/* 드래그 하이라이트: 구 primary 블루 → green(배치 가능) / red 톤 정합(불가) */
+body .rack-drop-zone.drag-over { background: rgba(74,222,128,0.08); }
+body .rack-unit.drag-target, body .slot-row.drag-target, body .u-row.drag-target {
+    background: rgba(74,222,128,0.18) !important;
+}
+body .rack-unit.drag-invalid, body .slot-row.drag-invalid, body .u-row.drag-invalid {
+    background: rgba(248,113,113,0.12) !important;
+    box-shadow: 0 0 0 2px var(--tui-red);
+}
+body .rack-table tr.drag-target .u-num-cell { background: rgba(74,222,128,0.25); }
+body .rack-table tr.drag-target .u-cell-empty { background: rgba(74,222,128,0.15); }
+body .rack-table tr.drag-invalid .u-num-cell { background: rgba(248,113,113,0.25); border-color: var(--tui-red); }
+body .rack-table tr.drag-invalid .u-cell-empty { background: rgba(248,113,113,0.12); }
+body .rack-slot-table tr.drag-target td.slot-u-label,
+body .rack-slot-table tr.drag-target td.slot-hole-label { background: rgba(74,222,128,0.18); border-color: var(--tui-green); }
+body .rack-slot-table tr.drag-target td.slot-empty-cell { background: rgba(74,222,128,0.12); border-color: var(--tui-green); }
+body .rack-slot-table tr.drag-invalid td.slot-u-label,
+body .rack-slot-table tr.drag-invalid td.slot-hole-label { background: rgba(248,113,113,0.18); border-color: var(--tui-red); }
+body .rack-slot-table tr.drag-invalid td.slot-empty-cell { background: rgba(248,113,113,0.1); border-color: var(--tui-red); }
+
+/* 전원 상태 점: 톤을 TUI 팔레트로 (no_bmc 진슬레이트는 다크 배경에서 안 보여 승격) */
+body .power-dot.loading, body .power-dot-mini.loading { background: var(--tui-fg-dim); }
+body .power-dot.power-on, body .power-dot-mini.pwr-on { background: var(--tui-green); box-shadow: 0 0 4px rgba(74,222,128,0.7); }
+body .power-dot.power-off, body .power-dot-mini.pwr-off { background: var(--tui-red); box-shadow: 0 0 4px rgba(248,113,113,0.7); }
+body .power-dot.power-no_bmc, body .power-dot-mini.pwr-no_bmc { background: var(--tui-border-bright); }
+body .power-dot.power-error, body .power-dot-mini.pwr-error { background: var(--tui-yellow); }
+body .power-dot.power-unknown, body .power-dot-mini.pwr-unknown { background: var(--tui-magenta); }
+/* 인라인 전원 범례 점/전원 제어 버튼(채도 채움)도 같은 토큰으로 — 범례↔점 일치 */
+body [style*="background:#22c55e"] { background: var(--tui-green) !important; color: #0d110d !important; }
+body [style*="background:#ef4444"] { background: var(--tui-red) !important; color: #0d110d !important; }
+body [style*="background:#eab308"] { background: var(--tui-yellow) !important; color: #0d110d !important; }
+body [style*="background:#f59e0b"] { background: var(--tui-orange) !important; color: #0d110d !important; }
+body [style*="background:#1e293b"] { background: var(--tui-border-bright) !important; }
+
+/* 랙 usage 바 → btop 세그먼트 게이지 (대시보드/부품 현황과 동일 언어, 70/90 전환) */
+body .room-util-bar, body .rack-stats-usage-bar {
+    height: 12px;
+    padding: 2px;
+    background: #0a0d0a;
+    border: 1px solid var(--tui-border);
+    border-radius: 0;
+}
+body .room-util-fill, body .rack-stats-usage-fill {
+    background: repeating-linear-gradient(90deg, var(--tui-green) 0 5px, transparent 5px 8px);
+    border-radius: 0;
+}
+body .room-util-fill.warning, body .rack-stats-usage-fill.warning {
+    background: repeating-linear-gradient(90deg, var(--tui-yellow) 0 5px, transparent 5px 8px);
+}
+body .room-util-fill.critical, body .rack-stats-usage-fill.critical {
+    background: repeating-linear-gradient(90deg, var(--tui-red) 0 5px, transparent 5px 8px);
+}
+
+/* 셀 보더·U라벨 박스드로잉 언어 통일 (빈 칸/경계선이 다크에서 안 보이던 지점) */
+body .empty-unit { border-color: var(--tui-border); }
+body .u-asset-cell.blade-cell.u-cell-empty { border-color: var(--tui-border); }
+body .mini-u-asset.mini-empty { border-color: var(--tui-border); }
+body .slot-asset-cell { border-color: var(--tui-border); }
+body .slot-row.u-boundary { border-top-color: var(--tui-border-bright); }
+body .u-row.u-empty .hole-marker, body .slot-row.slot-empty .hole-marker { border-color: var(--tui-border); }
+body .u-num-cell { font-variant-numeric: tabular-nums; }
+/* 선반(shelf): 중립 회색 → 팔레트 회녹 */
+body .slot-row.slot-shelf, body .u-row.u-shelf, body .slot-asset-cell.slot-shelf {
+    background: var(--tui-border-bright) !important;
+}
+/* 잔여 dim 라벨 승격 */
+body .room-stat-label { color: var(--tui-fg-dim); }
+body .rack-thumb-btn { color: var(--tui-fg-dim); }
+
 /* ============ 로그인 (자체 레이아웃 — login.ejs에 테마 링크 별도 1줄, B-T2) ============ */
 body .login-card {
     border-radius: 0;
