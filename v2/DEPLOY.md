@@ -45,6 +45,9 @@ docker compose -f docker-compose.prod.yml up -d
 
 # 4) 접속: http://<서버IP>:<APP_PORT>  (기본 3001)
 #    최초 로그인: admin / <INITIAL_ADMIN_PASSWORD>
+
+# 5) IP 관리를 쓸 경우: IP 관리 화면에서 [＋ 서브넷 등록]으로 사용 대역을 등록
+#    (CIDR /16~/30, 등록 시 IP 풀 자동 생성). 서버실→랙→자산 등록은 화면에서 진행.
 ```
 
 > DB가 먼저 정상 기동해야 앱이 뜹니다(앱은 `depends_on: db(service_healthy)`로 대기).
@@ -92,12 +95,14 @@ docker compose -f docker-compose.prod.yml up -d
 | APP_PORT | | 웹 공개 포트 (기본 3001) |
 | SESSION_SECRET | ✔ | 세션 키 (32자+ 랜덤) |
 | INITIAL_ADMIN_PASSWORD | ✔ | 최초 admin 비밀번호 |
-| SUBNETS_JSON | | IP 관리 초기 대역(JSON). 미설정 시 빈 상태 — 화면에서 등록 |
+| SUBNETS_JSON | | **선택(레거시)**. 최초 기동 시 대역 자동 시드용. 표준은 IP 관리 화면 등록 |
 | LENDING_ORG_LABEL | | 대여 라벨 기관명 (예: TTA) |
 | SSH_DEFAULT_USER / SSH_DEFAULT_PASSWORD | | 스캔 fallback 계정/비번 |
 | OLLAMA_HOST / PORT / MODEL | | AI 스펙조회(선택). 미기동이어도 앱 정상 |
 
-> `SUBNETS_JSON`에 서브넷 추가 UI는 아직 없습니다(백로그). 초기 대역은 이 키로 주입하세요.
+> **서브넷 등록은 IP 관리 화면의 [＋ 서브넷 등록]이 표준입니다** (CIDR /16~/30, 등록 시 IP 풀 자동 생성).
+> `SUBNETS_JSON`은 최초 기동 시 대역을 미리 시드하고 싶을 때만 쓰는 선택(레거시) 항목이며,
+> 설정하지 않아도 화면에서 얼마든지 등록·삭제할 수 있습니다.
 
 ---
 
@@ -167,6 +172,6 @@ docker compose -f docker-compose.prod.yml up -d
 | 로그인 안 됨 | INITIAL_ADMIN_PASSWORD는 **최초 기동에만** 적용. 변경은 컨테이너 내 `node scripts/init-admin.js --reset` |
 | **재시작 후 데이터 사라짐** | `down -v` 사용 여부 확인 — **`-v` 가 named volume(DB·사진)을 삭제**함. 재시작·재생성은 §7(stop/start 또는 `-v` 없는 down→up)로. 복구는 백업본에서만 |
 | 스키마 없음(테이블 0) | pgdata 볼륨이 이미 초기화됨 — 스키마는 빈 볼륨에만 생성. **완전 초기화 목적일 때만** `down -v`(⚠ 전 데이터 삭제, §7 경고 참조) |
-| IP 관리 화면이 비어있음 | SUBNETS_JSON 미설정 — 정상. `.env`에 대역 JSON 추가 후 재시작 |
+| IP 관리 화면이 비어있음 | 서브넷 미등록 — 정상. **IP 관리 화면의 [＋ 서브넷 등록]으로 대역 추가**(CIDR /16~/30) |
 | 스캔 실패(unreachable/auth) | 대상 IP·자격증명 등록 확인 + 컨테이너→대상 22/TCP 방화벽 |
 | 사진 안 보임 | uploads named volume 확인: `docker volume ls` |

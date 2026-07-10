@@ -484,6 +484,25 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 - **다음: B-6d(2.0.1 재빌드 — FIX 반영 이미지) / B-6e(IP 서브넷 관리 CRUD, INV-1 해소)
   / 3단계 전환 READ_ONLY 미들웨어.** 윈도우 실검증은 2.0.1로 재수행.
 
+## B-6e IP 서브넷 관리 (2026-07-10, 커밋 완료)
+
+INV-1(클린 설치 시 IP 미반영) 해소 — 서브넷을 화면에서 CRUD하고 풀을 자동 생성.
+- Part 0 설계(a~e 승인): subnets 테이블 신설 / 마이그레이션+소급 / 삭제정책(assigned 차단,
+  reserved 고지) / SUBNETS_JSON 레거시 유지 / CIDR 형식.
+- Part 1 스키마(c134df6): db/02_schema_assets.sql에 subnets + scripts/migrate-add-subnets.js.
+  운영 v2 소급 9행, ip_addresses 2,304 무손상. 실행 전 pg_dump 백업(backups/, .gitignore).
+- Part 2 백엔드(89ceb0a): Subnet 모델 + IpAddress 확장(createPool/deletePool/countByAllocation/
+  findMissingFromPool, syncAssetIps 무수정) + 서브넷 CRUD 라우트(중복/겹침 검증, 삭제정책, audit
+  target_type='subnet') + 사용등록 풀밖 IP 경고 + FIX-B 라벨 '서브넷'.
+- Part 3 프론트(89ceb0a): 하드코딩 Office/HPC/AIDC 제거 → 서브넷 보유 zone만 동적 렌더(빈 zone
+  미렌더) + 서브넷 관리 UI + 삭제 고지(reserved) + 빈 상태 안내 + 통계 카드 유지.
+- Part 3-fix(7aea9ec): POST /subnets 크래시 근본 수정 — server.js unhandledRejection/
+  uncaughtException 안전망(node18은 미처리 rejection 시 프로세스 종료) + 미들웨어 try/catch.
+  CIDR /24 → **/16~/30 확장**(네트워크 주소 정렬검사, multi-row 배치 INSERT: /16 65,536행 2.6s,
+  CIDR 범위 겹침 검사, 상세 /24 블록 페이지네이션). 실환경 브라우저 검증 통과, 운영 원복.
+- 백로그: BL-5 완료 처리, BL-7(대량 블록 네비 개선)·BL-6(zone 사용자 정의화) 추가.
+- **다음: Part 4(사용등록 폼 가용 IP 조회 — 서브넷 선택→available 목록, 직접입력 병행) → B-6d.**
+
 ## B-4d 단계 전체 완결 (2026-07-09)
 
 | 조각 | 내용 | 커밋 |
