@@ -452,6 +452,26 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
   ip-management 서브넷 추가 UI 부재(현재 SUBNETS_JSON로만 주입), READ_ONLY 미들웨어(B-6용).
 - **다음: B-6** — 배포 검증(윈도우 실검증 포함) + 3단계 전환(READ_ONLY 미들웨어 작성).
 
+## B-6 배포 검증 (진행 중, 커밋 대기)
+
+- 6a: 맥북(Apple Silicon)에서 `buildx --platform linux/amd64` 크로스 빌드 → 정품 이미지
+  `it-assets:2.0.0`(ipmitool 포함) tar 생성. 5b 스모크는 ipmitool 뺀 임시 이미지였음.
+- 6b: 정품 tar 실 x86 서버 검증(격리 스택 it-assets-dist, down -v 정리, 운영 무접촉):
+  - 정품 확인: amd64, User=node(비루트, uid 1000), HEALTHCHECK node 기반, **ipmitool 1.8.19 포함**,
+    253MB/11레이어, HEALTHCHECK healthy.
+  - DEPLOY.md 리허설(문자 그대로) → [문서 결함] 2건 발견·수정:
+    ① compose.prod의 `image: it-assets-app:2.0` + `build: .` — 정품 태그(it-assets:2.0.0)와 불일치 +
+       배포지엔 Dockerfile 없어 빌드 실패 → build 제거 + 태그 it-assets:2.0.0 통일.
+    ② DEPLOY.md가 로드 태그·APP_IMAGE 안내 없음 → load 출력 태그 명시 + APP_IMAGE/프로젝트명 분리 안내
+       + 문제해결 표에 태그 불일치 항목 추가.
+  - 클린 설치 재현: 21테이블 자동생성 + admin 자동시드 + SUBNETS_JSON 미설정 0행 + 신규설치
+    (서버실→랙→자산+IP+자격) + 스캔 실패경로(404) + 사진업로드 + 재기동 영속성 + backup→복원 원복.
+  - 정품 추가분: **TUI 테마 렌더**(tui-theme.css 링크 + 대시보드 tui-rack), **죽은 메뉴 6개 부재**
+    (requests/power-panel/network-layout/backup/gpu-monitoring/chat), backup.sh 격리 컨테이너명 동작(env 오버라이드).
+  - 배포 전달물 스펙: tar `it-assets-2.0.0.tar.gz`(약 83MB gzip) / 이미지 `it-assets:2.0.0`(253MB, amd64,
+    11레이어, node 비루트, ipmitool 1.8.19 포함).
+- **다음: B-6c** — 윈도우 사무 PC Docker Desktop/Rancher 실검증(서병준 입회) + 3단계 전환 READ_ONLY 미들웨어.
+
 ## B-4d 단계 전체 완결 (2026-07-09)
 
 | 조각 | 내용 | 커밋 |

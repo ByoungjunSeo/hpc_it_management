@@ -9,22 +9,24 @@
 
 | 파일 | 역할 |
 |------|------|
-| `it-assets-app.tar` | 앱 이미지 (별도 전달, `docker load`) |
+| `it-assets-2.0.0.tar.gz` | 앱 이미지 (별도 전달, `docker load`). 로드 태그: **`it-assets:2.0.0`** |
 | `docker-compose.prod.yml` | DB(postgres:16-alpine) + 앱 스택 |
 | `db/*.sql` | 최초 기동 시 스키마 자동 생성 |
 | `.env.example` | 환경변수 템플릿 (`.env`로 복사해 작성) |
 | `scripts/backup.sh` / `restore.sh` | 백업 / 복원 |
 
-이미지는 인터넷/사내미러가 있는 환경에서 빌드해 tar로 만듭니다(앱 이미지에 ipmitool 포함 —
-apt 필요). 빌드 예: `docker build -t it-assets-app:2.0 .` → `docker save -o it-assets-app.tar it-assets-app:2.0`
+이미지는 인터넷/사내미러가 있는 환경에서 빌드해 tar로 만듭니다(앱 이미지에 ipmitool 포함 — apt 필요).
+빌드 예: `docker build -t it-assets:2.0.0 .` → `docker save it-assets:2.0.0 | gzip > it-assets-2.0.0.tar.gz`
+> compose.prod.yml의 앱 이미지 태그는 **`it-assets:2.0.0`** 고정입니다. 다른 태그로 로드했다면
+> `.env`에 `APP_IMAGE=<태그>` 를 지정하세요. (배포 tar에는 Dockerfile이 없어 compose가 빌드하지 않습니다.)
 
 ---
 
 ## 1. 리눅스 서버 설치
 
 ```bash
-# 1) 이미지 적재
-docker load -i it-assets-app.tar
+# 1) 이미지 적재 (→ "Loaded image: it-assets:2.0.0" 출력 확인)
+gunzip -c it-assets-2.0.0.tar.gz | docker load
 
 # 2) 환경변수 작성 (CHANGE_ME 전부 채움 — 특히 아래 필수 키)
 cp .env.example .env
@@ -36,6 +38,10 @@ docker compose -f docker-compose.prod.yml up -d
 # 4) 접속: http://<서버IP>:<APP_PORT>  (기본 3001)
 #    최초 로그인: admin / <INITIAL_ADMIN_PASSWORD>
 ```
+
+> 여러 인스턴스를 한 호스트에서 돌리려면 프로젝트명을 분리하세요:
+> `docker compose -p <이름> -f docker-compose.prod.yml up -d` (컨테이너명이 `<이름>-app-1` 등이 됨).
+> backup/restore도 `COMPOSE_PROJECT=<이름>` 환경변수로 같은 컨테이너를 가리킵니다.
 
 필수 `.env` 키(미설정 시 기동 실패):
 - `POSTGRES_PASSWORD` — DB 비밀번호
@@ -117,6 +123,7 @@ docker compose -f docker-compose.prod.yml up -d   # 앱만 재생성, 볼륨 유
 
 | 증상 | 원인 / 조치 |
 |------|------------|
+| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.0.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
 | 앱 컨테이너가 바로 종료 | `.env`에 INITIAL_ADMIN_PASSWORD/SESSION_SECRET/POSTGRES_PASSWORD 누락 — 로그 `docker compose logs app` 확인 |
 | 로그인 안 됨 | INITIAL_ADMIN_PASSWORD는 **최초 기동에만** 적용. 변경은 컨테이너 내 `node scripts/init-admin.js --reset` |
 | 스키마 없음(테이블 0) | pgdata 볼륨이 이미 초기화됨 — 스키마는 빈 볼륨에만 생성. 초기화하려면 `down -v`(데이터 삭제 주의) |
