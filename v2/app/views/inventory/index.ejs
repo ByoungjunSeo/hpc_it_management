@@ -3,8 +3,8 @@
 <div class="page-header">
     <h1>입출고 관리</h1>
     <div class="btn-group">
-        <a href="/inventory/incoming" class="btn btn-success">+ 입고 등록</a>
-        <a href="/inventory/new" class="btn btn-primary">+ 사용 등록</a>
+        <a href="/inventory/incoming" class="btn btn-success">▼ 입고 등록</a>
+        <a href="/inventory/new" class="btn btn-primary">▷ 사용 등록</a>
     </div>
 </div>
 
@@ -307,12 +307,12 @@
                         <% if (log.status === '사용중') { %>
                         <form method="POST" action="/inventory/<%= log.id %>/return" style="display:inline" onsubmit="return confirm('반납 처리하시겠습니까?')">
                             <input type="hidden" name="return_date" value="<%= new Date().toISOString().split('T')[0] %>">
-                            <button type="submit" class="btn btn-sm btn-warning">반납</button>
+                            <button type="submit" class="btn btn-sm btn-warning">↺ 반납</button>
                         </form>
                         <% } %>
-                        <a href="/inventory/<%= log.id %>/edit" class="btn btn-sm btn-outline">수정</a>
+                        <a href="/inventory/<%= log.id %>/edit" class="btn btn-sm btn-outline">✎ 수정</a>
                         <form method="POST" action="/inventory/<%= log.id %>/delete" style="display:inline" onsubmit="return confirm('삭제하시겠습니까?')">
-                            <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                            <button type="submit" class="btn btn-sm btn-danger">✕ 삭제</button>
                         </form>
                     </td>
                 </tr>
