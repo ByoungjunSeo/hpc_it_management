@@ -79,7 +79,7 @@ docker compose -f docker-compose.prod.yml up -d
    docker compose -f docker-compose.prod.yml up -d
    ```
 3. named volume(pgdata/uploads)을 쓰므로 윈도우 경로 퍼미션 문제 없음.
-   브라우저 주소창에 **`http://localhost:3001`** — 반드시 `http://` 부터 입력(§7 SSL 오류 참고).
+   브라우저 주소창에 **`http://localhost:3001`** — 반드시 `http://` 부터 입력(§8 SSL 오류 참고).
 
 ---
 
@@ -137,7 +137,27 @@ docker compose -f docker-compose.prod.yml up -d      # 앱만 재생성, 볼륨 
 
 ---
 
-## 7. 문제 해결
+## 7. 재시작 / 중지 / 초기화
+
+데이터(DB·업로드 사진)는 named volume(`pgdata`, `uploads`)에 보존됩니다. 아래 명령을 구분해서 쓰세요.
+
+```bash
+# 잠깐 중지 → 재기동 (데이터 유지)
+docker compose -f docker-compose.prod.yml stop
+docker compose -f docker-compose.prod.yml start
+
+# 컨테이너 재생성 (업데이트·설정 변경 시. 볼륨은 유지되므로 데이터 유지)
+docker compose -f docker-compose.prod.yml down     # ⚠ -v 절대 붙이지 말 것
+docker compose -f docker-compose.prod.yml up -d
+```
+
+> ⚠ **`down -v` 는 모든 데이터(DB·업로드 사진)를 영구 삭제합니다.**
+> named volume(pgdata/uploads)까지 지우므로 **완전 초기화 목적일 때만** 사용하세요.
+> 평소 재시작·재생성에는 절대 `-v` 를 붙이지 마세요 — 되돌릴 수 없습니다(백업본으로만 복구).
+
+---
+
+## 8. 문제 해결
 
 | 증상 | 원인 / 조치 |
 |------|------------|
@@ -145,7 +165,8 @@ docker compose -f docker-compose.prod.yml up -d      # 앱만 재생성, 볼륨 
 | `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.0.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
 | 앱 컨테이너가 바로 종료 | ① DB 이미지 누락(오프라인) — `docker images`에 `postgres:16-alpine` 있는지 + `... ps`로 db healthy 확인 ② `.env`에 INITIAL_ADMIN_PASSWORD/SESSION_SECRET/POSTGRES_PASSWORD 누락 — `docker compose logs app` 확인 |
 | 로그인 안 됨 | INITIAL_ADMIN_PASSWORD는 **최초 기동에만** 적용. 변경은 컨테이너 내 `node scripts/init-admin.js --reset` |
-| 스키마 없음(테이블 0) | pgdata 볼륨이 이미 초기화됨 — 스키마는 빈 볼륨에만 생성. 초기화하려면 `down -v`(데이터 삭제 주의) |
+| **재시작 후 데이터 사라짐** | `down -v` 사용 여부 확인 — **`-v` 가 named volume(DB·사진)을 삭제**함. 재시작·재생성은 §7(stop/start 또는 `-v` 없는 down→up)로. 복구는 백업본에서만 |
+| 스키마 없음(테이블 0) | pgdata 볼륨이 이미 초기화됨 — 스키마는 빈 볼륨에만 생성. **완전 초기화 목적일 때만** `down -v`(⚠ 전 데이터 삭제, §7 경고 참조) |
 | IP 관리 화면이 비어있음 | SUBNETS_JSON 미설정 — 정상. `.env`에 대역 JSON 추가 후 재시작 |
 | 스캔 실패(unreachable/auth) | 대상 IP·자격증명 등록 확인 + 컨테이너→대상 22/TCP 방화벽 |
 | 사진 안 보임 | uploads named volume 확인: `docker volume ls` |
