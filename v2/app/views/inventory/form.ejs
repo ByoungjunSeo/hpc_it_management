@@ -1,5 +1,10 @@
 <%- include('../partials/header', { title, currentPath, extraCss }) %>
 
+<style>
+/* FIX-A(BUG-7): 랙 미리보기 빈 칸 hover — JS 인라인 대체. 벗어나면 규칙이 사라져 원배경 자동 복귀 */
+.inv-rack-empty:hover { background: #f0f9ff !important; }
+</style>
+
 <%
   const l = log || {};
   const action = isEdit ? '/inventory/' + l.id : '/inventory';
@@ -1547,6 +1552,8 @@ function renderInvRackPreview(data) {
             var hasRight = !!m.right;
 
             var cellH = 'height:18px; padding:1px 4px; border:1px solid #e2e8f0; font-size:10px; vertical-align:middle;';
+            // FIX-A(BUG-7): hover는 CSS :hover(.inv-rack-empty)로 — JS로 배경 직접 지정 시
+            // mouseout 복원이 #fff 하드코딩이라 테마 배경과 어긋나 잔상이 남았음.
             var emptyCell = cellH + ' background:#fff; cursor:pointer;';
 
             html += '<tr data-slot="' + slot + '" data-u="' + u + '" data-h="' + h + '">';
@@ -1577,7 +1584,7 @@ function renderInvRackPreview(data) {
                     if (isStart) html += '<span style="color:' + occTextColors.left + '; font-weight:500; font-size:10px;">' + escapeInvHtml(a.name) + '</span>';
                     html += '</td>';
                 } else {
-                    html += '<td style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                    html += '<td class="inv-rack-empty" style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')"></td>';
                 }
                 if (hasRight) {
                     var a = m.right;
@@ -1586,10 +1593,10 @@ function renderInvRackPreview(data) {
                     if (isStart) html += '<span style="color:' + occTextColors.right + '; font-weight:500; font-size:10px;">' + escapeInvHtml(a.name) + '</span>';
                     html += '</td>';
                 } else {
-                    html += '<td style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                    html += '<td class="inv-rack-empty" style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')"></td>';
                 }
             } else {
-                html += '<td colspan="2" style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                html += '<td colspan="2" class="inv-rack-empty" style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')"></td>';
             }
             html += '</tr>';
         }
