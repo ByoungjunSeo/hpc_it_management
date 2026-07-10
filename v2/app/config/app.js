@@ -118,6 +118,25 @@ module.exports = {
     { value: 'returned', label: '\ubc18\ub0a9\uc644\ub8cc' }
   ],
 
+  // FIX-B: \uac10\uc0ac\ub85c\uadf8 \ub300\uc0c1\uc720\ud615 \ud45c\uc2dc \ub77c\ubca8 (DB\uac12 \ubd88\ubcc0 \u2014 \ud45c\uc2dc \uacc4\uce35 \ubcc0\ud658\ub9cc)
+  // \ucf54\ub4dc \uc804\uc218 \uc870\uc0ac \uae30\uc900 14\uc885. \ubbf8\ub798 \uac12\uc740 raw fallback.
+  auditTargetTypeLabels: {
+    asset: '\uc790\uc0b0',
+    asset_incoming: '\uc7a5\ube44\uc785\uace0',
+    equipment_usage: '\uc0ac\uc6a9\ub4f1\ub85d',
+    computing_module: '\ucef4\ud4e8\ud305\ubaa8\ub4c8',
+    module_inventory: '\ubd80\ud488\uc7ac\uace0',
+    module_incoming: '\ubd80\ud488\uc785\uace0',
+    module_usage: '\ubd80\ud488\uc0ac\uc6a9',
+    lending: '\ub300\uc5ec',
+    rack: '\ub799',
+    room: '\uc11c\ubc84\uc2e4',
+    ip: 'IP',
+    photo: '\uc0ac\uc9c4',
+    user: '\uc0ac\uc6a9\uc790',
+    vendor_intake: '\uc5c5\uccb4\uc785\uace0\uc2e0\uccad'
+  },
+
   powerNodeTypes: [
     { value: 'main_panel', label: '메인 분전반' },
     { value: 'sub_panel', label: '분전반' },

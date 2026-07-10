@@ -30,7 +30,7 @@
                 <select name="target_type" class="form-control">
                     <option value="">전체</option>
                     <% targetTypes.forEach(t => { %>
-                    <option value="<%= t %>" <%= filters.target_type === t ? 'selected' : '' %>><%= t %></option>
+                    <option value="<%= t %>" <%= filters.target_type === t ? 'selected' : '' %>><%= appConfig.auditTargetTypeLabels[t] || t %></option>
                     <% }) %>
                 </select>
             </div>
@@ -90,7 +90,7 @@
                             <%= log.action === 'create' ? '생성' : log.action === 'update' ? '수정' : log.action === 'delete' ? '삭제' : log.action === 'login' ? '로그인' : log.action === 'scan' ? '스캔' : log.action === 'backup' ? '백업' : log.action %>
                         </span>
                     </td>
-                    <td data-sort="<%= log.target_type || '' %>"><%= log.target_type || '-' %></td>
+                    <td data-sort="<%= log.target_type || '' %>"><%= log.target_type ? (appConfig.auditTargetTypeLabels[log.target_type] || log.target_type) : '-' %></td>
                     <td data-sort="<%= log.target_label || '' %>">
                         <% if (log.target_id && log.target_type === 'asset') { %>
                         <a href="/assets/<%= log.target_id %>"><%= log.target_label || log.target_id %></a>
