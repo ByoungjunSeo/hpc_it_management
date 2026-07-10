@@ -132,6 +132,7 @@ module.exports = {
     rack: '\ub799',
     room: '\uc11c\ubc84\uc2e4',
     ip: 'IP',
+    subnet: '\uc11c\ube0c\ub137',
     photo: '\uc0ac\uc9c4',
     user: '\uc0ac\uc6a9\uc790',
     vendor_intake: '\uc5c5\uccb4\uc785\uace0\uc2e0\uccad'

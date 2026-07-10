@@ -2,6 +2,7 @@
 
 <div class="page-header">
     <h1>IP 관리</h1>
+    <button type="button" class="btn btn-primary" onclick="document.getElementById('subnetForm').hidden = !document.getElementById('subnetForm').hidden;">＋ 서브넷 등록</button>
 </div>
 
 <div class="stats-grid">
@@ -23,21 +24,66 @@
     </div>
 </div>
 
+<!-- 서브넷 등록 폼 (B-6e) -->
+<div id="subnetForm" class="card" hidden>
+    <div class="card-header"><h2>서브넷 등록</h2></div>
+    <form method="POST" action="/ip-management/subnets" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; padding:12px;">
+        <div class="form-group" style="margin:0;">
+            <label>이름</label>
+            <input type="text" name="name" class="form-control" placeholder="예: Office-3" required>
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>대역 (CIDR /24)</label>
+            <input type="text" name="cidr" class="form-control" placeholder="예: 10.100.60.0/24" required>
+        </div>
+        <div class="form-group" style="margin:0;">
+            <label>네트워크 구분</label>
+            <select name="network_zone" class="form-control" required>
+                <% appConfig.networkZones.forEach(z => { %>
+                <option value="<%= z.value %>"><%= z.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group" style="margin:0; flex:1; min-width:160px;">
+            <label>설명 (선택)</label>
+            <input type="text" name="description" class="form-control" placeholder="설명">
+        </div>
+        <button type="submit" class="btn btn-success">＋ 등록</button>
+    </form>
+    <p class="text-muted" style="padding:0 12px 12px;">등록 시 해당 대역의 IP 풀(256개)이 자동 생성됩니다. 현재 /24만 지원합니다.</p>
+</div>
+
+<%
+  // B-6e: 서브넷 보유 zone만 동적 렌더 (빈 zone 섹션 미렌더 — 보완 2)
+  const byZone = {};
+  subnets.forEach(s => { (byZone[s.network_zone] = byZone[s.network_zone] || []).push(s); });
+%>
+
+<% if (subnets.length === 0) { %>
+<div class="card">
+    <div style="padding:32px; text-align:center;">
+        <p class="text-muted">등록된 서브넷이 없습니다.</p>
+        <p class="text-muted">IP 풀을 사용하려면 서브넷을 먼저 등록하세요.</p>
+        <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="document.getElementById('subnetForm').hidden = false; window.scrollTo(0,0);">＋ 서브넷 등록</button>
+    </div>
+</div>
+<% } else { %>
 <% appConfig.networkZones.forEach(zone => { %>
+<% if (byZone[zone.value] && byZone[zone.value].length > 0) { %>
 <div class="card">
     <div class="card-header">
         <h2><%= zone.label %> 네트워크</h2>
     </div>
     <div class="subnet-list">
-        <% subnetStats.filter(s => s.network_zone === zone.value).forEach(s => { %>
-        <a href="/ip-management/subnet/<%= encodeURIComponent(s.subnet) %>" class="subnet-item">
-            <div class="subnet-info">
-                <strong><%= s.subnet %></strong>
-                <span class="text-muted"><%= appConfig.subnets.find(sub => sub.subnet === s.subnet)?.label || '' %></span>
-            </div>
+        <% byZone[zone.value].forEach(s => { %>
+        <div class="subnet-item" style="display:flex; align-items:center; gap:12px;">
+            <a href="/ip-management/subnet/<%= encodeURIComponent(s.cidr) %>" class="subnet-info" style="flex:1; display:flex; flex-direction:column;">
+                <strong><%= s.cidr %></strong>
+                <span class="text-muted"><%= s.name %></span>
+            </a>
             <div class="subnet-bar">
                 <div class="progress-bar" style="width:200px; height:12px;">
-                    <div class="progress-fill" style="width:<%= s.total > 0 ? ((s.assigned + s.reserved) / s.total * 100) : 0 %>%; background:<%= (s.assigned + s.reserved) / s.total > 0.8 ? 'var(--danger)' : 'var(--primary)' %>;"></div>
+                    <div class="progress-fill" style="width:<%= s.total > 0 ? ((Number(s.assigned) + Number(s.reserved)) / s.total * 100) : 0 %>%; background:<%= s.total > 0 && (Number(s.assigned) + Number(s.reserved)) / s.total > 0.8 ? 'var(--danger)' : 'var(--primary)' %>;"></div>
                 </div>
             </div>
             <div class="subnet-counts">
@@ -45,10 +91,32 @@
                 <span class="badge badge-primary"><%= s.assigned %> 할당</span>
                 <span class="badge badge-secondary"><%= s.reserved %> 예약</span>
             </div>
-        </a>
+            <form method="POST" action="/ip-management/subnets/<%= s.id %>/delete" style="display:inline; margin:0;"
+                  onsubmit="return confirmSubnetDelete(this, '<%= s.cidr %>', <%= Number(s.assigned) %>, <%= Number(s.reserved) %>);">
+                <button type="submit" class="btn btn-sm btn-danger">✕ 삭제</button>
+            </form>
+        </div>
         <% }) %>
     </div>
 </div>
+<% } %>
 <% }) %>
+<% } %>
+
+<script>
+// B-6e 삭제 확인: assigned는 백엔드 차단(안내), reserved는 함께 삭제 고지 (보완 1)
+function confirmSubnetDelete(form, cidr, assigned, reserved) {
+    if (assigned > 0) {
+        alert('삭제 불가: ' + cidr + ' 대역에 할당된 IP ' + assigned + '개가 있습니다. 먼저 반납하세요.');
+        return false;
+    }
+    var msg = '서브넷 ' + cidr + ' 와 IP 풀(256개)을 삭제합니다.';
+    if (reserved > 0) {
+        msg += '\n\n⚠ 이 대역에 예약됨 ' + reserved + '개가 포함되어 함께 삭제됩니다.';
+    }
+    msg += '\n\n계속하시겠습니까?';
+    return confirm(msg);
+}
+</script>
 
 <%- include('../partials/footer', { extraJs }) %>

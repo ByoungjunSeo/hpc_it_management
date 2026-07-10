@@ -883,7 +883,14 @@ router.post('/', requireMaintenance, async (req, res) => {
             if (assetIps.length > 0) {
               await AssetIp.deleteByAsset(asset.id);
               await AssetIp.bulkCreate(asset.id, assetIps);
-              await IpAddress.syncAssetIps(asset.id, assetIps.map(ip => ip.ip_address));
+              const ipList = assetIps.map(ip => ip.ip_address);
+              await IpAddress.syncAssetIps(asset.id, ipList);
+              // B-6e: 풀에 없는 IP는 asset_ips엔 저장되나 IP 관리 화면(풀)엔 반영 안 됨 — 경고
+              const missing = await IpAddress.findMissingFromPool(ipList);
+              if (missing.length > 0) {
+                req.flash('error', '주의: 등록한 IP 중 ' + missing.join(', ') +
+                  ' 는 IP 풀에 없어 IP 관리 화면에 반영되지 않습니다. 해당 서브넷을 먼저 등록하세요.');
+              }
             }
 
             // Sync credentials → asset_credentials table
