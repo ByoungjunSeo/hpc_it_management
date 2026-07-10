@@ -37,6 +37,7 @@ app.use(session({
     pool: pool,
     tableName: 'session',
   }),
+  name: 'itassets_v2.sid', // B-6b-fix: v1(:3000)과 쿠키명 분리 — 기본 connect.sid 공유 시 상호 로그아웃
   secret: process.env.SESSION_SECRET || 'it-asset-secret-key',
   resave: false,
   saveUninitialized: false,
