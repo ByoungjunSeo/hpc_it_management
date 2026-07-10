@@ -7,6 +7,30 @@ function fixDates(row) {
   return fixRowDates(row, [], ['created_at', 'updated_at']);
 }
 
+// ── B-6e: CIDR 유틸 (/16~/30) ──
+function ipToInt(ip) {
+  const p = ip.split('.').map(Number);
+  return ((p[0] << 24) >>> 0) + (p[1] << 16) + (p[2] << 8) + p[3];
+}
+function intToIp(n) {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join('.');
+}
+// cidr('10.0.0.0/22') → { firstInt, lastInt, size, prefix }
+function cidrRange(cidr) {
+  const [base, prefixStr] = cidr.split('/');
+  const prefix = parseInt(prefixStr, 10);
+  const size = Math.pow(2, 32 - prefix);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const firstInt = (ipToInt(base) & mask) >>> 0;
+  return { firstInt, lastInt: firstInt + size - 1, size, prefix };
+}
+// 두 CIDR 범위가 겹치는지
+function cidrsOverlap(a, b) {
+  const ra = cidrRange(a);
+  const rb = cidrRange(b);
+  return ra.firstInt <= rb.lastInt && rb.firstInt <= ra.lastInt;
+}
+
 const IpAddress = {
   // B-6e: 최초 기동 시 SUBNETS_JSON(appConfig.subnets)을 subnets 테이블 + ip_addresses 풀에
   // 동시 시딩. subnets 테이블이 비었을 때만 동작(멱등). 이후 서브넷 관리는 UI(subnets CRUD).
@@ -35,18 +59,33 @@ const IpAddress = {
     }
   },
 
-  // /24 대역 256행(0~255) 생성. client 없으면 자체 연결.
+  // CIDR 대역 전체(네트워크~브로드캐스트 포함) 풀 생성. multi-row 배치 INSERT.
+  // /16~/30 지원. 기존 /24 동작(256행 전주소 시딩)과 정합 — 제외 없이 전 범위.
   async _insertPool(client, cidr, zone) {
-    const base = cidr.split('/')[0];
-    const parts = base.split('.');
-    for (let i = 0; i < 256; i++) {
-      const ip = parts[0] + '.' + parts[1] + '.' + parts[2] + '.' + i;
+    const { firstInt, size } = cidrRange(cidr);
+    const BATCH = 1000;
+    let batch = [];
+    const flush = async () => {
+      if (batch.length === 0) return;
+      // (ip, subnet, zone) 3열 묶음 → VALUES ($1,$2,$3),($4,$5,$6)...
+      const values = [];
+      const params = [];
+      batch.forEach((ip, i) => {
+        values.push(`($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3}, 'available')`);
+        params.push(ip, cidr, zone);
+      });
       await client.query(
         `INSERT INTO ip_addresses (ip_address, subnet, network_zone, allocation_type)
-         VALUES ($1, $2, $3, 'available') ON CONFLICT DO NOTHING`,
-        [ip, cidr, zone]
+         VALUES ${values.join(',')} ON CONFLICT DO NOTHING`,
+        params
       );
+      batch = [];
+    };
+    for (let i = 0; i < size; i++) {
+      batch.push(intToIp(firstInt + i));
+      if (batch.length >= BATCH) await flush();
     }
+    await flush();
   },
 
   // B-6e: 서브넷 등록 시 풀 생성 (단일 대역)
@@ -111,23 +150,38 @@ const IpAddress = {
     return rows[0];
   },
 
-  async findBySubnet(subnet) {
-    const { rows } = await pool.query(
-      `SELECT ip.*, a.model_name as asset_model, a.asset_number, a.ownership as asset_ownership,
+  // B-6e: blockBase('10.100.60') 지정 시 해당 /24 블록만 (대량 대역 페이지네이션)
+  async findBySubnet(subnet, blockBase) {
+    let sql = `SELECT ip.*, a.model_name as asset_model, a.asset_number, a.ownership as asset_ownership,
               a.management_number as asset_mgmt_number,
               a.assigned_user as asset_user, a.purpose as asset_purpose
        FROM ip_addresses ip
        LEFT JOIN assets a ON ip.asset_id = a.id
-       WHERE ip.subnet = $1`,
-      [subnet]
-    );
-    // Sort by last octet numerically
+       WHERE ip.subnet = $1`;
+    const params = [subnet];
+    if (blockBase) {
+      sql += ` AND ip.ip_address LIKE $2`;
+      params.push(blockBase + '.%');
+    }
+    const { rows } = await pool.query(sql, params);
+    // Sort by last octet numerically (블록 필터 시 같은 앞3옥텟이라 안전)
     rows.sort((a, b) => {
       const lastA = parseInt(a.ip_address.split('.').pop());
       const lastB = parseInt(b.ip_address.split('.').pop());
       return lastA - lastB;
     });
     return rows.map(fixDates);
+  },
+
+  // B-6e: 대역의 /24 블록 앞3옥텟 목록 (페이지네이션 네비용). /24 이하면 [단일].
+  blocksOf(cidr) {
+    const r = cidrRange(cidr);
+    const count = Math.ceil(r.size / 256);
+    const blocks = [];
+    for (let b = 0; b < count; b++) {
+      blocks.push(intToIp(r.firstInt + b * 256).split('.').slice(0, 3).join('.'));
+    }
+    return blocks;
   },
 
   async getSubnetStats() {
@@ -189,5 +243,10 @@ const IpAddress = {
     );
   }
 };
+
+// B-6e: 라우트에서 CIDR 검증·겹침 검사에 재사용
+IpAddress.cidrRange = cidrRange;
+IpAddress.cidrsOverlap = cidrsOverlap;
+IpAddress.ipToInt = ipToInt;
 
 module.exports = IpAddress;

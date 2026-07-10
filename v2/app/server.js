@@ -181,6 +181,16 @@ app.get('/api/search', async (req, res) => {
 app.use(notFoundHandler);
 app.use(errorHandler);
 
+// B-6e-fix: 미처리 async rejection이 프로세스를 죽이지 않게 안전망.
+// (node18은 unhandledRejection 시 기본적으로 프로세스를 종료 — 라우트 하나의 미처리
+//  reject가 전체 서비스 다운으로 번지는 것을 막는다. 로그만 남기고 생존.)
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+
 // Start server
 const PORT = process.env.APP_PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {

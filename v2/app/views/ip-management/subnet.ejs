@@ -1,9 +1,22 @@
 <%- include('../partials/header', { title, currentPath, extraCss }) %>
 
 <div class="page-header">
-    <h1><%= subnetConfig.label %> (<%= subnet %>)</h1>
+    <h1><%= subnetConfig.label %> (<%= subnet %>)<% if (currentBlock) { %> — <%= currentBlock %>.0/24<% } %></h1>
     <a href="/ip-management" class="btn btn-secondary">IP 대시보드</a>
 </div>
+
+<% if (blocks) { %>
+<%# B-6e: /24 초과 대역 — 블록(/24) 단위 페이지네이션 %>
+<div class="card" style="padding:12px;">
+    <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+        <span class="text-muted" style="margin-right:8px;">블록 (<%= blocks.length %>개):</span>
+        <% blocks.forEach(b => { %>
+        <a href="/ip-management/subnet/<%= encodeURIComponent(subnet) %>?block=<%= b %>"
+           class="btn btn-sm <%= b === currentBlock ? 'btn-primary' : 'btn-outline' %>"><%= b %>.0/24</a>
+        <% }) %>
+    </div>
+</div>
+<% } %>
 
 <div class="card">
     <div class="card-header">

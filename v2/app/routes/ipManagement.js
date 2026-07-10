@@ -7,26 +7,41 @@ const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
 
-// /24 CIDR 형식 검증 (B-6e: 우선 /24만 지원)
-const CIDR24_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.0\/24$/;
-function validCidr24(cidr) {
-  const m = (cidr || '').trim().match(CIDR24_RE);
-  if (!m) return null;
-  const oct = [m[1], m[2], m[3]].map(Number);
-  if (oct.some(o => o > 255)) return null;
-  return m[1] + '.' + m[2] + '.' + m[3] + '.0/24';
+// B-6e: CIDR /16~/30 검증. 반환 { ok, cidr, size, error }
+const CIDR_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
+function parseCidr(input) {
+  const m = (input || '').trim().match(CIDR_RE);
+  if (!m) return { ok: false, error: 'CIDR 형식이 아닙니다 (예: 10.100.60.0/24).' };
+  const oct = [m[1], m[2], m[3], m[4]].map(Number);
+  const prefix = parseInt(m[5], 10);
+  if (oct.some(o => o > 255)) return { ok: false, error: 'IP 옥텟은 0~255여야 합니다.' };
+  if (prefix < 16 || prefix > 30) return { ok: false, error: '지원 범위 /16~/30 입니다.' };
+  const cidr = oct.join('.') + '/' + prefix;
+  // 네트워크 주소 정렬 검사
+  const range = IpAddress.cidrRange(cidr);
+  if (IpAddress.ipToInt(oct.join('.')) !== range.firstInt) {
+    const f = range.firstInt;
+    const alignedIp = [(f >>> 24) & 255, (f >>> 16) & 255, (f >>> 8) & 255, f & 255].join('.');
+    return { ok: false, error: '네트워크 주소가 아닙니다. ' + alignedIp + '/' + prefix + ' 를 의도했는지 확인하세요.' };
+  }
+  return { ok: true, cidr, size: range.size };
 }
 
 // Initialize subnets on first access (guard: only runs if table empty)
 let initialized = false;
 
 router.use(async (req, res, next) => {
-  if (!initialized) {
-    await IpAddress.initializeSubnets();
-    // syncAllAssets removed — §5: v2 EUL has no ip1~ip4/bmc/ib columns
-    initialized = true;
+  try {
+    if (!initialized) {
+      await IpAddress.initializeSubnets();
+      // syncAllAssets removed — §5: v2 EUL has no ip1~ip4/bmc/ib columns
+      initialized = true;
+    }
+    next();
+  } catch (err) {
+    // B-6e-fix: 초기화 실패가 미처리 rejection으로 프로세스를 죽이던 경로 — next(err)로 수렴
+    next(err);
   }
-  next();
 });
 
 // IP dashboard — B-6e: subnets 테이블 기반 동적 섹션 (풀 집계 조인)
@@ -58,7 +73,12 @@ router.get('/subnet/:subnet', async (req, res, next) => {
       return res.redirect('/ip-management');
     }
     const subnetConfig = { subnet: row.cidr, label: row.name, zone: row.network_zone };
-    const addresses = await IpAddress.findBySubnet(subnet);
+    // B-6e: /24 초과 대역은 블록 페이지네이션 (그리드는 256칸/블록 재사용)
+    const blocks = IpAddress.blocksOf(row.cidr);
+    const currentBlock = (req.query.block && blocks.includes(req.query.block))
+      ? req.query.block
+      : (blocks.length > 1 ? blocks[0] : null);
+    const addresses = await IpAddress.findBySubnet(subnet, currentBlock);
     const assets = await Asset.findAll();
     res.render('ip-management/subnet', {
       title: row.name,
@@ -69,6 +89,8 @@ router.get('/subnet/:subnet', async (req, res, next) => {
       subnetConfig,
       addresses,
       assets,
+      blocks: blocks.length > 1 ? blocks : null,
+      currentBlock,
       appConfig
     });
   } catch (err) {
@@ -82,24 +104,32 @@ router.post('/subnets', requireMaintenance, async (req, res) => {
     const name = (req.body.name || '').trim();
     const network_zone = (req.body.network_zone || '').trim();
     const description = (req.body.description || '').trim() || null;
-    const cidr = validCidr24(req.body.cidr);
 
-    if (!name || !cidr) {
-      req.flash('error', '이름과 유효한 대역(예: 10.0.0.0/24)이 필요합니다.');
+    if (!name) {
+      req.flash('error', '이름이 필요합니다.');
       return res.redirect('/ip-management');
     }
     if (!['office', 'hpc', 'aidc'].includes(network_zone)) {
       req.flash('error', '네트워크 구분(office/hpc/aidc)을 선택하세요.');
       return res.redirect('/ip-management');
     }
-    // 중복/겹침: /24 단위라 동일 cidr = 겹침. subnets 테이블 + ip_addresses 풀 양쪽 확인
+    const parsed = parseCidr(req.body.cidr);
+    if (!parsed.ok) {
+      req.flash('error', parsed.error);
+      return res.redirect('/ip-management');
+    }
+    const cidr = parsed.cidr;
+
+    // 중복: 동일 cidr
     if (await Subnet.findByCidr(cidr)) {
       req.flash('error', '이미 등록된 대역입니다: ' + cidr);
       return res.redirect('/ip-management');
     }
-    const existingPool = await IpAddress.countByAllocation(cidr);
-    if (existingPool.total > 0) {
-      req.flash('error', '해당 대역의 IP 풀이 이미 존재합니다: ' + cidr);
+    // 겹침: 기존 등록 대역과 IP 범위 교차 검사 (prefix 달라도)
+    const all = await Subnet.findAllWithStats();
+    const clash = all.find(s => IpAddress.cidrsOverlap(cidr, s.cidr));
+    if (clash) {
+      req.flash('error', '기존 대역과 범위가 겹칩니다: ' + clash.cidr + ' (' + clash.name + ')');
       return res.redirect('/ip-management');
     }
 
@@ -109,7 +139,7 @@ router.post('/subnets', requireMaintenance, async (req, res) => {
       action: 'create', targetType: 'subnet', targetId: id,
       targetLabel: name + ' (' + cidr + ')'
     });
-    req.flash('success', '서브넷이 등록되었습니다: ' + cidr + ' (IP 풀 256개 생성)');
+    req.flash('success', '서브넷이 등록되었습니다: ' + cidr + ' (IP 풀 ' + parsed.size + '개 생성)');
     res.redirect('/ip-management');
   } catch (err) {
     req.flash('error', '서브넷 등록 실패: ' + err.message);
