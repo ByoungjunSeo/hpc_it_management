@@ -522,6 +522,44 @@ FIX 3건 + B-6e 반영 이미지 재빌드 및 배포 패키지 확정.
   DEPLOY.md tar명 실물(.tar) 정합 + docker load -i는 tar/tar.gz 겸용 안내.
 - **다음: B-6c 윈도우 실검증을 2.0.1 배포물로 재수행 → 3단계 전환(READ_ONLY 미들웨어) → B-7 cutover.**
 
+## ★ B-6 배포 검증 전체 완료 (2026-07-11)
+
+배포 패키지 확정 + 윈도우 클린 설치 실검증까지 완결. v1 무중단 운영·무접촉 유지.
+
+**단계별 완료 (커밋 해시):**
+
+| 하위 | 내용 | 커밋 |
+|------|------|------|
+| 6a | Apple Silicon → `buildx --platform linux/amd64` 크로스 빌드, 정품 이미지 tar | (5b 연장) |
+| 6b | 정품 tar x86 서버 검증 + DEPLOY.md 문서결함 2건 수정 | 7b52ed3 |
+| 6c | 윈도우 클린 설치 실검증 → 문서결함 5건(DOC-1~5) + FIX 3건 + 백로그 | 7b52ed3, 3015696, 8c66d60, aa4f15d, 51c2193 |
+| 6e | 서브넷 CRUD + 풀 자동생성(INV-1 해소) + CIDR /16~/30 | c134df6, 89ceb0a, 7aea9ec, a7555ad, aa6f535 |
+| 6d | 2.0.1 버전표기 + ARG APT_MIRROR + 재빌드·패키징 | 335dcb6, 17f182a, cf8be0d |
+| BUG-8 | 랙 미리보기 선택 백화 — 클래스+CSS 전환 + tui-theme 다크 오버라이드 | 83ef480 |
+
+**윈도우 최종 스모크 (2.0.1 배포물, 서병준):**
+- 전 항목 통과. 소요 ~5분(Docker Desktop·git 설치 전제).
+- BUG-8 반영 확인: 재빌드 이미지 컨테이너 내 `tui-theme.css`에 `inv-rack-empty` 다크
+  오버라이드 존재(grep 3), 빈 칸 초기 렌더 다크·선택색(장비 파랑/선반 노랑) 정상.
+- 격리 스모크(기동→로그인 302→사용등록 폼 200→렌더 JS 파싱 3블록)까지 통과.
+
+**전달물 최종 스펙:**
+
+| 항목 | 값 |
+|------|-----|
+| 배포 묶음 | `it-assets-dist-2.0.1.tar.gz` (193MB) |
+| 앱 이미지 | `it-assets:2.0.1` — 83MB(무압축 tar) / 254MB(로드 후), **amd64**, node 비루트(uid 1000), ipmitool 1.8.19 포함, HEALTHCHECK healthy |
+| DB 이미지 | `postgres:16-alpine` (오프라인 전달분 포함) |
+| 구성 | 14파일 — 이미지 tar 2 + DEPLOY.md + docker-compose.prod.yml + .env.example + db/(6 SQL) + scripts/(backup.sh·restore.sh) |
+| initdb | **22테이블**(subnets 포함) = 신규 설치 SQL에 B-6e 반영 |
+| 설치 전제 | Docker Desktop + git, `.env`에 INITIAL_ADMIN_PASSWORD 필수(미설정 시 기동 중단, 하드코딩 fallback 없음) |
+
+**다음 단계 (순서):**
+1. **READ_ONLY 미들웨어** — v1 동결용 3단계 전환 장치(B-6/B-7 사이 쓰기 차단).
+2. **B-7** — v1→v2 데이터 최종 이관(로그 델타 §7 표 + EUL 델타 신규 12행+전이 6건 방침) + cutover.
+3. **8월 타 팀 배포** — 클린 설치 패키지 배부.
+4. **v2.1** — BL-1~7 우선순위 정렬부터(현 유력 최상위: BL-1 선반 1/3U, 정확성 이슈).
+
 ## B-4d 단계 전체 완결 (2026-07-09)
 
 | 조각 | 내용 | 커밋 |
