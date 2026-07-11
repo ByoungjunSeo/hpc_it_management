@@ -23,6 +23,18 @@
 
 이미지는 인터넷/사내미러가 있는 환경에서 빌드해 tar로 만듭니다(앱 이미지에 ipmitool 포함 — apt 필요).
 빌드 예: `docker build -t it-assets:2.0.1 .` → `docker save it-assets:2.0.1 | gzip > it-assets-2.0.1.tar.gz`
+
+> **deb.debian.org 차단 환경(사내망) 빌드**: `--build-arg APT_MIRROR=<미러>`로 apt 소스를
+> 사내/공개 미러로 교체(main·updates만, security는 스킵)합니다. 미지정 시 기본값은 원본
+> deb.debian.org(회귀 0).
+> ```
+> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.0.1 .
+> ```
+> 실검증 이력: 2.0.1 이미지는 사무 PC(윈도우)에서 사무망의 deb.debian.org 도메인 차단으로
+> kakao 미러(http, security 제외)를 경유해 빌드·전달했고, 서버 격리 스택에서 정품 검증(amd64,
+> ipmitool 1.8.19, 버전 2.0.1) 통과. (서버 자체도 deb.debian.org egress가 막혀 기본 경로
+> 실빌드는 불가 — 미러 ARG 경로로만 재현 확인됨. 기본 경로 동작은 Dockerfile 로직상
+> 원본 소스 무변경으로 보장.)
 > compose.prod.yml의 앱 이미지 태그는 **`it-assets:2.0.1`** 고정입니다. 다른 태그로 로드했다면
 > `.env`에 `APP_IMAGE=<태그>` 를 지정하세요. (배포 tar에는 Dockerfile이 없어 compose가 빌드하지 않습니다.)
 

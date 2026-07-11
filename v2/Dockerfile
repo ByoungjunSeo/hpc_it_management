@@ -9,9 +9,19 @@ RUN npm ci --omit=dev
 
 FROM node:18-bookworm-slim
 # ipmitool: PSU IPMI 감지(sshDiscovery.detectPsuViaIpmi)가 execFile('ipmitool')로 PATH 탐색.
-# 이 단계는 apt egress(deb.debian.org)가 필요 — 인터넷/사내미러 있는 환경에서 빌드할 것.
+# 이 단계는 apt egress가 필요 — 인터넷/사내미러 있는 환경에서 빌드할 것.
 # (HEALTHCHECK는 node 내장으로 처리해 curl 의존 제거)
-RUN apt-get update \
+#
+# APT_MIRROR: deb.debian.org가 차단된 사내망 대응.
+#   미지정(기본) → 원본 소스(deb.debian.org) 그대로 = 기존과 동일 동작(회귀 0).
+#   지정 시 → main/updates만 해당 미러로 교체하고 security는 스킵.
+#   예: --build-arg APT_MIRROR=http://mirror.kakao.com/debian
+ARG APT_MIRROR=""
+RUN if [ -n "$APT_MIRROR" ]; then \
+      printf 'Types: deb\nURIs: %s\nSuites: bookworm bookworm-updates\nComponents: main\nSigned-By: /usr/share/keyrings/debian-archive-keyring.gpg\n' "$APT_MIRROR" \
+        > /etc/apt/sources.list.d/debian.sources; \
+    fi \
+ && apt-get update \
  && apt-get install -y --no-install-recommends ipmitool \
  && rm -rf /var/lib/apt/lists/*
 
