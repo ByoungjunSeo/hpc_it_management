@@ -106,12 +106,13 @@ app.get('/api/search', async (req, res) => {
 
     // Search assets
     const { rows: assets } = await pool.query(`
-      SELECT a.id, a.asset_number, a.model_name, a.asset_type, a.ip_address,
+      SELECT a.id, a.asset_number, a.management_number, a.model_name, a.asset_type, a.ip_address,
              a.assigned_user, a.purpose, r.name as rack_name, sr.name as room_name
       FROM assets a
       LEFT JOIN racks r ON a.rack_id = r.id
       LEFT JOIN server_rooms sr ON r.room_id = sr.id
-      WHERE a.asset_number ILIKE $1 OR a.model_name ILIKE $1 OR a.ip_address ILIKE $1
+      WHERE a.asset_number ILIKE $1 OR a.management_number ILIKE $1 OR a.model_name ILIKE $1
+         OR a.ip_address ILIKE $1
          OR a.assigned_user ILIKE $1 OR a.purpose ILIKE $1 OR a.serial_number ILIKE $1
          OR a.manufacturer ILIKE $1
       LIMIT 15
@@ -121,7 +122,7 @@ app.get('/api/search', async (req, res) => {
         type: 'asset',
         id: a.id,
         title: a.model_name || a.asset_number || a.asset_type,
-        subtitle: [a.asset_number, a.ip_address, a.assigned_user].filter(Boolean).join(' | '),
+        subtitle: [a.management_number, a.asset_number, a.ip_address, a.assigned_user].filter(Boolean).join(' | '),
         location: [a.room_name, a.rack_name].filter(Boolean).join(' > '),
         url: '/assets/' + a.id
       });
