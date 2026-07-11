@@ -46,6 +46,8 @@ services:
       PGPORT: 5432
       APP_PORT: 3001
       NODE_ENV: production
+      # BL-9: 미설정 시 컨테이너 생성 전 차단 (앱 자체 검사와 이중 방어 — 값 검증은 앱이 수행)
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set in .env}
     ports:
       # 호스트 공개 포트는 .env의 APP_PORT (기본 3001)
       - "${APP_PORT:-3001}:3001"

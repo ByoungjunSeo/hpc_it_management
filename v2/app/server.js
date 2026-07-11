@@ -1,5 +1,16 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
+// BL-9: SESSION_SECRET 기동 검사 — docker/systemd 어느 경로로 기동해도 여기서 걸린다.
+// 구 fallback 리터럴은 제거(검사 우회 경로 오해 방지). 아래 목록은 차단 비교용으로만 보존.
+const LEGACY_SESSION_FALLBACKS = ['it-asset-secret', 'it-asset-secret-key'];
+const sessionSecret = process.env.SESSION_SECRET || '';
+if (!sessionSecret || sessionSecret.startsWith('CHANGE_ME')
+    || LEGACY_SESSION_FALLBACKS.includes(sessionSecret) || sessionSecret.length < 32) {
+  console.error('[session-secret] 오류: SESSION_SECRET이 미설정이거나 안전하지 않습니다 (미설정/CHANGE_ME/과거 기본값/32자 미만).');
+  console.error('[session-secret] .env의 SESSION_SECRET을 32자 이상 무작위 문자열로 설정한 뒤 다시 시작하세요. 생성 예: openssl rand -hex 32');
+  process.exit(1);
+}
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -31,14 +42,14 @@ app.set('views', path.join(__dirname, 'views'));
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser(process.env.SESSION_SECRET || 'it-asset-secret'));
+app.use(cookieParser(sessionSecret));
 app.use(session({
   store: new pgSession({
     pool: pool,
     tableName: 'session',
   }),
   name: 'itassets_v2.sid', // B-6b-fix: v1(:3000)과 쿠키명 분리 — 기본 connect.sid 공유 시 상호 로그아웃
-  secret: process.env.SESSION_SECRET || 'it-asset-secret-key',
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 24 * 60 * 60 * 1000 }
