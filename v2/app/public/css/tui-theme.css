@@ -633,3 +633,17 @@ body .adp-tab.active, body .modal-tab.active {
 body .tab-nav, body .tabs, body .adp-tabs, body .modal-tabs {
     border-bottom: 1px solid var(--tui-border) !important;
 }
+
+/* ============ 랙 미리보기 빈 칸 (BUG-8 후속) ============
+   폼 <style>의 .inv-rack-empty/.asset-rack-empty(라이트 #fff)를 다크 톤으로 오버라이드.
+   선택색(장비 #dbeafe / 선반 #fef3c7)은 폼 <style> !important로 유지 — 다크에서 잘 보임.
+   테마 <link> 제거 시(라이트) 폼 <style>의 흰 배경으로 자동 복귀(탈착성). */
+body .inv-rack-empty, body .asset-rack-empty {
+    background: var(--tui-bg) !important;
+    border: 1px solid var(--tui-border) !important;
+}
+body .inv-rack-empty:hover, body .asset-rack-empty:hover {
+    background: var(--tui-bg-raise) !important;
+    outline: 1px solid var(--tui-green);
+    outline-offset: -1px;
+}

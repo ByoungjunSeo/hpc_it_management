@@ -2,7 +2,14 @@
 
 <style>
 /* FIX-A(BUG-7): 랙 미리보기 빈 칸 hover — JS 인라인 대체. 벗어나면 규칙이 사라져 원배경 자동 복귀 */
+.inv-rack-empty { background: #fff; }
 .inv-rack-empty:hover { background: #f0f9ff !important; }
+/* BUG-8: 선택 하이라이트도 클래스+CSS로 (JS 인라인 배경 제거) */
+.inv-sel-shelf  { background: #fef3c7 !important; outline: 1px solid #f59e0b; outline-offset: -1px; }
+.inv-sel-device { background: #dbeafe !important; outline: 1px solid #3b82f6; outline-offset: -1px; }
+.inv-sel-tag { font-size: 9px; font-weight: 600; }
+.inv-sel-tag.shelf  { color: #92400e; }
+.inv-sel-tag.device { color: #1e40af; }
 /* BUG-7 재발: 가용 IP 조회 모달 버튼도 동일 전환 */
 .ip-pick-btn:hover { background: #eff6ff !important; }
 </style>
@@ -1552,9 +1559,9 @@ function renderInvRackPreview(data) {
             var hasRight = !!m.right;
 
             var cellH = 'height:18px; padding:1px 4px; border:1px solid #e2e8f0; font-size:10px; vertical-align:middle;';
-            // FIX-A(BUG-7): hover는 CSS :hover(.inv-rack-empty)로 — JS로 배경 직접 지정 시
-            // mouseout 복원이 #fff 하드코딩이라 테마 배경과 어긋나 잔상이 남았음.
-            var emptyCell = cellH + ' background:#fff; cursor:pointer;';
+            // FIX-A(BUG-7)/BUG-8: 배경은 CSS(.inv-rack-empty)가 담당 — 인라인 색 지정 제거로
+            // 다크 테마에서도 원배경 유지, 선택/원복은 클래스 토글.
+            var emptyCell = cellH + ' cursor:pointer;';
 
             html += '<tr data-slot="' + slot + '" data-u="' + u + '" data-h="' + h + '">';
 
@@ -1685,16 +1692,13 @@ function highlightInvSlots(slotStart, count, shelfSlots) {
         var startIdx = (slotToH(s) === 3) ? 2 : 1; // h=3 has U label td
         for (var c = startIdx; c < cells.length; c++) {
             if (!isInvSlotOccupied(s)) {
+                // BUG-8: 인라인 배경/outline 직접 지정 → 클래스 토글(CSS). 다크 테마 잔상 방지
                 if (isShelf) {
-                    cells[c].style.background = '#fef3c7';
-                    cells[c].style.outline = '1px solid #f59e0b';
-                    cells[c].style.outlineOffset = '-1px';
-                    if (s === slotStart) cells[c].innerHTML = '<span style="color:#92400e; font-size:9px; font-weight:600;">선반</span>';
+                    cells[c].classList.add('inv-sel-shelf');
+                    if (s === slotStart) cells[c].innerHTML = '<span class="inv-sel-tag shelf">선반</span>';
                 } else {
-                    cells[c].style.background = '#dbeafe';
-                    cells[c].style.outline = '1px solid #3b82f6';
-                    cells[c].style.outlineOffset = '-1px';
-                    if (s === shelfEnd) cells[c].innerHTML = '<span style="color:#1e40af; font-size:9px; font-weight:600;">장비</span>';
+                    cells[c].classList.add('inv-sel-device');
+                    if (s === shelfEnd) cells[c].innerHTML = '<span class="inv-sel-tag device">장비</span>';
                 }
             }
         }
@@ -1709,8 +1713,8 @@ function clearInvSlotHighlight() {
             var cells = row.querySelectorAll('td');
             var startIdx = (slotToH(s) === 3) ? 2 : 1;
             for (var c = startIdx; c < cells.length; c++) {
-                cells[c].style.background = '#fff';
-                cells[c].style.outline = 'none';
+                // BUG-8: 클래스 제거로 원배경 복귀 (JS가 배경 직접 안 건드림)
+                cells[c].classList.remove('inv-sel-shelf', 'inv-sel-device');
                 cells[c].innerHTML = '';
             }
         }

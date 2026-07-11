@@ -263,6 +263,31 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
 
 ---
 
+## BUG-8: 랙 미리보기 선택 시 전체 백화 (윈도우 2.0.1 스모크 발견)
+- 상태: [완료] B-6d 후속 | 방침: (나) 수정 | BUG-7 동일 계열(JS 배경 하드코딩)
+- 관련(v2): app/views/inventory/form.ejs, app/views/assets/form.ejs (랙 미리보기)
+
+### 증상
+초기 렌더는 다크(정상)인데, 빈 칸 클릭(Unit 선택) 후 하이라이트가 갱신되면 빈 칸 전체가
+흰색으로 백화(TUI 다크 테마).
+
+### 원인
+- `highlightInvSlots`/`highlightAssetSlots`가 선택 칸 배경을 `cells[c].style.background =
+  '#fef3c7'/'#dbeafe'`로 직접 인라인 지정.
+- `clearInvSlotHighlight`/`clearAssetSlotHighlight`가 원복을 `cells[c].style.background =
+  '#fff'` 하드코딩 → 다크 테마 배경과 어긋나 전체 흰색.
+- emptyCell도 인라인 `background:#fff`. (BUG-7과 동일 계열 — JS가 배경을 직접 칠함)
+
+### 수정
+- 선택 하이라이트를 클래스 토글로: `.inv-sel-shelf`/`.inv-sel-device`(inventory),
+  `.asset-sel-device`(assets) + `<style>` CSS(배경·outline·태그색). 선택 칸(장비 파랑/
+  선반 노랑) 유지.
+- clear는 `classList.remove(...)`로 원배경 복귀(JS가 배경 직접 안 건드림).
+- emptyCell 인라인 `background:#fff` 제거 → 배경은 `.inv-rack-empty`/`.asset-rack-empty`
+  CSS가 담당(다크 테마는 tui-theme이 오버라이드). 렌더 JS 문법 파싱 통과.
+
+---
+
 ## 조사 판정 기록 (B-6c 윈도우 검증 — 회귀 아님, 향후 재질문 방지)
 
 ### INV-1: 사용등록 IP가 IP 관리 화면에 미반영 → [v1 동일 — 회귀 아님]
@@ -291,6 +316,7 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
 | BUG-5 선반 잔존 | 미룸 확정 | cutover 후 UI 트랙 | 원인규명완료·영향0건, 렌더이중화 해소와 합동 |
 | BUG-6 스캔 전체기록/이력무정보 | [완료] B-4d-7c | 변경분만 기록(A·A′) + 비고 합성(B) 실증 |
 | BUG-7 랙 미리보기 hover 잔상 | [완료] B-6c | CSS :hover로 대체(FIX-A) |
+| BUG-8 랙 미리보기 선택 백화 | [완료] B-6d후속 | 선택 하이라이트 클래스+CSS 전환 |
 
 > **잔여 미해결 = BUG-2(신기능 트랙)·BUG-5(UI 트랙) 2건뿐.** BUG-1/3/4/6/7은 전부 [완료]/종결.
 > INV-1/INV-2는 조사 결과 v1 동일(회귀 아님) — 각각 BL-5(→B-6e)/BL-3 백로그로.

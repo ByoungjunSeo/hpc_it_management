@@ -2,7 +2,11 @@
 
 <style>
 /* BUG-7(재발): 인라인 JS hover → CSS :hover 전환. 벗어나면 규칙이 사라져 원배경 자동 복귀 */
+.asset-rack-empty { background: #fff; }
 .asset-rack-empty:hover { background: #f0f9ff !important; }
+/* BUG-8: 선택 하이라이트도 클래스+CSS로 (JS 인라인 배경 제거) */
+.asset-sel-device { background: #dbeafe !important; outline: 1px solid #3b82f6; outline-offset: -1px; }
+.asset-sel-tag { color: #1e40af; font-size: 9px; font-weight: 600; }
 .ip-pick-btn:hover { background: #eff6ff !important; }
 </style>
 
@@ -816,7 +820,7 @@ function renderRackPreview(data) {
             var hasRight = !!m.right;
 
             var cellH = 'height:18px; padding:1px 4px; border:1px solid #e2e8f0; font-size:10px; vertical-align:middle;';
-            var emptyCell = cellH + ' background:#fff; cursor:pointer;';
+            var emptyCell = cellH + ' cursor:pointer;';
 
             html += '<tr data-slot="' + slot + '" data-u="' + u + '" data-h="' + h + '">';
 
@@ -922,10 +926,9 @@ function highlightAssetSlots(slotStart, count) {
         var startIdx = (slotToH(s) === 3) ? 2 : 1;
         for (var c = startIdx; c < cells.length; c++) {
             if (!isSlotOccupied(s)) {
-                cells[c].style.background = '#dbeafe';
-                cells[c].style.outline = '1px solid #3b82f6';
-                cells[c].style.outlineOffset = '-1px';
-                if (s === slotStart) cells[c].innerHTML = '<span style="color:#1e40af; font-size:9px; font-weight:600;">시작</span>';
+                // BUG-8: 인라인 배경/outline → 클래스 토글(CSS)
+                cells[c].classList.add('asset-sel-device');
+                if (s === slotStart) cells[c].innerHTML = '<span class="asset-sel-tag">시작</span>';
             }
         }
     }
@@ -939,8 +942,8 @@ function clearAssetSlotHighlight() {
             var cells = row.querySelectorAll('td');
             var startIdx = (slotToH(s) === 3) ? 2 : 1;
             for (var c = startIdx; c < cells.length; c++) {
-                cells[c].style.background = '#fff';
-                cells[c].style.outline = 'none';
+                // BUG-8: 클래스 제거로 원배경 복귀
+                cells[c].classList.remove('asset-sel-device');
                 cells[c].innerHTML = '';
             }
         }
