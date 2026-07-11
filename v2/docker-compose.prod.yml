@@ -3,9 +3,10 @@
 # (개발용 docker-compose.yml과 독립 — 개발 스택은 무수정 보존)
 #
 # 사전 준비: cp .env.example .env 후 CHANGE_ME 값 전부 채우기.
-# 이미지는 사내망 tar 전달(앱+DB 둘 다): it-assets-2.0.1.tar.gz + postgres-16-alpine.tar.gz
-#   gunzip -c it-assets-2.0.1.tar.gz | docker load
-#   gunzip -c postgres-16-alpine.tar.gz | docker load
+# 이미지는 사내망 tar 전달(앱+DB 둘 다, 무압축 .tar): it-assets-2.0.1.tar + postgres-16-alpine.tar
+#   docker load -i it-assets-2.0.1.tar
+#   docker load -i postgres-16-alpine.tar
+#   (gzip 압축본(.tar.gz)이어도 docker load -i가 자동 인식 — DEPLOY.md §1 참조)
 
 name: it-assets
 

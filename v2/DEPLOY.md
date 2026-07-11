@@ -73,9 +73,11 @@ docker compose -f docker-compose.prod.yml up -d
 
 필수 `.env` 키(미설정 시 기동 실패):
 - `POSTGRES_PASSWORD` — DB 비밀번호
-- `SESSION_SECRET` — 세션 암호화 키(32자+ 랜덤)
 - `INITIAL_ADMIN_PASSWORD` — 최초 admin 비밀번호(첫 기동에만 사용, 멱등)
 
+보안 필수 키(⚠ 미설정이어도 기동됨 — 반드시 수동 확인):
+- `SESSION_SECRET` — 세션 암호화 키(32자+ 랜덤). 미변경 시 예측 가능한
+  세션 서명 키가 되어 세션 위조 위험. 차기 버전에서 기동 시 검사로 강제 예정.
 ---
 
 ## 2. 윈도우 데스크탑 설치
@@ -140,19 +142,38 @@ bash scripts/backup.sh
 bash scripts/restore.sh backups/db_YYYYMMDD_HHMMSS.dump --with-uploads
 ```
 
-정기 백업은 cron 예: `0 20 * * * cd /path/to/v2 && bash scripts/backup.sh >> backups/backup.log 2>&1`
+정기 백업은 cron 예: `0 20 * * * cd <설치 디렉토리> && bash scripts/backup.sh >> backups/backup.log 2>&1`
+(`<설치 디렉토리>` = 배포 tar를 전개한 경로. 예: `/opt/it-assets-dist-2.0.1`)
 
 ---
 
-## 6. 업데이트 절차
+## 6. 업데이트(업그레이드) 절차
+
+패치/기능 릴리스는 새 버전 dist tar 재배포 방식입니다(오프라인 전제 — `pull` 없음).
 
 ```bash
-docker load -i it-assets-<새버전>.tar   # 새 이미지 적재
-# docker-compose.prod.yml의 앱 태그는 it-assets:2.0.1 고정 —
-# 새 태그면 .env에 APP_IMAGE=it-assets:<새버전> 지정
-docker compose -f docker-compose.prod.yml up -d      # 앱만 재생성, 볼륨 유지
+# 0) 수령 확인: 릴리스 노트의 sha256과 대조
+sha256sum it-assets-dist-<새버전>.tar.gz
+
+# 1) 업그레이드 전 백업 (필수)
+bash scripts/backup.sh
+
+# 2) 새 앱 이미지 적재
+docker load -i it-assets-<새버전>.tar
+
+# 3) 이미지 태그 반영: compose의 앱 이미지는 ${APP_IMAGE:-it-assets:2.0.1} —
+#    .env에 APP_IMAGE=it-assets:<새버전> 지정 (compose 파일 자체가 갱신 전달된
+#    릴리스면 새 compose 파일로 교체)
+vi .env
+
+# 4) 재기동 (앱만 재생성, named volume 데이터 유지 — ⚠ -v 금지)
+docker compose -f docker-compose.prod.yml up -d
 ```
-스키마 변경이 있는 릴리스는 릴리스 노트의 마이그레이션 안내를 따르세요(db/*.sql은 최초 1회만 실행됨).
+
+DB **스키마 변경이 포함된 릴리스**는 마이그레이션 SQL과 적용 순서를 릴리스 노트에
+동봉합니다 — 반드시 그 순서대로 적용하세요(`db/*.sql`은 빈 볼륨 최초 기동 시에만
+자동 실행되므로 기존 설치에는 적용되지 않습니다). 데이터 보정이 수반되는 릴리스
+(예: 랙 실장 단위 개선)도 동일하게 보정 절차를 릴리스 노트로 안내합니다.
 
 ---
 
