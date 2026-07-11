@@ -9,20 +9,21 @@
 
 | 파일 | 역할 |
 |------|------|
-| `it-assets-2.0.1.tar.gz` | 앱 이미지 (별도 전달, `docker load`). 로드 태그: **`it-assets:2.0.1`** |
-| `postgres-16-alpine.tar.gz` | **DB 이미지 (오프라인 필수 — 아래 ⚠)** |
+| `it-assets-2.0.1.tar` | 앱 이미지 (별도 전달, `docker load`). 로드 태그: **`it-assets:2.0.1`** |
+| `postgres-16-alpine.tar` | **DB 이미지 (오프라인 필수 — 아래 ⚠)** |
 | `docker-compose.prod.yml` | DB(postgres:16-alpine) + 앱 스택 |
 | `db/*.sql` | 최초 기동 시 스키마 자동 생성 |
 | `.env.example` | 환경변수 템플릿 (`.env`로 복사해 작성) |
 | `scripts/backup.sh` / `restore.sh` | 백업 / 복원 |
 
 > ⚠ **DB 이미지도 반드시 함께 전달하세요.** 인터넷이 있는 환경에서
-> `docker pull postgres:16-alpine && docker save postgres:16-alpine | gzip > postgres-16-alpine.tar.gz`
+> `docker pull postgres:16-alpine && docker save postgres:16-alpine -o postgres-16-alpine.tar`
 > 로 만들어 앱 tar와 같이 넘깁니다. 이게 없으면 오프라인 환경에서 `compose up` 시
 > DB 컨테이너가 이미지를 내려받지 못해 뜨지 않고, **앱 컨테이너도 DB를 기다리다 종료됩니다.**
 
 이미지는 인터넷/사내미러가 있는 환경에서 빌드해 tar로 만듭니다(앱 이미지에 ipmitool 포함 — apt 필요).
-빌드 예: `docker build -t it-assets:2.0.1 .` → `docker save it-assets:2.0.1 | gzip > it-assets-2.0.1.tar.gz`
+빌드 예: `docker build -t it-assets:2.0.1 .` → `docker save it-assets:2.0.1 -o it-assets-2.0.1.tar`
+(용량을 줄이려면 `docker save ... | gzip > it-assets-2.0.1.tar.gz` 도 가능 — `docker load -i`는 tar/tar.gz 모두 자동 인식.)
 
 > **deb.debian.org 차단 환경(사내망) 빌드**: `--build-arg APT_MIRROR=<미러>`로 apt 소스를
 > 사내/공개 미러로 교체(main·updates만, security는 스킵)합니다. 미지정 시 기본값은 원본
@@ -44,8 +45,9 @@
 
 ```bash
 # 1) 이미지 적재 — 앱 + DB 둘 다 (→ "Loaded image: ..." 출력 확인)
-gunzip -c it-assets-2.0.1.tar.gz | docker load       # → it-assets:2.0.1
-gunzip -c postgres-16-alpine.tar.gz | docker load    # → postgres:16-alpine
+#    docker load -i는 .tar(무압축)·.tar.gz(압축) 모두 자동 인식
+docker load -i it-assets-2.0.1.tar       # → it-assets:2.0.1
+docker load -i postgres-16-alpine.tar    # → postgres:16-alpine
 #   (온라인 환경이면 이 두 줄 대신 첫 up에서 자동 pull됨)
 
 # 2) 환경변수 작성 (CHANGE_ME 전부 채움 — 특히 아래 필수 키)
@@ -86,10 +88,10 @@ docker compose -f docker-compose.prod.yml up -d
    - **Docker Desktop** (WSL2 백엔드): 개인/소규모는 무료, 대기업은 유료 구독 확인 필요.
    - **Rancher Desktop** (오픈소스 대안, 라이선스 부담 없음) — dockerd(moby) 모드 선택.
    - 설치 시 WSL2 활성화 필요(Windows 기능 → "Linux용 Windows 하위 시스템").
-2. PowerShell 또는 WSL 터미널에서 §1과 동일. 윈도우는 `docker load -i`로 gz를 바로 적재:
+2. PowerShell 또는 WSL 터미널에서 §1과 동일. 윈도우는 `docker load -i`로 tar를 바로 적재:
    ```powershell
-   docker load -i it-assets-2.0.1.tar.gz
-   docker load -i postgres-16-alpine.tar.gz
+   docker load -i it-assets-2.0.1.tar
+   docker load -i postgres-16-alpine.tar
    copy .env.example .env    # 메모장/VS Code로 열어 CHANGE_ME 채움
    docker compose -f docker-compose.prod.yml up -d
    ```
@@ -145,7 +147,7 @@ bash scripts/restore.sh backups/db_YYYYMMDD_HHMMSS.dump --with-uploads
 ## 6. 업데이트 절차
 
 ```bash
-gunzip -c it-assets-<새버전>.tar.gz | docker load   # 새 이미지 적재
+docker load -i it-assets-<새버전>.tar   # 새 이미지 적재
 # docker-compose.prod.yml의 앱 태그는 it-assets:2.0.1 고정 —
 # 새 태그면 .env에 APP_IMAGE=it-assets:<새버전> 지정
 docker compose -f docker-compose.prod.yml up -d      # 앱만 재생성, 볼륨 유지

@@ -501,7 +501,26 @@ INV-1(클린 설치 시 IP 미반영) 해소 — 서브넷을 화면에서 CRUD�
   CIDR /24 → **/16~/30 확장**(네트워크 주소 정렬검사, multi-row 배치 INSERT: /16 65,536행 2.6s,
   CIDR 범위 겹침 검사, 상세 /24 블록 페이지네이션). 실환경 브라우저 검증 통과, 운영 원복.
 - 백로그: BL-5 완료 처리, BL-7(대량 블록 네비 개선)·BL-6(zone 사용자 정의화) 추가.
-- **다음: Part 4(사용등록 폼 가용 IP 조회 — 서브넷 선택→available 목록, 직접입력 병행) → B-6d.**
+- Part 4(사용등록 폼 가용 IP 조회): subnets 테이블 기반 동적 서브넷 목록 + available LIMIT 512 +
+  직접입력 병행(하이브리드). BUG-7 동종 재발 5곳 전수 전환 + 렌더 JS 문법 검증 규약(aa6f535).
+
+## B-6d 2.0.1 재빌드·패키징 (2026-07-11, 커밋 완료)
+
+FIX 3건 + B-6e 반영 이미지 재빌드 및 배포 패키지 확정.
+- 버전 표기(335dcb6): package.json/lock 2.0.1 + DEPLOY.md·compose 태그/tar명 정합.
+- 빌드 환경 전환: 사무 PC(윈도우 x86 네이티브)에서 빌드 — 사무망이 deb.debian.org 도메인
+  차단이라 Dockerfile에 **ARG APT_MIRROR** 추가(미지정=원본 소스 회귀0, 지정 시 미러 교체+
+  security 스킵). kakao 미러 경유 빌드. 서버도 deb.debian.org egress 차단이라 기본 경로
+  실빌드는 불가 — 미러 ARG 경로로만 재현 확인(DEPLOY.md 빌드섹션에 기록).
+- 정품 검증(격리 스택 it-assets-dist, down -v): amd64/비루트/ipmitool 1.8.19/version 2.0.1/
+  HEALTHCHECK healthy/254MB, **initdb 22테이블(subnets 포함)** = 신규 설치 SQL에 B-6e 반영.
+- 클린 스모크: admin 시드=INITIAL_ADMIN_PASSWORD(하드코딩 fallback 없음, 미설정 시 기동 중단
+  재확정) + B-6e 신기능(빈상태→서브넷등록→풀256→가용IP모달→assigned전환→풀밖경고→삭제차단)
+  + FIX 렌더(이력 한글/버튼 기호) + 렌더 JS 문법 파싱 통과 + 영속성 2방식(stop→start, down→up).
+- 최종 패키징: /tmp/it-assets-dist-2.0.1.tar.gz (193MB) — 이미지 tar 2종(무압축 .tar) +
+  DEPLOY.md + docker-compose.prod.yml + .env.example + db/ + scripts/(backup·restore).
+  DEPLOY.md tar명 실물(.tar) 정합 + docker load -i는 tar/tar.gz 겸용 안내.
+- **다음: B-6c 윈도우 실검증을 2.0.1 배포물로 재수행 → 3단계 전환(READ_ONLY 미들웨어) → B-7 cutover.**
 
 ## B-4d 단계 전체 완결 (2026-07-09)
 
