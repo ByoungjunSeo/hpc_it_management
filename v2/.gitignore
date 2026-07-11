@@ -1,5 +1,7 @@
 # 환경 변수 파일 (실제 비밀번호 포함)
 .env
+# B-7c' 드라이런 스크래치 DB 접속정보 (커밋 금지)
+.env.dryrun
 
 # PostgreSQL 데이터 볼륨 (Docker가 만들 거)
 pgdata/
