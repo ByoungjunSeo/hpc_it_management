@@ -76,6 +76,9 @@
         </div>
         <% } %>
     </nav>
+    <% if (typeof readOnlyMode !== 'undefined' && readOnlyMode) { %>
+    <div class="alert alert-error">v2 전환 작업으로 쓰기가 중지되었습니다. 조회만 가능합니다.</div>
+    <% } %>
     <% if (typeof flash !== 'undefined' && flash) { %>
     <% if (flash.success) { %>
     <div class="alert alert-success"><%- flash.success %></div>

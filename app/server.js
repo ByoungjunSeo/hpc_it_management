@@ -69,6 +69,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Write freeze for v2 cutover (no-op unless READ_ONLY=1)
+app.use(require('./middleware/readOnly'));
+
 // Auth routes (no login required)
 app.use('/', require('./routes/auth'));
 
