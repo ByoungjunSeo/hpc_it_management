@@ -212,6 +212,11 @@ express → getDb() → 디렉토리 생성(backups, photos)
 
 ## 7. 운영 전환 시 정리 메모 (B-7)
 
+> **[종결] B-7 컷오버 2026-07-11 완료 — "★ B-7 전체 완결" 섹션 참조.**
+> 아래 메모 중 데이터 이관 관련(델타 재이전·audit 충돌)은 빅뱅 재이관으로 해소됨.
+> 미처리 항목(admin 비번, vendor_intake id=1 삭제, returned 표식 notes 방침, blade_slot 표기,
+> TPC-SV-1U-06, BUG-3 모달)은 v2.1/운영 후속 과제로 잔존.
+
 - admin 비번 qwe123 → 강한 비번 (`ADMIN_PASSWORD=... node init-admin.js --reset`)
 - 로그인 로직 timingSafeEqual 적용
 - audit_logs 등 로그 테이블 cutover 시 델타 재이전 + reset-sequences 재실행
@@ -555,10 +560,50 @@ FIX 3건 + B-6e 반영 이미지 재빌드 및 배포 패키지 확정.
 | 설치 전제 | Docker Desktop + git, `.env`에 INITIAL_ADMIN_PASSWORD 필수(미설정 시 기동 중단, 하드코딩 fallback 없음) |
 
 **다음 단계 (순서):**
-1. **READ_ONLY 미들웨어** — v1 동결용 3단계 전환 장치(B-6/B-7 사이 쓰기 차단).
-2. **B-7** — v1→v2 데이터 최종 이관(로그 델타 §7 표 + EUL 델타 신규 12행+전이 6건 방침) + cutover.
+1. ~~READ_ONLY 미들웨어~~ → **B-7b로 완료** (3960ad0)
+2. ~~B-7 cutover~~ → **2026-07-11 완료** ("★ B-7 전체 완결" 섹션)
 3. **8월 타 팀 배포** — 클린 설치 패키지 배부.
-4. **v2.1** — BL-1~7 우선순위 정렬부터(현 유력 최상위: BL-1 선반 1/3U, 정확성 이슈).
+4. **v2.1** — BL-1~8 우선순위 정렬부터(현 유력 최상위: BL-1 선반 1/3U, 정확성 이슈).
+
+## ★ B-7 전체 완결 — v1→v2 컷오버 (2026-07-11)
+
+**v2(3001)가 단일 운영본이 됐다. v1(3000)은 READ_ONLY 조회 전용 존치.**
+
+**하위 단계:**
+
+| 하위 | 내용 | 커밋/산출물 |
+|------|------|------|
+| B-7a | 델타 규모 조사 + v1 보존 스냅샷 | 67cf976 |
+| B-7b | v1 READ_ONLY 미들웨어(환경변수 없으면 no-op, /login만 쓰기 허용) | 3960ad0 |
+| B-7c' | 스크래치 DB(5434) 전량 재이관 드라이런 — 드리프트 0, 54/54 PASS | 0639f38 (b7-remigrate/ 4종) |
+| B-7f | 운영 컷오버 본실행(게이트 방식 10단계) — 검증 54/54 PASS | v2/backups/b7f_* |
+| 마무리 | v2 상시 구동 systemd 정식화(it-assets-v2.service) | v2/deploy/ 사본 |
+
+**빅뱅 재이관 채택 근거(B-7a):** 델타 세밀 재이전은 audit_logs id 충돌 48건 + 자식테이블
+타임스탬프 부재로 식별 불가 → 운영 v2 데이터 폐기 후 v1 전량 재이관으로 확정.
+
+**핵심 수치:**
+- 최종 동결 스냅샷: audit_logs **1429**(+1은 READ_ONLY 배너 확인 로그인 — 허용 예외, 승인 확정),
+  assets 174, racks 23(v1 실삭제 4건 반영), ip_addresses 2304, asset_credentials 223.
+- EUL: v1 792행 → **1055 이벤트**(incoming 233 / in_use 559 / returned 263, asset_id NULL 218).
+- 검증 54/54 PASS(행수 20·EUL 3·FK 7·시퀀스 21·racks·표본 diff 2) — verify.js가 스냅샷에서
+  기대치 재산출(하드코딩 아님).
+- 실측 소요: DB 이관 자체 ~3초. v1 쓰기 동결(21:56) → v2 전환 검증 완료(22:14) **총 18분**.
+
+**산출물 (v2/backups/, gitignore 대상 — 파일 실물 보존):**
+b7f_v2_full_20260711_2151.sql(구 v2 전체 덤프 = 롤백 수단, 구 audit 1526 포함) /
+v1_snapshot_b7f.sqlite(동결 스냅샷 = 이관 소스) / b7f_cutover_migrate.log /
+b7f_subnets_backup.sql / B7F_CUTOVER_REPORT.md
+
+**현 상태 선언:**
+- v2: 3001, **systemd `it-assets-v2`**(enabled, Restart=on-failure, dotenv가 v2/.env 로드),
+  DB=it-assets-db 컨테이너(5433).
+- v1: 3000, systemd `it-assets` + READ_ONLY=1 override 존치(조회·로그인만) — **해제 금지**.
+  v1 audit_logs는 로그인 기록으로만 +1씩 증가 가능(무해, 이관 기준은 동결 스냅샷).
+- 알려진 관찰(BL-8 등록): 이관 audit_logs(id≤1476) 표시 시각이 v1의 UTC 저장 특성 그대로
+  (신규 v2 기록은 KST 정상) — v1 대비 회귀 아님.
+
+**다음 단계:** 8월 타 팀 배포 → v2.1 백로그(BL-1~8) 우선순위 정렬.
 
 ## B-4d 단계 전체 완결 (2026-07-09)
 

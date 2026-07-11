@@ -329,3 +329,15 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
 - ③ UI 전반 개선
 - ④ SSH/BMC 팝업 접속 신기능 (BUG-2 전원제어 통합)
 - 메뉴 정리(가): 신청서/전력분전반(powerPanel)/네트워크(networkLayout) 이식 제외 + 메뉴 숨김
+
+## 운영 인프라 메모 (버그 아님 — 서버 점검 창 대기)
+
+### OPS-1: docker 데몬 libnetwork 스토어 손상 (B-7c' 발견, 2026-07-11)
+- 증상: 기본 bridge 네트워크로 신규 컨테이너 기동 시
+  `failed to update store for object type *libnetwork.endpointCnt: Key not found in store`
+  로 실패. **기존 컨테이너(it-assets-db)는 무영향.**
+- 당시 우회: 전용 네트워크 생성(`docker network create ...`) 후 그 네트워크로 기동 — 성공.
+- 조치 필요: docker 데몬 재시작이 가능한 점검 창에서 정리(재시작 시 대개 스토어 재구축됨).
+  **주의: 데몬 재시작은 it-assets-db(운영 v2 DB)를 함께 내리므로 반드시 v2 정지 공지 창에서.**
+  it-assets-db는 restart 정책으로 자동 복귀하지만 v2 앱(it-assets-v2)의 PG 커넥션 풀 재확립
+  확인까지 점검 항목에 포함할 것.
