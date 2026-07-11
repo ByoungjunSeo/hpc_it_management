@@ -9,7 +9,7 @@
 
 | 파일 | 역할 |
 |------|------|
-| `it-assets-2.0.0.tar.gz` | 앱 이미지 (별도 전달, `docker load`). 로드 태그: **`it-assets:2.0.0`** |
+| `it-assets-2.0.1.tar.gz` | 앱 이미지 (별도 전달, `docker load`). 로드 태그: **`it-assets:2.0.1`** |
 | `postgres-16-alpine.tar.gz` | **DB 이미지 (오프라인 필수 — 아래 ⚠)** |
 | `docker-compose.prod.yml` | DB(postgres:16-alpine) + 앱 스택 |
 | `db/*.sql` | 최초 기동 시 스키마 자동 생성 |
@@ -22,8 +22,8 @@
 > DB 컨테이너가 이미지를 내려받지 못해 뜨지 않고, **앱 컨테이너도 DB를 기다리다 종료됩니다.**
 
 이미지는 인터넷/사내미러가 있는 환경에서 빌드해 tar로 만듭니다(앱 이미지에 ipmitool 포함 — apt 필요).
-빌드 예: `docker build -t it-assets:2.0.0 .` → `docker save it-assets:2.0.0 | gzip > it-assets-2.0.0.tar.gz`
-> compose.prod.yml의 앱 이미지 태그는 **`it-assets:2.0.0`** 고정입니다. 다른 태그로 로드했다면
+빌드 예: `docker build -t it-assets:2.0.1 .` → `docker save it-assets:2.0.1 | gzip > it-assets-2.0.1.tar.gz`
+> compose.prod.yml의 앱 이미지 태그는 **`it-assets:2.0.1`** 고정입니다. 다른 태그로 로드했다면
 > `.env`에 `APP_IMAGE=<태그>` 를 지정하세요. (배포 tar에는 Dockerfile이 없어 compose가 빌드하지 않습니다.)
 
 ---
@@ -32,7 +32,7 @@
 
 ```bash
 # 1) 이미지 적재 — 앱 + DB 둘 다 (→ "Loaded image: ..." 출력 확인)
-gunzip -c it-assets-2.0.0.tar.gz | docker load       # → it-assets:2.0.0
+gunzip -c it-assets-2.0.1.tar.gz | docker load       # → it-assets:2.0.1
 gunzip -c postgres-16-alpine.tar.gz | docker load    # → postgres:16-alpine
 #   (온라인 환경이면 이 두 줄 대신 첫 up에서 자동 pull됨)
 
@@ -76,7 +76,7 @@ docker compose -f docker-compose.prod.yml up -d
    - 설치 시 WSL2 활성화 필요(Windows 기능 → "Linux용 Windows 하위 시스템").
 2. PowerShell 또는 WSL 터미널에서 §1과 동일. 윈도우는 `docker load -i`로 gz를 바로 적재:
    ```powershell
-   docker load -i it-assets-2.0.0.tar.gz
+   docker load -i it-assets-2.0.1.tar.gz
    docker load -i postgres-16-alpine.tar.gz
    copy .env.example .env    # 메모장/VS Code로 열어 CHANGE_ME 채움
    docker compose -f docker-compose.prod.yml up -d
@@ -134,7 +134,7 @@ bash scripts/restore.sh backups/db_YYYYMMDD_HHMMSS.dump --with-uploads
 
 ```bash
 gunzip -c it-assets-<새버전>.tar.gz | docker load   # 새 이미지 적재
-# docker-compose.prod.yml의 앱 태그는 it-assets:2.0.0 고정 —
+# docker-compose.prod.yml의 앱 태그는 it-assets:2.0.1 고정 —
 # 새 태그면 .env에 APP_IMAGE=it-assets:<새버전> 지정
 docker compose -f docker-compose.prod.yml up -d      # 앱만 재생성, 볼륨 유지
 ```
@@ -167,7 +167,7 @@ docker compose -f docker-compose.prod.yml up -d
 | 증상 | 원인 / 조치 |
 |------|------------|
 | `ERR_SSL_PROTOCOL_ERROR` | 브라우저가 주소를 https로 자동 승격 — 주소를 지우고 `http://` 부터 명시 입력(자동완성 주의, 시크릿 창 활용) |
-| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.0.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
+| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.0.1`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
 | 앱 컨테이너가 바로 종료 | ① DB 이미지 누락(오프라인) — `docker images`에 `postgres:16-alpine` 있는지 + `... ps`로 db healthy 확인 ② `.env`에 INITIAL_ADMIN_PASSWORD/SESSION_SECRET/POSTGRES_PASSWORD 누락 — `docker compose logs app` 확인 |
 | 로그인 안 됨 | INITIAL_ADMIN_PASSWORD는 **최초 기동에만** 적용. 변경은 컨테이너 내 `node scripts/init-admin.js --reset` |
 | **재시작 후 데이터 사라짐** | `down -v` 사용 여부 확인 — **`-v` 가 named volume(DB·사진)을 삭제**함. 재시작·재생성은 §7(stop/start 또는 `-v` 없는 down→up)로. 복구는 백업본에서만 |
