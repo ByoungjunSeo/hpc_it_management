@@ -1,0 +1,18 @@
+[Unit]
+Description=HPC/AIDC IT Asset Management System v2 (PostgreSQL backend)
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=mlcommons
+Group=mlcommons
+WorkingDirectory=/mlcommons_cm/hpc_it_management/v2/app
+ExecStart=/mlcommons_cm/hpc_it_management/node-v18.20.5-linux-x64/bin/node server.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=it-assets-v2
+
+[Install]
+WantedBy=multi-user.target
