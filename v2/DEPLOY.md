@@ -73,11 +73,9 @@ docker compose -f docker-compose.prod.yml up -d
 
 필수 `.env` 키(미설정 시 기동 실패):
 - `POSTGRES_PASSWORD` — DB 비밀번호
+- `SESSION_SECRET` — 세션 암호화 키. **32자 이상 무작위 문자열 필수** —
+  미설정·CHANGE_ME 방치·32자 미만이면 기동이 차단됩니다(생성 예: `openssl rand -hex 32`).
 - `INITIAL_ADMIN_PASSWORD` — 최초 admin 비밀번호(첫 기동에만 사용, 멱등)
-
-보안 필수 키(⚠ 미설정이어도 기동됨 — 반드시 수동 확인):
-- `SESSION_SECRET` — 세션 암호화 키(32자+ 랜덤). 미변경 시 예측 가능한
-  세션 서명 키가 되어 세션 위조 위험. 차기 버전에서 기동 시 검사로 강제 예정.
 ---
 
 ## 2. 윈도우 데스크탑 설치
