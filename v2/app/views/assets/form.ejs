@@ -1,5 +1,11 @@
 <%- include('../partials/header', { title, currentPath, extraCss }) %>
 
+<style>
+/* BUG-7(재발): 인라인 JS hover → CSS :hover 전환. 벗어나면 규칙이 사라져 원배경 자동 복귀 */
+.asset-rack-empty:hover { background: #f0f9ff !important; }
+.ip-pick-btn:hover { background: #eff6ff !important; }
+</style>
+
 <div class="page-header">
     <h1><%= asset ? '자산 수정' : '자산 등록' %></h1>
     <a href="/assets" class="btn btn-secondary">목록</a>
@@ -838,7 +844,7 @@ function renderRackPreview(data) {
                     if (isStart) html += '<span style="color:' + occTextColors.left + '; font-weight:500; font-size:10px;">' + escapeHtml(a.name) + '</span>';
                     html += '</td>';
                 } else {
-                    html += '<td style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                    html += '<td class="asset-rack-empty" style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')"></td>';
                 }
                 if (hasRight) {
                     var a = m.right;
@@ -847,10 +853,10 @@ function renderRackPreview(data) {
                     if (isStart) html += '<span style="color:' + occTextColors.right + '; font-weight:500; font-size:10px;">' + escapeHtml(a.name) + '</span>';
                     html += '</td>';
                 } else {
-                    html += '<td style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                    html += '<td class="asset-rack-empty" style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')"></td>';
                 }
             } else {
-                html += '<td colspan="2" style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')" onmouseenter="this.style.background=\'#f0f9ff\'" onmouseleave="this.style.background=\'#fff\'"></td>';
+                html += '<td colspan="2" class="asset-rack-empty" style="' + emptyCell + '" onclick="onAssetSlotClick(' + slot + ')"></td>';
             }
             html += '</tr>';
         }
@@ -995,7 +1001,7 @@ function loadAvailableIps() {
             var html = '<div style="margin-bottom:8px;font-size:12px;color:#64748b;">' + data.ips.length + '개 가용 IP</div>';
             html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;">';
             data.ips.forEach(function(ip) {
-                html += '<button type="button" style="padding:4px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;background:white;cursor:pointer;text-align:left;transition:background 0.15s;" onmouseover="this.style.background=\'#eff6ff\'" onmouseout="this.style.background=\'white\'" onclick="selectAvailableIp(\'' + ip + '\')">' + ip + '</button>';
+                html += '<button type="button" class="ip-pick-btn" style="padding:4px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;background:white;cursor:pointer;text-align:left;transition:background 0.15s;" onclick="selectAvailableIp(\'' + ip + '\')">' + ip + '</button>';
             });
             html += '</div>';
             results.innerHTML = html;

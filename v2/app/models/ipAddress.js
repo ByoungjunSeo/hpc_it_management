@@ -173,6 +173,18 @@ const IpAddress = {
     return rows.map(fixDates);
   },
 
+  // B-6e Part4: 서브넷의 available IP 목록 (대량 대역 대비 LIMIT). inet 정렬.
+  async findAvailable(subnet, limit = 512) {
+    const { rows } = await pool.query(
+      `SELECT ip_address FROM ip_addresses
+       WHERE subnet = $1 AND allocation_type = 'available'
+       ORDER BY ip_address::inet
+       LIMIT $2`,
+      [subnet, limit]
+    );
+    return rows.map(r => r.ip_address);
+  },
+
   // B-6e: 대역의 /24 블록 앞3옥텟 목록 (페이지네이션 네비용). /24 이하면 [단일].
   blocksOf(cidr) {
     const r = cidrRange(cidr);

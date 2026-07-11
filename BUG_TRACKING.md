@@ -235,8 +235,8 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 ---
 
 ## BUG-7: 랙 미리보기 hover 잔상 (B-6c 윈도우 검증 발견)
-- 상태: [완료] B-6c (FIX-A) | 방침: (나) 수정
-- 관련(v2): app/views/inventory/form.ejs (사용등록 화면 랙 미리보기)
+- 상태: [완료] B-6c (FIX-A) + B-6e Part4 재발 전수 전환 | 방침: (나) 수정
+- 관련(v2): app/views/inventory/form.ejs, app/views/assets/form.ejs
 
 ### 증상
 사용 등록 화면의 랙 미리보기에서 빈 칸 위로 마우스를 올리면 흰색으로 바뀌고, mouseout
@@ -251,6 +251,15 @@ onmouseleave="this.style.background='#fff'"` — mouseout 복원이 **원래 색
 3곳의 인라인 JS hover 제거 → `class="inv-rack-empty"` + `<style>.inv-rack-empty:hover
 { background:#f0f9ff !important; }`. hover 해제 시 CSS 규칙이 사라져 원배경 자동 복귀
 (JS가 style을 안 건드림 = 잔상 원천 제거). onclick(빈 칸 클릭 → Unit 자동입력)은 보존.
+
+### 재발 (B-6e Part4) — 동일 패턴 4곳 추가 발견, 전수 전환 완료
+B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존:
+- inventory/form.ejs:1771 — 가용 IP 조회 모달 IP 버튼 (onmouseenter/leave, #fff 복원)
+- assets/form.ejs:841/850/853 — 자산등록 랙 미리보기 빈 칸 (B-6c 당시 미수정분)
+- assets/form.ejs:998 — 자산등록 가용 IP 버튼 (onmouseover/out, white 복원)
+→ 전부 인라인 hover 제거 + 클래스(`.inv-rack-empty`/`.asset-rack-empty`/`.ip-pick-btn`) +
+  `<style>` CSS :hover로 일괄 전환. 잔존 onmouse* 0.
+**재발 방지 규약: 인라인 onmouse* / JS로 background 하드코딩 복원 금지 — hover는 CSS :hover만.**
 
 ---
 

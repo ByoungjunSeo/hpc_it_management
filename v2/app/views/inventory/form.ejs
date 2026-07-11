@@ -3,6 +3,8 @@
 <style>
 /* FIX-A(BUG-7): 랙 미리보기 빈 칸 hover — JS 인라인 대체. 벗어나면 규칙이 사라져 원배경 자동 복귀 */
 .inv-rack-empty:hover { background: #f0f9ff !important; }
+/* BUG-7 재발: 가용 IP 조회 모달 버튼도 동일 전환 */
+.ip-pick-btn:hover { background: #eff6ff !important; }
 </style>
 
 <%
@@ -595,11 +597,9 @@
     </div>
     <div style="margin-bottom:12px;">
       <label style="font-size:13px; font-weight:600; margin-bottom:4px; display:block;">서브넷 선택</label>
+      <%# B-6e Part4: 서브넷 목록은 subnets 테이블에서 동적 로드(openInvIpModal) %>
       <select id="invIpSubnetSelect" class="form-control" onchange="loadInvAvailableIps()">
         <option value="">서브넷 선택</option>
-        <% appConfig.subnets.forEach(s => { %>
-        <option value="<%= s.subnet %>"><%= s.label %> (<%= s.subnet %>)</option>
-        <% }) %>
       </select>
     </div>
     <div id="invIpList" style="max-height:300px; overflow-y:auto;"></div>
@@ -1722,6 +1722,23 @@ function openInvIpModal() {
     var modal = document.getElementById('invIpModal');
     modal.style.display = 'flex';
     document.getElementById('invIpList').innerHTML = '<div style="text-align:center; padding:20px; color:#94a3b8;">서브넷을 선택하세요</div>';
+    // B-6e Part4: 서브넷 목록 동적 로드 (subnets 테이블 기반)
+    var sel = document.getElementById('invIpSubnetSelect');
+    fetch('/assets/api/subnets')
+        .then(function(r) { return r.ok ? r.json() : { subnets: [] }; })
+        .then(function(data) {
+            var opts = '<option value="">서브넷 선택</option>';
+            (data.subnets || []).forEach(function(s) {
+                opts += '<option value="' + s.cidr + '">' + s.name + ' (' + s.cidr + ') · 가용 ' + s.available + '</option>';
+            });
+            sel.innerHTML = opts;
+            if (!data.subnets || data.subnets.length === 0) {
+                document.getElementById('invIpList').innerHTML = '<div style="text-align:center; padding:20px; color:#94a3b8;">등록된 서브넷이 없습니다. IP 관리에서 먼저 등록하세요.</div>';
+            }
+        })
+        .catch(function() {
+            document.getElementById('invIpList').innerHTML = '<div style="text-align:center; padding:20px; color:#ef4444;">서브넷 목록 조회 실패</div>';
+        });
 }
 
 function closeInvIpModal() {
@@ -1753,7 +1770,7 @@ function loadInvAvailableIps() {
             }
             var html = '<div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:4px;">';
             data.ips.forEach(function(ip) {
-                html += '<button type="button" onclick="selectInvAvailableIp(\'' + ip + '\')" style="padding:6px 8px; font-size:12px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; cursor:pointer; text-align:center; transition:background 0.15s;" onmouseenter="this.style.background=\'#eff6ff\'" onmouseleave="this.style.background=\'#fff\'">' + ip + '</button>';
+                html += '<button type="button" class="ip-pick-btn" onclick="selectInvAvailableIp(\'' + ip + '\')" style="padding:6px 8px; font-size:12px; border:1px solid #e2e8f0; border-radius:4px; background:#fff; cursor:pointer; text-align:center; transition:background 0.15s;">' + ip + '</button>';
             });
             html += '</div>';
             listEl.innerHTML = html;

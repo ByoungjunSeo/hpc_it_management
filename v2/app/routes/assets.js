@@ -7,6 +7,7 @@ const Vendor = require('../models/vendor');
 const AssetIp = require('../models/assetIp');
 const AssetCredential = require('../models/assetCredential');
 const IpAddress = require('../models/ipAddress');
+const Subnet = require('../models/subnet');
 const appConfig = require('../config/app');
 const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
@@ -262,9 +263,21 @@ router.get('/api/available-ips', async (req, res) => {
   try {
     const subnet = req.query.subnet;
     if (!subnet) return res.json({ ips: [] });
-    const all = await IpAddress.findBySubnet(subnet);
-    const available = all.filter(ip => ip.allocation_type === 'available');
-    res.json({ ips: available.map(ip => ip.ip_address) });
+    // B-6e Part4: 풀 기반 available (대량 대역 대비 LIMIT 512)
+    const ips = await IpAddress.findAvailable(subnet, 512);
+    res.json({ ips, limited: ips.length >= 512 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// API: 등록된 서브넷 목록 (가용 IP 조회 모달 select용) — B-6e subnets 테이블 기반
+router.get('/api/subnets', async (req, res) => {
+  try {
+    const rows = await Subnet.findAllWithStats();
+    res.json({ subnets: rows.map(s => ({
+      cidr: s.cidr, name: s.name, available: Number(s.available) || 0
+    })) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
