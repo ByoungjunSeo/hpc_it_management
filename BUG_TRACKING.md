@@ -356,14 +356,14 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
 > DOC-1~5는 B-6c 윈도우 실검증, DOC-6은 down -v 경고(리줌 가이드 B-6 섹션에 기록,
 > 전부 2.0.1에 반영 완료). 아래는 B-4 리눅스 설치 검증(2026-07-11)에서 발견된 신규 2건.
 
-### DOC-7: docker-compose.prod.yml 헤더 주석 구버전 잔재 — [완료(repo)] 2.0.1 tar 미반영
+### DOC-7: docker-compose.prod.yml 헤더 주석 구버전 잔재 — [완료] 2.0.2 tar 반영
 - 증상: 헤더 주석이 `*.tar.gz` + `gunzip -c … | docker load` 전달 방식 안내 — 실물은
   무압축 `.tar`, DEPLOY.md(DOC-2 수정분)는 `docker load -i` 기준. DOC-2 수정 당시 compose
   주석 누락 잔재. 심각도 경미(주석) — 설치 차단 없음.
 - 조치: repo compose 주석 현행화 완료. **2.0.1 tar에는 미반영** — 배포 공지문
   (v2/RELEASE_NOTICE_2.0.1.md §5 정오표)으로 보완, 차기(2.0.2+) 패키징에 자동 반영.
 
-### DOC-8: DEPLOY.md §5 cron 예시 경로 `/path/to/v2` 오해 소지 — [완료(repo)] 2.0.1 tar 미반영
+### DOC-8: DEPLOY.md §5 cron 예시 경로 `/path/to/v2` 오해 소지 — [완료] 2.0.2 tar 반영
 - 증상: 수령자 전개 디렉토리는 `it-assets-dist-2.0.1`이라 "v2" 경로명이 무의미.
   심각도 경미(예시 문구).
 - 조치: `<설치 디렉토리>` 일반형 + 예시 경로로 수정 완료(repo). **2.0.1 tar 미반영** —
