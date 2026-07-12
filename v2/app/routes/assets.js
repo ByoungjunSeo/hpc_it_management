@@ -157,7 +157,7 @@ router.post('/', requireMaintenance, async (req, res) => {
     if (req.body.room_id === '__new__' && req.body.new_room_name && req.body.new_room_name.trim()) {
       const roomName = req.body.new_room_name.trim();
       const locType = req.body.loc_type || 'server_room';
-      const existingRoom = await ServerRoom.findByName(roomName, locType);
+      const existingRoom = await ServerRoom.findByNameNormalized(roomName, locType); // BL-3: 정규화 비교
       if (existingRoom) {
         req.body.room_id = existingRoom.id;
       } else {
@@ -790,7 +790,7 @@ router.post('/:id', requireMaintenance, async (req, res) => {
     if (req.body.room_id === '__new__' && req.body.new_room_name && req.body.new_room_name.trim()) {
       const roomName = req.body.new_room_name.trim();
       const locType = req.body.loc_type || 'server_room';
-      const existingRoom = await ServerRoom.findByName(roomName, locType);
+      const existingRoom = await ServerRoom.findByNameNormalized(roomName, locType); // BL-3: 정규화 비교
       if (existingRoom) {
         req.body.room_id = existingRoom.id;
       } else {

@@ -23,6 +23,12 @@ CREATE TABLE server_rooms (
     UNIQUE(name, location_type)
 );
 
+-- BL-3: 이름 정규화(공백/대소문자 변형) 중복까지 DB 계층에서 차단.
+-- 기존 UNIQUE(name, location_type)는 바이트 동일만 방어 — 이 인덱스가 보완.
+-- (기존 설치 DB 적용분은 db/migrations/2026-07-12_bl3_room_name_norm_unique.sql)
+CREATE UNIQUE INDEX idx_server_rooms_name_norm
+    ON server_rooms (lower(trim(name)), location_type);
+
 -- 2. vendor_info
 CREATE TABLE vendor_info (
     id SERIAL PRIMARY KEY,

@@ -43,10 +43,24 @@ const ServerRoom = {
     return rows[0];
   },
 
+  // BL-3: 정규화(trim+대소문자 무시) 중복 조회 — location_type별 분리 유지.
+  // excludeId는 개명(수정) 시 자기 자신 제외용.
+  async findByNameNormalized(name, locationType, excludeId) {
+    let sql = `SELECT * FROM server_rooms
+               WHERE lower(trim(name)) = lower(trim($1)) AND location_type = $2`;
+    const params = [name, locationType || 'server_room'];
+    if (excludeId) {
+      sql += ' AND id != $3';
+      params.push(excludeId);
+    }
+    const { rows } = await pool.query(sql, params);
+    return rows[0];
+  },
+
   async create(data) {
     const { rows } = await pool.query(
       'INSERT INTO server_rooms (name, location, description, location_type) VALUES ($1, $2, $3, $4) RETURNING id',
-      [data.name, data.location, data.description, data.location_type || 'server_room']
+      [data.name ? data.name.trim() : data.name, data.location, data.description, data.location_type || 'server_room']
     );
     return rows[0].id;
   },
@@ -54,7 +68,7 @@ const ServerRoom = {
   async update(id, data) {
     return pool.query(
       'UPDATE server_rooms SET name=$1, location=$2, description=$3, location_type=$4, updated_at=NOW() WHERE id=$5',
-      [data.name, data.location, data.description, data.location_type || 'server_room', id]
+      [data.name ? data.name.trim() : data.name, data.location, data.description, data.location_type || 'server_room', id]
     );
   },
 

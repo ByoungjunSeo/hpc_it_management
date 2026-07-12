@@ -92,8 +92,9 @@ router.get('/', async (req, res, next) => {
 router.post('/', requireMaintenance, async (req, res) => {
   try {
     const locType = req.body.location_type || 'server_room';
-    if (req.body.name && await ServerRoom.findByName(req.body.name.trim(), locType)) {
-      throw new Error('같은 이름의 서버실이 이미 존재합니다: ' + req.body.name);
+    // BL-3: 정규화(trim+대소문자) 비교 — 공백/대소문자 변형 중복 차단
+    if (req.body.name && await ServerRoom.findByNameNormalized(req.body.name, locType)) {
+      throw new Error('같은 이름의 서버실이 이미 존재합니다(공백/대소문자 차이 포함): ' + req.body.name.trim());
     }
     const roomId = await ServerRoom.create(req.body);
     await AuditLog.log(req, { action: 'create', targetType: 'room', targetId: roomId, targetLabel: req.body.name });
@@ -107,6 +108,11 @@ router.post('/', requireMaintenance, async (req, res) => {
 // Edit server room
 router.post('/:id/edit', requireMaintenance, async (req, res) => {
   try {
+    // BL-3: 개명 시에도 동일 정규화 검사 (자기 자신 제외)
+    const editLocType = req.body.location_type || 'server_room';
+    if (req.body.name && await ServerRoom.findByNameNormalized(req.body.name, editLocType, req.params.id)) {
+      throw new Error('같은 이름의 서버실이 이미 존재합니다(공백/대소문자 차이 포함): ' + req.body.name.trim());
+    }
     await ServerRoom.update(req.params.id, req.body);
     await AuditLog.log(req, { action: 'update', targetType: 'room', targetId: req.params.id, targetLabel: req.body.name });
     req.flash('success', '서버실이 수정되었습니다.');
