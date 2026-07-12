@@ -13,15 +13,15 @@
 
 | 단계 | 내용 | 커밋 |
 |------|------|------|
-| B-1 | PostgreSQL 21테이블 + 트리거 + 배포 정책 | 4a96a24 |
-| B-1.5 | docker-compose ports 127.0.0.1:5433 추가 | 5fa09f0 |
-| B-2.1/2.2 | 마이그레이션 스크립트 + 단순 테이블 5개 이전 | 569a270 |
-| B-2.3~2.8a | 나머지 15개 테이블 이전 (migrate-data.js 확장) | b55985a |
-| B-2.8b | equipment_usage_logs 780→1036행 (id 1~1036), migrate-eul.js | b55985a |
-| B-2.9 | 전체 21테이블 검증 + 시퀀스 일괄 리셋 | b55985a |
-| chore | scripts/node_modules .gitignore 추가 | 8e3e966 |
-| chore | dryrun 산출물 git 제외 (내부 IP 포함, 재생성 가능) | 99f6c74 |
-| B-3 | init-admin.js — admin upsert, PBKDF2 SHA-512 v1 호환, 검증 통과 | d33fd0a |
+| B-1 | PostgreSQL 21테이블 + 트리거 + 배포 정책 | c2a10f4 |
+| B-1.5 | docker-compose ports 127.0.0.1:5433 추가 | 6838306 |
+| B-2.1/2.2 | 마이그레이션 스크립트 + 단순 테이블 5개 이전 | d4573f0 |
+| B-2.3~2.8a | 나머지 15개 테이블 이전 (migrate-data.js 확장) | 302020e |
+| B-2.8b | equipment_usage_logs 780→1036행 (id 1~1036), migrate-eul.js | 302020e |
+| B-2.9 | 전체 21테이블 검증 + 시퀀스 일괄 리셋 | 302020e |
+| chore | scripts/node_modules .gitignore 추가 | ba0588a |
+| chore | dryrun 산출물 git 제외 (내부 IP 포함, 재생성 가능) | c65543a |
+| B-3 | init-admin.js — admin upsert, PBKDF2 SHA-512 v1 호환, 검증 통과 | 90d7dd9 |
 
 **상태: 데이터 이전 + 인증 기반 완료.**
 
@@ -264,7 +264,7 @@ express → getDb() → 디렉토리 생성(backups, photos)
   현재 DB 0건. 한글 라벨 미정 → fallback으로 'transferred' 원문 노출(안 깨짐).
   자산 이관 기능을 실제 설계할 때(B-4d 또는 이후) 한글 라벨 확정.
 
-### B-4b 검증 경계 (커밋 ba9401e)
+### B-4b 검증 경계 (커밋 2a9e278)
 
 검증 완료 (실데이터 확인):
 - requireLogin 보호 + 읽기 라우트: auditLog, 대시보드, offices, storage,
@@ -359,36 +359,36 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 ### B-4c 완료 + B-4d 진행
 
 **B-4c 완료** (5개 쓰기 라우트 이식·검증):
-- serverRooms(c592b0d) · vendorIntake(f7823f4) · ipManagement(d23cd90) · photos(9cdd202) · lendings(5fb9446)
+- serverRooms(b56c3b2) · vendorIntake(42d1e38) · ipManagement(dfb8755) · photos(a1d6d19) · lendings(efbe706)
 - 제외 3개(requests/powerPanel/networkLayout) + 미사용 5개(publicIntake/backup/excelUpload/gpuMonitoring/chat) 주석 유지.
 - lendings: 8EP 이식, fault-return 2개(6모델 대형 트랜잭션)는 B-4d로 스텁 분리.
 
 **B-4d 진행:**
-- B-4d-1: asset 모델 확장 14메서드 + 날짜밀림 스윕(공용 utils/dateFix.js, DATE/TIMESTAMP 분기, 4모델)(0218d2b)
-- B-4d-2.5: EUL append-only 트리거 제거 (방향1, b88e7de) — v1 동등 mutable EUL 복원, 자산삭제 회귀 해소.
+- B-4d-1: asset 모델 확장 14메서드 + 날짜밀림 스윕(공용 utils/dateFix.js, DATE/TIMESTAMP 분기, 4모델)(979d1f0)
+- B-4d-2.5: EUL append-only 트리거 제거 (방향1, 89af313) — v1 동등 mutable EUL 복원, 자산삭제 회귀 해소.
   이력불변은 마이그레이션 후 신기능 트랙으로 분리.
-- B-4d-2: assets 12EP 이식 (ad36abc) — fault-repair/module-action 503 스텁,
+- B-4d-2: assets 12EP 이식 (73fcc83) — fault-repair/module-action 503 스텁,
   EUL동기화·prefill·auto-sync는 B-4d-6 유보.
 - BUG-4 종결 (v2 스키마 구조적 소멸 — 아래 BUG_TRACKING 참조).
-- B-4d-3: racks 10EP 이식(0777fe0) + power-control 스텁화(B-4d-3b, BUG-2 트랙, bde0854).
+- B-4d-3: racks 10EP 이식(3b23c72) + power-control 스텁화(B-4d-3b, BUG-2 트랙, 9c09210).
   BUG-5 재현결과: 조건부 잠복·원인규명완료·미룸.
 - B-4d-4: 모듈 4모델 확장(26메서드, 트랜잭션 3종). getUsageByCode 유보(EUL, B-4d-5/6).
-- B-4d-5: moduleInventory 16EP 이식(3300f61, §5 EUL동기화 제거·syncModulesToUsageLog 스텁) + BUG-1 수정(edc2b2d).
+- B-4d-5: moduleInventory 16EP 이식(f3a1a0c, §5 EUL동기화 제거·syncModulesToUsageLog 스텁) + BUG-1 수정(44581ef).
 - B-4d-6 (inventory + EUL 이벤트소싱, 완료):
-  - 설계 확정(6e1938d, B4D6_EUL_DESIGN.md): status↔event_type 매핑 + JSONB 3종 + 쓰기 하이브리드
+  - 설계 확정(fd1ec69, B4D6_EUL_DESIGN.md): status↔event_type 매핑 + JSONB 3종 + 쓰기 하이브리드
     (create=INSERT / 반납=append INSERT / update=UPDATE / delete=DELETE).
-  - 6a: EUL 모델 확장 — 읽기7+쓰기4, flatten(JSONB→v1 가상컬럼), STATUS_TO_EVENT (124d65e).
-  - 6b: 라우트 헬퍼 — mapHardware/Ips/CredsToCols, generateVendorManagementNumber async (7c2a00a).
+  - 6a: EUL 모델 확장 — 읽기7+쓰기4, flatten(JSONB→v1 가상컬럼), STATUS_TO_EVENT (d009a9f).
+  - 6b: 라우트 헬퍼 — mapHardware/Ips/CredsToCols, generateVendorManagementNumber async (ee25332).
   - **6c: inventory 라우트 18EP 이식 완료 = 구현 17EP + 스텁확정 1EP(#18 migrate-psu, 일회성이라 v2 불필요)**:
-    - 6c-A(307e60e): 라우트 생성 + 무접촉 7EP(#2,4,5,6,7,8,17) + incoming-form 뷰 복사 + mount.
-    - 6c-B(c9d313f): 읽기 5EP(#1,9,11,12,16) + 뷰 3개 복사(index/form/equipment-detail).
-    - 6c-C1(c43dcfb): 반납#14·삭제#15. / 6c-C2(eb27887): 입고#3(재입고 reactivate, 다중노드, 모듈재고).
-    - 6c-C3(c857145): 사용등록#10(자동반납 + 자산동기화 200줄). / 6c-C4(e1d380b): 수정#13.
+    - 6c-A(624766d): 라우트 생성 + 무접촉 7EP(#2,4,5,6,7,8,17) + incoming-form 뷰 복사 + mount.
+    - 6c-B(9a5a43b): 읽기 5EP(#1,9,11,12,16) + 뷰 3개 복사(index/form/equipment-detail).
+    - 6c-C1(4ff143b): 반납#14·삭제#15. / 6c-C2(8886846): 입고#3(재입고 reactivate, 다중노드, 모듈재고).
+    - 6c-C3(b0c510f): 사용등록#10(자동반납 + 자산동기화 200줄). / 6c-C4(b1b4fbd): 수정#13.
   - 실증 완료: flatten 뱃지(읽기 목록/상세 status·개별컬럼 렌더) / append(수동반납#14·자동반납#10,
     이전 in_use 보존 + returned 신규행) / incoming 매핑(#3, status='입고'→event_type) / UPDATE(#13,
     행수 불변 내용정정) / DELETE(#15) / mapXxx→buildSnapshots JSONB 체인(#10 create·#13 update 양경로).
   - 검증은 전부 __TEST_xxx__ 마커 격리 후 정리 — 운영 행수(assets 172/eul 1036 등) 사전=사후 확인됨.
-  - 6d(1e330aa): 화면 필드 대조 완료 — detail 타임라인(날짜/사용자/용도/위치 v1 문자열 일치.
+  - 6d(946bfea): 화면 필드 대조 완료 — detail 타임라인(날짜/사용자/용도/위치 v1 문자열 일치.
     v1 1행→v2 2행 이벤트 분리 표시는 설계 의도), edit prefill(JSONB→flatten→폼 정상), index 표본
     (v1 상위행 7월 데이터는 운영 델타, B-7 재이전 대상). returned 행은 "반납:"만 표시
     (6a 보정 — 사용일은 인접 in_use 행에 있어 정보손실 없음 확인).
@@ -423,7 +423,7 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
     S1 수치 실증(total 5→5 불변), keep업체 tmp 코드 upsert 2회째 증가 분기 실증, EUL 불변.
 - B-4d-9 (기술부채 일괄, 완료 — 커밋 대기):
   - assets.js §5 주석 스텁 → 영구 제거 종결(원칙 주석 1줄). /computing-modules 리다이렉트 복원.
-  - 날짜 래퍼 공용화 완료(29c6253 부채 해소 — moduleInventoryLog도 fixRowDates 위임) +
+  - 날짜 래퍼 공용화 완료(4f160bc 부채 해소 — moduleInventoryLog도 fixRowDates 위임) +
     Date 직렬화 스윕: 미적용 7모델(user/serverRoom/rack/ipAddress/computingModule/assetIp/
     assetCredential) 일괄 적용, v1↔v2 날짜 문자열 재대조 일치·UTC ISO 잔존 0.
   - BUG-3 수정(모달 CSS 탭 분기 밖 이동 — BUG_TRACKING [완료] 참조). BUG-5는 결정 자료
@@ -500,25 +500,25 @@ B-4c-1 serverRooms 쓰기 검증 완료 (코드 변경 없음 — B-4b에서 이
 INV-1(클린 설치 시 IP 미반영) 해소 — 서브넷을 화면에서 CRUD하고 풀을 자동 생성.
 - Part 0 설계(a~e 승인): subnets 테이블 신설 / 마이그레이션+소급 / 삭제정책(assigned 차단,
   reserved 고지) / SUBNETS_JSON 레거시 유지 / CIDR 형식.
-- Part 1 스키마(c134df6): db/02_schema_assets.sql에 subnets + scripts/migrate-add-subnets.js.
+- Part 1 스키마(ebcad87): db/02_schema_assets.sql에 subnets + scripts/migrate-add-subnets.js.
   운영 v2 소급 9행, ip_addresses 2,304 무손상. 실행 전 pg_dump 백업(backups/, .gitignore).
-- Part 2 백엔드(89ceb0a): Subnet 모델 + IpAddress 확장(createPool/deletePool/countByAllocation/
+- Part 2 백엔드(c3b3428): Subnet 모델 + IpAddress 확장(createPool/deletePool/countByAllocation/
   findMissingFromPool, syncAssetIps 무수정) + 서브넷 CRUD 라우트(중복/겹침 검증, 삭제정책, audit
   target_type='subnet') + 사용등록 풀밖 IP 경고 + FIX-B 라벨 '서브넷'.
-- Part 3 프론트(89ceb0a): 하드코딩 Office/HPC/AIDC 제거 → 서브넷 보유 zone만 동적 렌더(빈 zone
+- Part 3 프론트(c3b3428): 하드코딩 Office/HPC/AIDC 제거 → 서브넷 보유 zone만 동적 렌더(빈 zone
   미렌더) + 서브넷 관리 UI + 삭제 고지(reserved) + 빈 상태 안내 + 통계 카드 유지.
-- Part 3-fix(7aea9ec): POST /subnets 크래시 근본 수정 — server.js unhandledRejection/
+- Part 3-fix(424b311): POST /subnets 크래시 근본 수정 — server.js unhandledRejection/
   uncaughtException 안전망(node18은 미처리 rejection 시 프로세스 종료) + 미들웨어 try/catch.
   CIDR /24 → **/16~/30 확장**(네트워크 주소 정렬검사, multi-row 배치 INSERT: /16 65,536행 2.6s,
   CIDR 범위 겹침 검사, 상세 /24 블록 페이지네이션). 실환경 브라우저 검증 통과, 운영 원복.
 - 백로그: BL-5 완료 처리, BL-7(대량 블록 네비 개선)·BL-6(zone 사용자 정의화) 추가.
 - Part 4(사용등록 폼 가용 IP 조회): subnets 테이블 기반 동적 서브넷 목록 + available LIMIT 512 +
-  직접입력 병행(하이브리드). BUG-7 동종 재발 5곳 전수 전환 + 렌더 JS 문법 검증 규약(aa6f535).
+  직접입력 병행(하이브리드). BUG-7 동종 재발 5곳 전수 전환 + 렌더 JS 문법 검증 규약(2bbdaa6).
 
 ## B-6d 2.0.1 재빌드·패키징 (2026-07-11, 커밋 완료)
 
 FIX 3건 + B-6e 반영 이미지 재빌드 및 배포 패키지 확정.
-- 버전 표기(335dcb6): package.json/lock 2.0.1 + DEPLOY.md·compose 태그/tar명 정합.
+- 버전 표기(dc080ac): package.json/lock 2.0.1 + DEPLOY.md·compose 태그/tar명 정합.
 - 빌드 환경 전환: 사무 PC(윈도우 x86 네이티브)에서 빌드 — 사무망이 deb.debian.org 도메인
   차단이라 Dockerfile에 **ARG APT_MIRROR** 추가(미지정=원본 소스 회귀0, 지정 시 미러 교체+
   security 스킵). kakao 미러 경유 빌드. 서버도 deb.debian.org egress 차단이라 기본 경로
@@ -542,11 +542,11 @@ FIX 3건 + B-6e 반영 이미지 재빌드 및 배포 패키지 확정.
 | 하위 | 내용 | 커밋 |
 |------|------|------|
 | 6a | Apple Silicon → `buildx --platform linux/amd64` 크로스 빌드, 정품 이미지 tar | (5b 연장) |
-| 6b | 정품 tar x86 서버 검증 + DEPLOY.md 문서결함 2건 수정 | 7b52ed3 |
-| 6c | 윈도우 클린 설치 실검증 → 문서결함 5건(DOC-1~5) + FIX 3건 + 백로그 | 7b52ed3, 3015696, 8c66d60, aa4f15d, 51c2193 |
-| 6e | 서브넷 CRUD + 풀 자동생성(INV-1 해소) + CIDR /16~/30 | c134df6, 89ceb0a, 7aea9ec, a7555ad, aa6f535 |
-| 6d | 2.0.1 버전표기 + ARG APT_MIRROR + 재빌드·패키징 | 335dcb6, 17f182a, cf8be0d |
-| BUG-8 | 랙 미리보기 선택 백화 — 클래스+CSS 전환 + tui-theme 다크 오버라이드 | 83ef480 |
+| 6b | 정품 tar x86 서버 검증 + DEPLOY.md 문서결함 2건 수정 | 8d4d606 |
+| 6c | 윈도우 클린 설치 실검증 → 문서결함 5건(DOC-1~5) + FIX 3건 + 백로그 | 8d4d606, 0823b8d, 2f65f92, a31bab1, 3e90846 |
+| 6e | 서브넷 CRUD + 풀 자동생성(INV-1 해소) + CIDR /16~/30 | ebcad87, c3b3428, 424b311, cc1b645, 2bbdaa6 |
+| 6d | 2.0.1 버전표기 + ARG APT_MIRROR + 재빌드·패키징 | dc080ac, 35b40e3, 6ec2121 |
+| BUG-8 | 랙 미리보기 선택 백화 — 클래스+CSS 전환 + tui-theme 다크 오버라이드 | f12ebf3 |
 
 **윈도우 최종 스모크 (2.0.1 배포물, 서병준):**
 - 전 항목 통과. 소요 ~5분(Docker Desktop·git 설치 전제).
@@ -566,7 +566,7 @@ FIX 3건 + B-6e 반영 이미지 재빌드 및 배포 패키지 확정.
 | 설치 전제 | Docker Desktop + git, `.env`에 INITIAL_ADMIN_PASSWORD 필수(미설정 시 기동 중단, 하드코딩 fallback 없음) |
 
 **다음 단계 (순서):**
-1. ~~READ_ONLY 미들웨어~~ → **B-7b로 완료** (3960ad0)
+1. ~~READ_ONLY 미들웨어~~ → **B-7b로 완료** (fda8230)
 2. ~~B-7 cutover~~ → **2026-07-11 완료** ("★ B-7 전체 완결" 섹션)
 3. **8월 타 팀 배포** — 클린 설치 패키지 배부.
 4. **v2.1** — BL-1~8 우선순위 정렬부터(현 유력 최상위: BL-1 선반 1/3U, 정확성 이슈).
@@ -579,9 +579,9 @@ FIX 3건 + B-6e 반영 이미지 재빌드 및 배포 패키지 확정.
 
 | 하위 | 내용 | 커밋/산출물 |
 |------|------|------|
-| B-7a | 델타 규모 조사 + v1 보존 스냅샷 | 67cf976 |
-| B-7b | v1 READ_ONLY 미들웨어(환경변수 없으면 no-op, /login만 쓰기 허용) | 3960ad0 |
-| B-7c' | 스크래치 DB(5434) 전량 재이관 드라이런 — 드리프트 0, 54/54 PASS | 0639f38 (b7-remigrate/ 4종) |
+| B-7a | 델타 규모 조사 + v1 보존 스냅샷 | 3afcccf |
+| B-7b | v1 READ_ONLY 미들웨어(환경변수 없으면 no-op, /login만 쓰기 허용) | fda8230 |
+| B-7c' | 스크래치 DB(5434) 전량 재이관 드라이런 — 드리프트 0, 54/54 PASS | ab73578 (b7-remigrate/ 4종) |
 | B-7f | 운영 컷오버 본실행(게이트 방식 10단계) — 검증 54/54 PASS | v2/backups/b7f_* |
 | 마무리 | v2 상시 구동 systemd 정식화(it-assets-v2.service) | v2/deploy/ 사본 |
 
@@ -615,7 +615,7 @@ b7f_subnets_backup.sql / B7F_CUTOVER_REPORT.md
 ## ★ 2.0.1 배포 준비 종결 — 3관문 + D 문서 마무리 (2026-07-11 밤 ~ 07-12)
 
 **패키지 확정: `v2/backups/it-assets-dist-2.0.1.tar.gz`**
-(sha256 `f06bf0e5…3383c70` — 동봉 `.sha256` 파일 존재, 기준 커밋 83ef480, **git tag `v2.0.1`**)
+(sha256 `f06bf0e5…3383c70` — 동봉 `.sha256` 파일 존재, 기준 커밋 f12ebf3, **git tag `v2.0.1`**)
 
 **3관문 전부 통과 → "2.0.1 그대로 배포" 확정:**
 
@@ -625,11 +625,11 @@ b7f_subnets_backup.sql / B7F_CUTOVER_REPORT.md
 | C-6 | 이미지 레이어 전개 잔존 데이터 스캔(C1~C7: 자격증명/내부IP/시크릿/데이터/테스트/운영물/SSH·BMC) | 전 항목 PASS. 관찰 2: SESSION_SECRET fallback(→BL-9로 해소됨), APT_MIRROR 공개 미러 흔적(무해) |
 | B-4 | 리눅스 격리 클린 설치(-p b4test, 문서만 보고 walkthrough) | ① 문서만으로 설치 가능. 신규 결함 DOC-7(compose 주석)·DOC-8(cron 경로) 경미 — 공지문 정오표로 보완 |
 
-**D 문서 마무리 (커밋 d1753e6 / 5d47287 / b1f2127):**
+**D 문서 마무리 (커밋 95304cf / 8798a01 / 9eec9ec):**
 - `v2/RELEASE_NOTICE_2.0.1.md` 신설 — 공지문(sha256·보안 필수 조치·정오표·업그레이드 예고).
   ※ §8 문의 채널은 **아직 플레이스홀더** — 배부 전 확정 필요(대기 항목).
 - DEPLOY.md: DOC-7/8 수정 + §6 업그레이드 절차 보강(sha256 대조·백업 선행·APP_IMAGE·마이그레이션 동봉 원칙).
-  §1 SESSION_SECRET은 "보안 필수(기동 미차단)"로 분리 정정했다가 → **BL-9 구현 후 "필수 키(기동 차단)"로 복귀**(f21efff).
+  §1 SESSION_SECRET은 "보안 필수(기동 미차단)"로 분리 정정했다가 → **BL-9 구현 후 "필수 키(기동 차단)"로 복귀**(0891c9c).
 - CHANGE_ME 5종 판별: 기동 필수 2(POSTGRES_PASSWORD·INITIAL_ADMIN_PASSWORD) /
   보안 필수 1(SESSION_SECRET — BL-9 이후 기동 필수화) / 기능·표기 2(SSH_DEFAULT_PASSWORD·LENDING_ORG_LABEL, 후자 미설정 시 기본 'TTA' 표기).
 - OPS-1(docker libnetwork)은 TTA 서버 고유 문제로 판정 — 공지문 미기재(패키지 compose는 전용 네트워크 생성이라 노출면 다름).
@@ -640,17 +640,17 @@ b7f_subnets_backup.sql / B7F_CUTOVER_REPORT.md
 ## ★ v2.1 우선순위 확정 + 2.0.2 후보 묶음 완료 (2026-07-12)
 
 **우선순위**: V2.1_BACKLOG.md 상단 "우선순위 (2026-07-12 확정)" 표가 기준.
-1~4(BL-9/1/8/3) = **2.0.2 릴리스 후보 묶음 — 전부 완료**. BL-11(자격증명 암호화, 원격 스위트에서 분리)·BL-12(재고 점검) 신설(21314ba).
+1~4(BL-9/1/8/3) = **2.0.2 릴리스 후보 묶음 — 전부 완료**. BL-11(자격증명 암호화, 원격 스위트에서 분리)·BL-12(재고 점검) 신설(4bf0853).
 
 **완료·운영 반영 5건:**
 
 | 항목 | 내용 | 커밋 |
 |------|------|------|
-| BL-10 | 통합검색 관리번호(management_number) 매칭 + subtitle 표기 + placeholder | 98b0774 |
-| BL-9 | SESSION_SECRET 4조건 기동 검사(미설정/CHANGE_ME/구 fallback/32자 미만) + fallback 리터럴 제거 + compose `:?` | 91418f7, f21efff |
-| BL-1 | 선반 1/3U 입력 — 영향 조사 판정 A(저장/검증/렌더/파서 홀 단위 기지원) → 폼 2곳 U+홀 병행 + `normalizeUnitSize`(`\|\| 3` 함정 제거). **스키마 무변경** | d87d6f4, 57dfb78 |
-| BL-8 | audit_logs 이관분(id≤1476) **1429행 +9h 보정**(2중 백업, 앵커 id 1476=21:57 KST, 경계 단조성 회복). 코드 무수정 — 데이터만 | a0412b7(docs) |
-| BL-3 | 실 이름 정규화(trim+lower) 중복 방지 — 4경로 앱 검사 + 함수 유니크 인덱스. **v2/db/migrations/ 관례 신설**(첫 파일), 운영 DB 인덱스 적용 완료. 재설계(마스터 선택·유형 분리·INV-2)는 잔여 존치 | 94164fe, 4cb09b4 |
+| BL-10 | 통합검색 관리번호(management_number) 매칭 + subtitle 표기 + placeholder | 49f2608 |
+| BL-9 | SESSION_SECRET 4조건 기동 검사(미설정/CHANGE_ME/구 fallback/32자 미만) + fallback 리터럴 제거 + compose `:?` | 702ef5d, 0891c9c |
+| BL-1 | 선반 1/3U 입력 — 영향 조사 판정 A(저장/검증/렌더/파서 홀 단위 기지원) → 폼 2곳 U+홀 병행 + `normalizeUnitSize`(`\|\| 3` 함정 제거). **스키마 무변경** | 71ff446, f392404 |
+| BL-8 | audit_logs 이관분(id≤1476) **1429행 +9h 보정**(2중 백업, 앵커 id 1476=21:57 KST, 경계 단조성 회복). 코드 무수정 — 데이터만 | 8211013(docs) |
+| BL-3 | 실 이름 정규화(trim+lower) 중복 방지 — 4경로 앱 검사 + 함수 유니크 인덱스. **v2/db/migrations/ 관례 신설**(첫 파일), 운영 DB 인덱스 적용 완료. 재설계(마스터 선택·유형 분리·INV-2)는 잔여 존치 | a590085, dc49744 |
 
 **BL-9 운영 반영 사건 (교훈 — 재발 방지):**
 - 반영 중 운영 v2/.env의 SESSION_SECRET이 **6자**임이 발견돼 회전(현재 64자, 검사 통과 확인).
@@ -680,17 +680,17 @@ b7f_subnets_backup.sql / B7F_CUTOVER_REPORT.md
 
 | 조각 | 내용 | 커밋 |
 |------|------|------|
-| B-4d-1 | asset 모델 14메서드 + 날짜밀림 스윕(dateFix.js) | 0218d2b |
-| B-4d-2 / 2.5 | assets 12EP / EUL append-only 트리거 제거 | ad36abc / b88e7de |
-| B-4d-3 / 3b | racks 10EP / power-control 스텁화(BUG-2 트랙) | 0777fe0 / bde0854 |
+| B-4d-1 | asset 모델 14메서드 + 날짜밀림 스윕(dateFix.js) | 979d1f0 |
+| B-4d-2 / 2.5 | assets 12EP / EUL append-only 트리거 제거 | 73fcc83 / 89af313 |
+| B-4d-3 / 3b | racks 10EP / power-control 스텁화(BUG-2 트랙) | 3b23c72 / 9c09210 |
 | B-4d-4 | 모듈 4모델 26메서드 | (가이드 기재) |
-| B-4d-5 | moduleInventory 16EP + BUG-1 수정 | 3300f61 / edc2b2d |
-| B-4d-6 | inventory 18EP + EUL 이벤트소싱(설계~6d 화면검증) | 6e1938d~1e330aa |
-| B-4d-7 | discovery 14EP + §5 + BUG-6 + 입회 실스캔 | c422dd3 |
-| B-4d-8 | fault류 4EP(assets 2 + lendings 2) | 1682007 |
-| B-4d-9 | 기술부채 일괄(§5 주석 종결·날짜 스윕·BUG-3) | 1682007 |
-| B-4d-10 | 대시보드 §5 + prefill 전환 — §5 잔여 0 | 1682007 |
-| (docs) | B-4d-7~10 완결 기록 + BUG 클로징 | 1816c76 |
+| B-4d-5 | moduleInventory 16EP + BUG-1 수정 | f3a1a0c / 44581ef |
+| B-4d-6 | inventory 18EP + EUL 이벤트소싱(설계~6d 화면검증) | fd1ec69~946bfea |
+| B-4d-7 | discovery 14EP + §5 + BUG-6 + 입회 실스캔 | a3de1bc |
+| B-4d-8 | fault류 4EP(assets 2 + lendings 2) | 2167ac5 |
+| B-4d-9 | 기술부채 일괄(§5 주석 종결·날짜 스윕·BUG-3) | 2167ac5 |
+| B-4d-10 | 대시보드 §5 + prefill 전환 — §5 잔여 0 | 2167ac5 |
+| (docs) | B-4d-7~10 완결 기록 + BUG 클로징 | cdfa308 |
 
 - 남은 스텁: racks power-control(BUG-2 신기능 트랙 확정) · inventory #18 migrate-psu(설계 확정)뿐.
 - **다음 단계: B-5 이후** — MIGRATION_PLAN 로드맵 확인 후 별도 세션에서 설계

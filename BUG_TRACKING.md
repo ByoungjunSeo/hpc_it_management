@@ -71,7 +71,7 @@ AI 서버 3,4,5,6 선택 → 전원 탭 → 끄기 클릭 시 AI 3,4번이 안 �
 - v1 racks.js power-control이 user/pass 미정의 변수 참조 → 실행 시 crash.
   기존 추정("no_cred=자격증명 데이터 문제")과 다를 수 있음: 일부 서버 전원 미동작이
   데이터가 아니라 이 코드 crash 때문일 가능성.
-- B-4d-3b에서 power-control 503 스텁화(0777fe0 이식분 격리). power-status(읽기)는 유지.
+- B-4d-3b에서 power-control 503 스텁화(3b23c72 이식분 격리). power-status(읽기)는 유지.
 - BUG-2 신기능 트랙 진입 시: bmcCred 참조 정정 + no_cred 데이터 양쪽 확인.
 
 ---
@@ -111,7 +111,7 @@ AI 서버 3,4,5,6 선택 → 전원 탭 → 끄기 클릭 시 AI 3,4번이 안 �
 ---
 
 ## BUG-4: audit_logs 변경 이력에 [object Object] 노출
-- 상태: 종결(수정 불요, ad36abc) | 사유: v2 스키마 구조적 소멸(details 단일 JSONB)
+- 상태: 종결(수정 불요, 73fcc83) | 사유: v2 스키마 구조적 소멸(details 단일 JSONB)
 - 관련(v1): asset 수정 시 audit 기록 호출부, audit_logs 저장 로직, audit 뷰
 - 관련(v2): app/models/auditLog.js, views/audit-log/index.ejs
 
@@ -224,7 +224,7 @@ BUG-4 (audit [object Object]) → 종결(수정 불요, ad36abc에서 확인)
 - 변경 감지(diff) 로직: 스캔 결과 vs 현재 computing_modules 비교 후, 차이나는 것만 반영.
 
 ### BUG-6 보강 (B-4d-7 정찰 발견, 2026-07-07)
-- b56c430 이후 diff 기반 기록으로 (A) 부분 완화 확인. 단 잔존 결함:
+- b8512cc 이후 diff 기반 기록으로 (A) 부분 완화 확인. 단 잔존 결함:
   diff 신규측이 modulesToApply(PSU/메모리 보존본)가 아닌 원본 modules(PSU 제거본)를
   사용(discovery.js L634, L670) → 보존되는 PSU가 매 적용마다 phantom removed로 기록되는
   비대칭. fallback 메모리 보존 경로(L389–402)도 동일. v1 데이터에 apply_scan PSU
@@ -312,7 +312,7 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
 | BUG-1 비고 손실 | [완료] B-4d-5b | 사용자 비고+자동메시지 결합 보존 |
 | BUG-2 전원 끄기 | 신기능(예외) | 보류 | no_cred 규명 → 신기능 트랙 |
 | BUG-3 이동 UI | [완료] B-4d-9 | 모달 CSS 탭분기 밖 이동, 4모달 일괄 (UI 최종확인: 사용자) |
-| BUG-4 object Object | 종결(불요) | — | v2 details 단일 JSONB로 구조적 소멸(ad36abc) |
+| BUG-4 object Object | 종결(불요) | — | v2 details 단일 JSONB로 구조적 소멸(73fcc83) |
 | BUG-5 선반 잔존 | 미룸 확정 | cutover 후 UI 트랙 | 원인규명완료·영향0건, 렌더이중화 해소와 합동 |
 | BUG-6 스캔 전체기록/이력무정보 | [완료] B-4d-7c | 변경분만 기록(A·A′) + 비고 합성(B) 실증 |
 | BUG-7 랙 미리보기 hover 잔상 | [완료] B-6c | CSS :hover로 대체(FIX-A) |
