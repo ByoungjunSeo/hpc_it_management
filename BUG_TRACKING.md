@@ -332,7 +332,7 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
 
 ## 운영 인프라 메모 (버그 아님 — 서버 점검 창 대기)
 
-### OPS-1: docker 데몬 libnetwork 스토어 손상 (B-7c' 발견, 2026-07-11)
+### OPS-1: docker 데몬 libnetwork 스토어 손상 — [해소] 2026-07-12 점검 창 처리
 - 증상: 기본 bridge 네트워크로 신규 컨테이너 기동 시
   `failed to update store for object type *libnetwork.endpointCnt: Key not found in store`
   로 실패. **기존 컨테이너(it-assets-db)는 무영향.**
@@ -341,6 +341,15 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
   **주의: 데몬 재시작은 it-assets-db(운영 v2 DB)를 함께 내리므로 반드시 v2 정지 공지 창에서.**
   it-assets-db는 restart 정책으로 자동 복귀하지만 v2 앱(it-assets-v2)의 PG 커넥션 풀 재확립
   확인까지 점검 항목에 포함할 것.
+- **[해소] 2026-07-12 점검 창 실행 (역할 분담: sudo 3건 사용자 / 점검·검증 Claude)**:
+  - 절차: 사전 백업(pg_dump 256KB) + 증상 재현 기록(대조군: 기본 bridge `run --rm` →
+    `endpointCnt: Key not found in store` exit 125) → v2 정지(19:43) → `systemctl restart
+    docker`(치료) → it-assets-db 자동 복귀(unless-stopped, healthy 19:45) → v2 재기동
+    (19:50, /login 200).
+  - 판정 근거: 치료 후 동일 조건 `docker run --rm postgres:16-alpine echo OPS1-OK` **성공
+    (exit 0)** — 대조군과 동일 명령 대비. v1(:3000) 무영향, 테스트 잔재 0.
+  - 실측 v2 순단: **약 7분**(정지 확인 19:43:14 → 복귀 확인 19:50:04, 확인 시각 기준 상한).
+  - 상세 로그: /tmp/ops1_log_20260712.md.
 
 ## 배포 문서결함 (DOC) — 2.0.1 배포 검증 트랙
 
