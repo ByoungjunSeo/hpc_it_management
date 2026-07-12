@@ -421,8 +421,10 @@
                     <span>선반 포함</span>
                 </label>
                 <span id="invShelfUSizeWrap" style="display:none; margin-left:2px;">
-                    <input type="number" id="invShelfUSize" min="1" max="10" value="1" style="width:42px; padding:2px 4px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="onInvPlaceUSizeChange()">
-                    <span style="font-size:12px; color:#64748b;">U</span>
+                    <input type="number" id="invShelfUSize" min="0" max="10" value="1" style="width:42px; padding:2px 4px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="onInvPlaceUSizeChange()">
+                    <span style="font-size:12px; color:#64748b;">U +</span>
+                    <input type="number" id="invShelfExtra" min="0" max="2" value="0" style="width:42px; padding:2px 4px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="onInvPlaceUSizeChange()">
+                    <span style="font-size:12px; color:#64748b;">홀 <span style="color:#94a3b8;">(1홀=1/3U)</span></span>
                 </span>
             </div>
             <small style="color:#94a3b8; margin-left:auto;">빈 칸 클릭 → Unit 자동 입력</small>
@@ -1466,16 +1468,20 @@ function escapeInvHtml(str) {
     var d = document.createElement('div'); d.textContent = str; return d.innerHTML;
 }
 
-function getInvShelfUSize() {
-    var input = document.getElementById('invShelfUSize');
-    return Math.max(1, parseInt(input ? input.value : 1) || 1);
+// BL-1: 선반 크기를 홀 단위로 반환 (U+홀 병행 입력, 1홀=1/3U). 체크 시 최소 1홀
+function getInvShelfSlots() {
+    var uInput = document.getElementById('invShelfUSize');
+    var hInput = document.getElementById('invShelfExtra');
+    var shelfU = parseInt(uInput ? uInput.value : 1) || 0;
+    var shelfExtra = parseInt(hInput ? hInput.value : 0) || 0;
+    return Math.max(1, shelfU * 3 + shelfExtra);
 }
 
 function getInvPlaceUSize() {
     var input = document.getElementById('invPlaceUSize');
     var base = Math.max(1, parseInt(input ? input.value : 1) || 1);
     var shelf = document.getElementById('invShelfCheck');
-    return base + (shelf && shelf.checked ? getInvShelfUSize() : 0);
+    return base + (shelf && shelf.checked ? Math.ceil(getInvShelfSlots() / 3) : 0);
 }
 
 function getInvBaseUSize() {
@@ -1625,8 +1631,8 @@ function uhToSlot(u, h) { return (u - 1) * 3 + h; }
 function onInvSlotClick(slot) {
     var baseUSize = getInvBaseUSize();
     var hasShelf = isInvShelfChecked();
-    var shelfUSize = hasShelf ? getInvShelfUSize() : 0;
-    var totalSlots = (baseUSize + shelfUSize) * 3;
+    var shelfSlots = hasShelf ? getInvShelfSlots() : 0; // BL-1: 홀 단위
+    var totalSlots = baseUSize * 3 + shelfSlots;
     var slotEnd = slot + totalSlots - 1;
     var totalSlotMax = _invTotalU * 3;
 
@@ -1654,7 +1660,6 @@ function onInvSlotClick(slot) {
     var unitInput = document.querySelector('[name="unit"]');
     if (unitInput) {
         if (hasShelf) {
-            var shelfSlots = shelfUSize * 3;
             var shelfEnd = slot + shelfSlots - 1;
             var equipStart = slot + shelfSlots;
             unitInput.value = formatSlotRange(slot, slotEnd) + ' (선반 ' + formatSlotRange(slot, shelfEnd) + ', 장비 ' + formatSlotRange(equipStart, slotEnd) + ')';
@@ -1665,9 +1670,9 @@ function onInvSlotClick(slot) {
 
     // Store shelf_size (in slots) for server-side
     var shelfHidden = document.getElementById('invShelfSizeHidden');
-    if (shelfHidden) shelfHidden.value = hasShelf ? shelfUSize * 3 : 0;
+    if (shelfHidden) shelfHidden.value = shelfSlots;
 
-    highlightInvSlots(slot, totalSlots, hasShelf ? shelfUSize * 3 : 0);
+    highlightInvSlots(slot, totalSlots, shelfSlots);
 }
 
 // Format slot range as human-readable U/H text

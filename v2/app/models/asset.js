@@ -6,6 +6,17 @@ function fixDates(row) {
     ['purchase_date', 'warranty_end', 'created_at', 'updated_at']);
 }
 
+// BL-1: rack_unit_size 정규화 — 미입력(undefined/null/''/NaN)만 기본 3(홀).
+// 0 이하는 명시 거부: 기존 `parseInt(...) || 3`은 0을 3으로 둔갑시켜
+// 홀 단위 소형 값이 흔해진 뒤로는 입력 오류를 숨기는 함정이 된다.
+function normalizeUnitSize(value) {
+  if (value === undefined || value === null || value === '') return 3;
+  const n = parseInt(value, 10);
+  if (Number.isNaN(n)) return 3;
+  if (n < 1) throw new Error('랙 점유 크기(rack_unit_size)는 1홀 이상이어야 합니다.');
+  return n;
+}
+
 const Asset = {
   async findAll(filters = {}) {
     let sql = `
@@ -169,7 +180,7 @@ const Asset = {
 
   async checkRackUnitOverlap(rackId, unitStart, unitSize, bladeSlot, excludeId) {
     if (!rackId || !unitStart) return null;
-    const size = parseInt(unitSize) || 3;
+    const size = normalizeUnitSize(unitSize);
     const newStart = parseInt(unitStart);
     const newEnd = newStart + size - 1;
 
@@ -226,7 +237,7 @@ const Asset = {
       RETURNING id`,
       [data.asset_number, data.management_number, data.asset_type, data.ownership || 'company',
        data.vendor_id || null, data.model_name, data.manufacturer, data.serial_number,
-       data.room_id || null, data.rack_id || null, data.rack_unit_start || null, parseInt(data.rack_unit_size) || 3,
+       data.room_id || null, data.rack_id || null, data.rack_unit_start || null, normalizeUnitSize(data.rack_unit_size),
        data.parent_asset_id || null, data.blade_slot || null,
        data.ip_address, data.ssh_port || 22, data.ssh_user || 'root', data.ssh_password,
        data.assigned_user, data.purpose, data.status || 'active',
@@ -245,7 +256,7 @@ const Asset = {
       WHERE id=$25`,
       [data.asset_number, data.management_number, data.asset_type, data.ownership || 'company',
        data.vendor_id || null, data.model_name, data.manufacturer, data.serial_number,
-       data.room_id || null, data.rack_id || null, data.rack_unit_start || null, parseInt(data.rack_unit_size) || 3,
+       data.room_id || null, data.rack_id || null, data.rack_unit_start || null, normalizeUnitSize(data.rack_unit_size),
        data.parent_asset_id || null, data.blade_slot || null,
        data.ip_address, data.ssh_port || 22, data.ssh_user || 'root', data.ssh_password,
        data.assigned_user, data.purpose, data.status || 'active',

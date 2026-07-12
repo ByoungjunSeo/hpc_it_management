@@ -195,14 +195,16 @@
                     <span>선반 포함</span>
                 </label>
                 <span id="shelfUSizeWrap" style="display:none; margin-left:2px;">
-                    <input type="number" id="shelfUSize" min="1" max="10" value="1" style="width:42px; padding:2px 4px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="calcSlots()">
-                    <span style="font-size:12px; color:#64748b;">U</span>
+                    <input type="number" id="shelfUSize" min="0" max="10" value="1" style="width:42px; padding:2px 4px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="calcSlots()">
+                    <span style="font-size:12px; color:#64748b;">U +</span>
+                    <input type="number" id="shelfExtra" min="0" max="2" value="0" style="width:42px; padding:2px 4px; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; text-align:center;" onchange="calcSlots()">
+                    <span style="font-size:12px; color:#64748b;">홀 <span style="color:#94a3b8;">(1홀=1/3U)</span></span>
                 </span>
             </div>
             <div class="form-group">
                 <label>총 슬롯 크기</label>
                 <input type="number" name="rack_unit_size" id="totalSlots" class="form-control" value="<%= curSlots %>" readonly style="background:#f1f5f9;font-weight:600;">
-                <small style="color:#64748b;font-size:11px;">1U=3칸, 2U=6칸, 선반+2U=7칸</small>
+                <small style="color:#64748b;font-size:11px;">1U=3칸, 2U=6칸 · 선반은 U+홀 병행(예: 0U+1홀 = 1/3U 선반)</small>
             </div>
         </div>
         <!-- 랙 미리보기 (슬롯 레벨) -->
@@ -590,11 +592,18 @@ function filterRacks() {
 function calcSlots() {
     var u = parseInt(document.getElementById('uSize').value) || 1;
     var extra = parseInt(document.getElementById('extraSlots').value) || 0;
-    var shelfU = 0;
+    var shelfSlots = 0;
     if (document.getElementById('shelfCheck').checked) {
-        shelfU = parseInt(document.getElementById('shelfUSize').value) || 1;
+        // BL-1: 선반은 U+홀 병행 입력 (1홀=1/3U). 체크 상태에서 0이 되지 않게 최소 1홀 보정
+        var shelfU = parseInt(document.getElementById('shelfUSize').value) || 0;
+        var shelfExtra = parseInt(document.getElementById('shelfExtra').value) || 0;
+        shelfSlots = shelfU * 3 + shelfExtra;
+        if (shelfSlots < 1) {
+            shelfSlots = 1;
+            document.getElementById('shelfExtra').value = 1;
+        }
     }
-    document.getElementById('totalSlots').value = u * 3 + extra + shelfU * 3;
+    document.getElementById('totalSlots').value = u * 3 + extra + shelfSlots;
 }
 
 function onShelfToggle() {
