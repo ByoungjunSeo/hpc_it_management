@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 const { fixRowDates } = require('../utils/dateFix');
 
 function fixDates(row) {
-  return row ? fixRowDates(row, [], ['started_at', 'ended_at', 'checked_at', 'created_at', 'approved_at']) : row;
+  return row ? fixRowDates(row, [], ['started_at', 'ended_at', 'checked_at', 'created_at', 'approved_at', 'reverted_at']) : row;
 }
 
 // BL-12 보정 공식(구 scripts/inventory_count_apply.js "옵션 B" 승계 — v1 CSV 워크플로우의 실전 검증 산식):

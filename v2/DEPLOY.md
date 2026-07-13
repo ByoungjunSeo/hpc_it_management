@@ -9,7 +9,7 @@
 
 | 파일 | 역할 |
 |------|------|
-| `it-assets-2.0.2.tar` | 앱 이미지 (별도 전달, `docker load`). 로드 태그: **`it-assets:2.0.2`** |
+| `it-assets-2.1.0.tar` | 앱 이미지 (별도 전달, `docker load`). 로드 태그: **`it-assets:2.1.0`** |
 | `postgres-16-alpine.tar` | **DB 이미지 (오프라인 필수 — 아래 ⚠)** |
 | `docker-compose.prod.yml` | DB(postgres:16-alpine) + 앱 스택 |
 | `db/*.sql` | 최초 기동 시 스키마 자동 생성 |
@@ -22,21 +22,21 @@
 > DB 컨테이너가 이미지를 내려받지 못해 뜨지 않고, **앱 컨테이너도 DB를 기다리다 종료됩니다.**
 
 이미지는 인터넷/사내미러가 있는 환경에서 빌드해 tar로 만듭니다(앱 이미지에 ipmitool 포함 — apt 필요).
-빌드 예: `docker build -t it-assets:2.0.2 .` → `docker save it-assets:2.0.2 -o it-assets-2.0.2.tar`
-(용량을 줄이려면 `docker save ... | gzip > it-assets-2.0.2.tar.gz` 도 가능 — `docker load -i`는 tar/tar.gz 모두 자동 인식.)
+빌드 예: `docker build -t it-assets:2.1.0 .` → `docker save it-assets:2.1.0 -o it-assets-2.1.0.tar`
+(용량을 줄이려면 `docker save ... | gzip > it-assets-2.1.0.tar.gz` 도 가능 — `docker load -i`는 tar/tar.gz 모두 자동 인식.)
 
 > **deb.debian.org 차단 환경(사내망) 빌드**: `--build-arg APT_MIRROR=<미러>`로 apt 소스를
 > 사내/공개 미러로 교체(main·updates만, security는 스킵)합니다. 미지정 시 기본값은 원본
 > deb.debian.org(회귀 0).
 > ```
-> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.0.2 .
+> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.1.0 .
 > ```
 > 실검증 이력: 2.0.1 이미지는 사무 PC(윈도우)에서 사무망의 deb.debian.org 도메인 차단으로
 > kakao 미러(http, security 제외)를 경유해 빌드·전달했고, 서버 격리 스택에서 정품 검증(amd64,
 > ipmitool 1.8.19, 버전 2.0.1) 통과. (서버 자체도 deb.debian.org egress가 막혀 기본 경로
 > 실빌드는 불가 — 미러 ARG 경로로만 재현 확인됨. 기본 경로 동작은 Dockerfile 로직상
 > 원본 소스 무변경으로 보장.)
-> compose.prod.yml의 앱 이미지 태그는 **`it-assets:2.0.2`** 고정입니다. 다른 태그로 로드했다면
+> compose.prod.yml의 앱 이미지 태그는 **`it-assets:2.1.0`** 고정입니다. 다른 태그로 로드했다면
 > `.env`에 `APP_IMAGE=<태그>` 를 지정하세요. (배포 tar에는 Dockerfile이 없어 compose가 빌드하지 않습니다.)
 
 ---
@@ -46,7 +46,7 @@
 ```bash
 # 1) 이미지 적재 — 앱 + DB 둘 다 (→ "Loaded image: ..." 출력 확인)
 #    docker load -i는 .tar(무압축)·.tar.gz(압축) 모두 자동 인식
-docker load -i it-assets-2.0.2.tar       # → it-assets:2.0.2
+docker load -i it-assets-2.1.0.tar       # → it-assets:2.1.0
 docker load -i postgres-16-alpine.tar    # → postgres:16-alpine
 #   (온라인 환경이면 이 두 줄 대신 첫 up에서 자동 pull됨)
 
@@ -90,7 +90,7 @@ docker compose -f docker-compose.prod.yml up -d
    - 설치 시 WSL2 활성화 필요(Windows 기능 → "Linux용 Windows 하위 시스템").
 2. PowerShell 또는 WSL 터미널에서 §1과 동일. 윈도우는 `docker load -i`로 tar를 바로 적재:
    ```powershell
-   docker load -i it-assets-2.0.2.tar
+   docker load -i it-assets-2.1.0.tar
    docker load -i postgres-16-alpine.tar
    copy .env.example .env    # 메모장/VS Code로 열어 CHANGE_ME 채움
    docker compose -f docker-compose.prod.yml up -d
@@ -142,7 +142,7 @@ bash scripts/restore.sh backups/db_YYYYMMDD_HHMMSS.dump --with-uploads
 ```
 
 정기 백업은 cron 예: `0 20 * * * cd <설치 디렉토리> && bash scripts/backup.sh >> backups/backup.log 2>&1`
-(`<설치 디렉토리>` = 배포 tar를 전개한 경로. 예: `/opt/it-assets-dist-2.0.2`)
+(`<설치 디렉토리>` = 배포 tar를 전개한 경로. 예: `/opt/it-assets-dist-2.1.0`)
 
 ---
 
@@ -160,7 +160,7 @@ bash scripts/backup.sh
 # 2) 새 앱 이미지 적재
 docker load -i it-assets-<새버전>.tar
 
-# 3) 이미지 태그 반영: compose의 앱 이미지는 ${APP_IMAGE:-it-assets:2.0.2} —
+# 3) 이미지 태그 반영: compose의 앱 이미지는 ${APP_IMAGE:-it-assets:2.1.0} —
 #    .env에 APP_IMAGE=it-assets:<새버전> 지정 (compose 파일 자체가 갱신 전달된
 #    릴리스면 새 compose 파일로 교체)
 vi .env
@@ -201,7 +201,7 @@ docker compose -f docker-compose.prod.yml up -d
 | 증상 | 원인 / 조치 |
 |------|------------|
 | `ERR_SSL_PROTOCOL_ERROR` | 브라우저가 주소를 https로 자동 승격 — 주소를 지우고 `http://` 부터 명시 입력(자동완성 주의, 시크릿 창 활용) |
-| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.0.2`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
+| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.1.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
 | 앱 컨테이너가 바로 종료 | ① DB 이미지 누락(오프라인) — `docker images`에 `postgres:16-alpine` 있는지 + `... ps`로 db healthy 확인 ② `.env`에 INITIAL_ADMIN_PASSWORD/SESSION_SECRET/POSTGRES_PASSWORD 누락 — `docker compose logs app` 확인 |
 | 로그인 안 됨 | INITIAL_ADMIN_PASSWORD는 **최초 기동에만** 적용. 변경은 컨테이너 내 `node scripts/init-admin.js --reset` |
 | **재시작 후 데이터 사라짐** | `down -v` 사용 여부 확인 — **`-v` 가 named volume(DB·사진)을 삭제**함. 재시작·재생성은 §7(stop/start 또는 `-v` 없는 down→up)로. 복구는 백업본에서만 |
