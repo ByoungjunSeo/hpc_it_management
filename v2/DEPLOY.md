@@ -109,9 +109,10 @@ docker compose -f docker-compose.prod.yml up -d
 | APP_PORT | | 웹 공개 포트 (기본 3001) |
 | SESSION_SECRET | ✔ | 세션 키 (32자+ 랜덤) |
 | INITIAL_ADMIN_PASSWORD | ✔ | 최초 admin 비밀번호 |
+| CREDENTIAL_ENCRYPTION_KEY | 자격증명 사용 시 | 장비 접속 자격증명 DB 암호화 키(hex 64자, `openssl rand -hex 32`). 형식 오류면 기동 차단. **⚠ 분실 시 자격증명 복구 불가 — DB 백업과 별도 장소 보관** |
 | SUBNETS_JSON | | **선택(레거시)**. 최초 기동 시 대역 자동 시드용. 표준은 IP 관리 화면 등록 |
 | LENDING_ORG_LABEL | | 대여 라벨 기관명 (예: TTA) |
-| SSH_DEFAULT_USER / SSH_DEFAULT_PASSWORD | | 스캔 fallback 계정/비번 |
+| SSH_DEFAULT_USER / SSH_DEFAULT_PASSWORD | | 스캔 fallback 계정/비번. **(.env 파일 권한으로 보호되는 영역 — DB 암호화 대상과 위협 모델이 다름)** |
 | OLLAMA_HOST / PORT / MODEL | | AI 스펙조회(선택). 미기동이어도 앱 정상 |
 
 > **서브넷 등록은 IP 관리 화면의 [＋ 서브넷 등록]이 표준입니다** (CIDR /16~/30, 등록 시 IP 풀 자동 생성).
