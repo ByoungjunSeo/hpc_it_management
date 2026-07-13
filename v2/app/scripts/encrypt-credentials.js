@@ -3,14 +3,15 @@
 // 대상: asset_credentials.password(평문) + assets.ssh_password(레거시 평문).
 // 안전장치: 트랜잭션 / 멱등(이미 password_enc 있으면 skip) / 복호화 왕복 검증 후에만 평문 비움.
 // 실행 전: pg_dump 백업 + CREDENTIAL_ENCRYPTION_KEY 설정 필수(리포트/릴리스 노트 순서 참조).
-//   실행: node scripts/encrypt-credentials.js
-require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
+//   실행(배포/컨테이너): docker compose -f docker-compose.prod.yml exec -T app node scripts/encrypt-credentials.js
+//   — 이미지 내 /app/scripts에 포함. 컨테이너 env(PGHOST=db, PGPORT=5432, CREDENTIAL_ENCRYPTION_KEY)를 그대로 사용.
+// 위치: v2/app/scripts/ (BL-11 후속 이동 — 이미지에 동봉되어 컨테이너에서 실행 가능).
 const { Pool } = require('pg');
-const credCrypto = require('../app/utils/credentialCrypto');
+const credCrypto = require('../utils/credentialCrypto'); // /app/scripts → /app/utils
 
 const pool = new Pool({
-  host: process.env.PGHOST || '127.0.0.1',
-  port: parseInt(process.env.PGPORT || '5433', 10),
+  host: process.env.PGHOST || 'db',
+  port: parseInt(process.env.PGPORT || '5432', 10),
   database: process.env.POSTGRES_DB || 'it_assets',
   user: process.env.POSTGRES_USER || 'itadmin',
   password: process.env.POSTGRES_PASSWORD || '',

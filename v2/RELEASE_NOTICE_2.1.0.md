@@ -9,7 +9,7 @@ HPC/AIDC 장비실의 서버·모듈·IP·입출고를 웹에서 통합 관리�
 전달물은 아래 1파일입니다.
 
 - `it-assets-dist-2.1.0.tar.gz`
-- sha256: `[패키징 후 기재]`
+- sha256: `dfb111071cc81c985fbdbb659b571e3ffaf99a78069886eb8e467dcf28ff721f`
   — 수령 후 `sha256sum`으로 반드시 대조하세요.
 
 tar 안에 앱/DB docker 이미지 2종(오프라인 설치용), 설치 문서(DEPLOY.md),
@@ -66,13 +66,14 @@ DB 스키마(재고 점검·자격증명 암호화 컬럼 포함)는 첫 기동 
 # 1) 백업(필수) → 2) 새 이미지 적재
 bash scripts/backup.sh
 docker load -i it-assets-<새버전>.tar
-# 3) 마이그레이션 적용 (db/migrations/ 파일을 날짜/순서대로, 전부 멱등)
+# 3) 마이그레이션 적용 (db/migrations/*.sql — 파일명 순번(_1/_2/_3)이 적용 순서를 보장, 전부 멱등)
 for f in db/migrations/*.sql; do
   docker compose -f docker-compose.prod.yml exec -T db psql -U itadmin -d it_assets < "$f"
 done
 # 4) (자격증명 암호화 최초 도입 시) .env에 CREDENTIAL_ENCRYPTION_KEY 설정 + 서버 외부 백업 후
-#    재기동 → 평문→암호문 이관 스크립트 실행
-#    (사내 운영 반영 실증 순서: 마이그레이션 → 키 설정 → 재기동 → node scripts/encrypt-credentials.js)
+#    새 compose로 재기동(아래 5) → 평문→암호문 이관 스크립트를 컨테이너에서 실행:
+#    docker compose -f docker-compose.prod.yml exec -T app node scripts/encrypt-credentials.js
+#    (순서: 마이그레이션 → 키 설정 → 재기동 → encrypt-credentials.js. 스크립트는 앱 이미지에 포함)
 # 5) .env에 APP_IMAGE=it-assets:<새버전> + 새 compose 교체 후 재기동
 docker compose -f docker-compose.prod.yml up -d
 ```
