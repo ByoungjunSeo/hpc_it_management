@@ -136,3 +136,55 @@ CREATE INDEX idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX idx_audit_logs_target ON audit_logs(target_type);
 CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX idx_audit_logs_date ON audit_logs(created_at);
+
+-- ============================================================
+-- BL-12: 장비실 재고 점검 (MIGRATION_PLAN §4-4). users 참조 → 이 위치.
+-- 신규 설치는 여기서 생성, 기존 DB는 db/migrations/2026-07-13_bl12_inventory_audit.sql
+-- ============================================================
+
+-- 점검 세션
+CREATE TABLE inventory_audits (
+    id SERIAL PRIMARY KEY,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ended_at TIMESTAMPTZ,
+    auditor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status TEXT NOT NULL DEFAULT 'in_progress'
+        CHECK(status IN ('in_progress','completed','cancelled')),
+    scope_owner TEXT,          -- BL-12: 점검 범위(전체=NULL / 'company' / 'vendor')
+    scope_module_type TEXT,    -- BL-12: module_type 필터(전체=NULL)
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 점검 항목별 결과
+CREATE TABLE inventory_audit_items (
+    id SERIAL PRIMARY KEY,
+    audit_id INTEGER NOT NULL REFERENCES inventory_audits(id) ON DELETE CASCADE,
+    item_code TEXT NOT NULL,
+    module_type TEXT NOT NULL,
+    system_storage_qty INTEGER NOT NULL,
+    system_in_use_qty INTEGER NOT NULL,
+    actual_storage_qty INTEGER,
+    diff INTEGER,
+    reason TEXT,
+    checked_at TIMESTAMPTZ,
+    ok_flag BOOLEAN DEFAULT FALSE,
+    UNIQUE(audit_id, item_code)
+);
+CREATE INDEX idx_audit_items_audit ON inventory_audit_items(audit_id);
+
+-- 보정 이력
+CREATE TABLE inventory_corrections (
+    id SERIAL PRIMARY KEY,
+    audit_id INTEGER REFERENCES inventory_audits(id) ON DELETE SET NULL,
+    item_code TEXT NOT NULL,
+    before_qty INTEGER NOT NULL,
+    after_qty INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(status IN ('pending','approved','rejected')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_corrections_item ON inventory_corrections(item_code);

@@ -102,6 +102,7 @@ app.use('/rooms', require('./routes/serverRooms'));
 app.use('/racks', require('./routes/racks'));
 app.use('/computing-modules', (req, res) => res.redirect('/module-inventory?tab=installed'));
 app.use('/ip-management', require('./routes/ipManagement'));
+app.use('/inventory-audit', require('./routes/inventoryAudit')); // BL-12: /inventory 앞에 마운트(경로 우선)
 app.use('/inventory', require('./routes/inventory'));
 app.use('/discovery', require('./routes/discovery'));
 app.use('/offices', require('./routes/offices'));

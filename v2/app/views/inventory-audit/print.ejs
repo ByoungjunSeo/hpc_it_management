@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>재고 점검표 #<%= audit.id %></title>
+<style>
+  body { font-family: 'Malgun Gothic', sans-serif; font-size: 12px; margin: 16px; color: #111; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .meta { color: #444; margin-bottom: 12px; font-size: 12px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #999; padding: 4px 6px; text-align: left; }
+  th { background: #eee; }
+  .num { text-align: right; }
+  .input-col { width: 70px; }
+  .note-col { width: 160px; }
+  .print-btn { margin-bottom: 12px; }
+  @media print { .print-btn { display: none; } body { margin: 0; } }
+</style>
+</head>
+<body>
+<button class="print-btn" onclick="window.print()">인쇄</button>
+<h1>장비실 재고 점검표 #<%= audit.id %></h1>
+<div class="meta">
+    범위 <%= audit.scope_owner === 'company' ? '자사' : (audit.scope_owner === 'vendor' ? '업체' : '전체') %><%= audit.scope_module_type ? ' / ' + audit.scope_module_type : '' %>
+    · 항목 <%= items.length %>건 · 점검자 ______________ · 점검일 ______________
+</div>
+<table>
+    <thead>
+        <tr><th>유형</th><th>부품코드</th><th>품명</th><th class="num">시스템 보관</th><th class="input-col">실물 보관</th><th class="num">차이</th><th class="note-col">사유/비고</th></tr>
+    </thead>
+    <tbody>
+        <% items.forEach(function(i){ %>
+        <tr>
+            <td><%= i.module_type %></td>
+            <td><%= i.item_code %></td>
+            <td><%= i.label || '' %></td>
+            <td class="num"><%= i.system_storage_qty %></td>
+            <td class="input-col">&nbsp;</td>
+            <td class="num">&nbsp;</td>
+            <td class="note-col">&nbsp;</td>
+        </tr>
+        <% }) %>
+    </tbody>
+</table>
+<p style="margin-top:12px; color:#666; font-size:11px;">
+    ※ 종이 실사 후 시스템(재고 점검 #<%= audit.id %>)에 실물 수량을 입력하세요. 컬럼 구조는 기존 체크리스트와 호환됩니다.
+</p>
+</body>
+</html>

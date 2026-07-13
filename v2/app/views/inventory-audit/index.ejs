@@ -1,0 +1,63 @@
+<%- include('../partials/header', { title, currentPath, extraCss: undefined }) %>
+
+<div class="page-header">
+    <h1>재고 점검</h1>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h2>새 점검 시작</h2></div>
+    <form method="POST" action="/inventory-audit" style="padding:12px; display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+        <input type="hidden" name="returnTo" value="/inventory-audit">
+        <div class="form-group" style="flex:0 0 180px;">
+            <label>점검 범위(소유)</label>
+            <select name="scope_owner" class="form-control">
+                <option value="">전체</option>
+                <option value="company">자사</option>
+                <option value="vendor">업체</option>
+            </select>
+        </div>
+        <div class="form-group" style="flex:0 0 180px;">
+            <label>부품 유형</label>
+            <select name="scope_module_type" class="form-control">
+                <option value="">전체</option>
+                <% moduleTypes.forEach(t => { %>
+                <option value="<%= t.value %>"><%= t.label %></option>
+                <% }) %>
+            </select>
+        </div>
+        <div class="form-group">
+            <button type="submit" class="btn btn-primary">점검 시작</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-header"><h2>점검 이력</h2></div>
+    <table class="data-table">
+        <thead>
+            <tr><th>#</th><th>시작</th><th>완료</th><th>점검자</th><th>범위</th><th>항목</th><th>차이</th><th>상태</th></tr>
+        </thead>
+        <tbody>
+            <% if (audits.length === 0) { %>
+            <tr><td colspan="8" style="text-align:center; color:#94a3b8;">점검 이력이 없습니다. 위에서 새 점검을 시작하세요.</td></tr>
+            <% } %>
+            <% audits.forEach(a => { %>
+            <tr>
+                <td><a href="/inventory-audit/<%= a.id %>">#<%= a.id %></a></td>
+                <td><%= a.started_at %></td>
+                <td><%= a.ended_at || '-' %></td>
+                <td><%= a.auditor_name || '-' %></td>
+                <td><%= a.scope_owner === 'company' ? '자사' : (a.scope_owner === 'vendor' ? '업체' : '전체') %><%= a.scope_module_type ? ' / ' + a.scope_module_type : '' %></td>
+                <td><%= a.item_count %></td>
+                <td><% if (a.diff_count > 0) { %><span style="color:#ef4444;font-weight:600;"><%= a.diff_count %></span><% } else { %>0<% } %></td>
+                <td>
+                    <% var st = { in_progress: '진행 중', completed: '완료', cancelled: '취소' }; %>
+                    <span class="badge"><%= st[a.status] || a.status %></span>
+                </td>
+            </tr>
+            <% }) %>
+        </tbody>
+    </table>
+</div>
+
+<%- include('../partials/footer') %>

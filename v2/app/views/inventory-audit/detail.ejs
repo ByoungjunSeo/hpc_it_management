@@ -1,0 +1,145 @@
+<%- include('../partials/header', { title, currentPath, extraCss: undefined }) %>
+<%
+  var st = { in_progress: '진행 중', completed: '완료', cancelled: '취소' };
+  var inProgress = audit.status === 'in_progress';
+  var diffItems = items.filter(function(i){ return i.actual_storage_qty !== null && i.diff !== null && i.diff !== 0; });
+  var typeLabelMap = {}; moduleTypes.forEach(function(t){ typeLabelMap[t.value] = t.label; });
+%>
+
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+    <h1>재고 점검 #<%= audit.id %> <span class="badge"><%= st[audit.status] %></span></h1>
+    <div style="display:flex; gap:8px;">
+        <a href="/inventory-audit/<%= audit.id %>/print" target="_blank" class="btn btn-secondary btn-sm">🖨 점검표 인쇄</a>
+        <a href="/inventory-audit" class="btn btn-secondary btn-sm">목록</a>
+    </div>
+</div>
+
+<p style="color:#64748b; font-size:13px;">
+    시작 <%= audit.started_at %> · 점검자 <%= audit.auditor_name || '-' %>
+    · 범위 <%= audit.scope_owner === 'company' ? '자사' : (audit.scope_owner === 'vendor' ? '업체' : '전체') %><%= audit.scope_module_type ? ' / ' + audit.scope_module_type : '' %>
+    · 항목 <%= items.length %>건
+</p>
+
+<% if (inProgress) { %>
+<div class="card">
+    <div class="card-header"><h2>실물 수량 입력</h2></div>
+    <table class="data-table" id="auditItems">
+        <thead>
+            <tr><th>유형</th><th>부품코드</th><th>품명</th><th>시스템 보관</th><th>사용 중</th><th>실물 보관</th><th>차이</th><th>확인</th><th>사유/비고</th></tr>
+        </thead>
+        <tbody>
+            <% items.forEach(function(i){ %>
+            <tr data-item="<%= i.item_code %>">
+                <td><%= typeLabelMap[i.module_type] || i.module_type %></td>
+                <td><code><%= i.item_code %></code></td>
+                <td><%= i.label || '-' %></td>
+                <td class="sys-stg" style="text-align:right;"><%= i.system_storage_qty %></td>
+                <td style="text-align:right; color:#94a3b8;"><%= i.system_in_use_qty %></td>
+                <td><input type="number" class="form-control actual-in" inputmode="numeric" min="0" style="width:80px;" value="<%= i.actual_storage_qty === null ? '' : i.actual_storage_qty %>"></td>
+                <td class="diff-cell" style="text-align:right; font-weight:600;"><%= i.diff === null ? '-' : i.diff %></td>
+                <td style="text-align:center;"><input type="checkbox" class="ok-in" <%= i.ok_flag ? 'checked' : '' %>></td>
+                <td><input type="text" class="form-control reason-in" value="<%= i.reason || '' %>" placeholder="사유" style="min-width:120px;"></td>
+            </tr>
+            <% }) %>
+        </tbody>
+    </table>
+    <div style="padding:12px; display:flex; gap:8px;">
+        <form method="POST" action="/inventory-audit/<%= audit.id %>/complete" onsubmit="return confirm('점검을 완료하시겠습니까? 완료 후 차이 항목에 보정을 적용할 수 있습니다.');">
+            <button type="submit" class="btn btn-primary">점검 완료</button>
+        </form>
+        <form method="POST" action="/inventory-audit/<%= audit.id %>/cancel" onsubmit="return confirm('이 점검을 취소하시겠습니까?');">
+            <button type="submit" class="btn btn-danger">취소</button>
+        </form>
+        <span id="saveStatus" style="align-self:center; color:#94a3b8; font-size:12px;"></span>
+    </div>
+</div>
+<% } else { %>
+<div class="card" style="margin-bottom:16px;">
+    <div class="card-header"><h2>차이 요약 (<%= diffItems.length %>건)</h2></div>
+    <% if (diffItems.length === 0) { %>
+    <p style="padding:12px; color:#16a34a;">차이 항목이 없습니다. 시스템 재고와 실물이 일치합니다.</p>
+    <% } else { %>
+    <table class="data-table">
+        <thead><tr><th>부품코드</th><th>품명</th><th>시스템 보관</th><th>실물 보관</th><th>차이</th><th>사유</th></tr></thead>
+        <tbody>
+            <% diffItems.forEach(function(i){ %>
+            <tr>
+                <td><code><%= i.item_code %></code></td><td><%= i.label || '-' %></td>
+                <td style="text-align:right;"><%= i.system_storage_qty %></td>
+                <td style="text-align:right;"><%= i.actual_storage_qty %></td>
+                <td style="text-align:right; font-weight:600; color:<%= i.diff > 0 ? '#16a34a' : '#ef4444' %>;"><%= i.diff > 0 ? '+' + i.diff : i.diff %></td>
+                <td><%= i.reason || '-' %></td>
+            </tr>
+            <% }) %>
+        </tbody>
+    </table>
+    <% if (audit.status === 'completed' && corrections.length === 0) { %>
+    <div style="padding:12px;">
+        <form method="POST" action="/inventory-audit/<%= audit.id %>/apply" onsubmit="return confirm('<%= diffItems.length %>건의 보정을 적용합니다. 시스템 보관 수량이 실물 값으로 갱신됩니다. 계속하시겠습니까?');">
+            <button type="submit" class="btn btn-primary">보정 적용 (<%= diffItems.length %>건)</button>
+        </form>
+        <small style="color:#64748b;">적용 시 보관 수량 = 실물, 총량 = 실물 + 사용 중(사용 중 수량은 불변). module_inventory_logs에 기록됩니다.</small>
+    </div>
+    <% } %>
+    <% } %>
+</div>
+
+<% if (corrections.length > 0) { %>
+<div class="card">
+    <div class="card-header"><h2>적용된 보정 (<%= corrections.length %>건)</h2></div>
+    <table class="data-table">
+        <thead><tr><th>부품코드</th><th>이전</th><th>이후</th><th>사유</th><th>적용자</th><th>적용 시각</th></tr></thead>
+        <tbody>
+            <% corrections.forEach(function(c){ %>
+            <tr>
+                <td><code><%= c.item_code %></code></td>
+                <td style="text-align:right;"><%= c.before_qty %></td>
+                <td style="text-align:right;"><%= c.after_qty %></td>
+                <td><%= c.reason %></td>
+                <td><%= c.approver_name || '-' %></td>
+                <td><%= c.approved_at || '-' %></td>
+            </tr>
+            <% }) %>
+        </tbody>
+    </table>
+</div>
+<% } %>
+<% } %>
+
+<% if (inProgress) { %>
+<script>
+(function(){
+    var auditId = <%= audit.id %>;
+    var status = document.getElementById('saveStatus');
+    function saveRow(tr){
+        var code = tr.getAttribute('data-item');
+        var actual = tr.querySelector('.actual-in').value;
+        var reason = tr.querySelector('.reason-in').value;
+        var ok = tr.querySelector('.ok-in').checked;
+        // diff 실시간 계산
+        var sys = parseInt(tr.querySelector('.sys-stg').textContent, 10);
+        var diffCell = tr.querySelector('.diff-cell');
+        if (actual === '') { diffCell.textContent = '-'; diffCell.style.color = ''; }
+        else {
+            var d = parseInt(actual, 10) - sys;
+            diffCell.textContent = d > 0 ? '+' + d : d;
+            diffCell.style.color = d === 0 ? '#16a34a' : '#ef4444';
+        }
+        status.textContent = '저장 중...';
+        var body = new URLSearchParams({ item_code: code, actual: actual, reason: reason, ok_flag: ok ? 'true' : 'false' });
+        fetch('/inventory-audit/' + auditId + '/save', {
+            method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString()
+        }).then(function(r){ return r.json(); })
+          .then(function(){ status.textContent = '저장됨 ' + new Date().toLocaleTimeString(); })
+          .catch(function(){ status.textContent = '저장 실패'; });
+    }
+    document.querySelectorAll('#auditItems tr[data-item]').forEach(function(tr){
+        tr.querySelector('.actual-in').addEventListener('change', function(){ saveRow(tr); });
+        tr.querySelector('.reason-in').addEventListener('change', function(){ saveRow(tr); });
+        tr.querySelector('.ok-in').addEventListener('change', function(){ saveRow(tr); });
+    });
+})();
+</script>
+<% } %>
+
+<%- include('../partials/footer') %>
