@@ -823,9 +823,14 @@ function checkAssetPowerInPopup(assetId) {
             if (!info) {
                 badge.textContent = 'BMC 미등록';
                 badge.style.background = '#1e293b';
+                setPowerButtonsDisabled(assetId, 'BMC IP가 등록되지 않아 전원제어를 쓸 수 없습니다.');
                 return;
             }
             updatePowerBadge(badge, info.status);
+            // BUG-2(T1): BMC/자격증명 미비 자산은 전원 버튼 비활성 + 사유
+            if (info.status === 'no_bmc') setPowerButtonsDisabled(assetId, 'BMC IP 미등록 — 전원제어 불가.');
+            else if (info.status === 'no_cred') setPowerButtonsDisabled(assetId, 'BMC 계정 미등록 — 자산 편집에서 BMC 자격증명을 등록하세요.');
+            else setPowerButtonsDisabled(assetId, null);
         })
         .catch(function() {
             var badge = document.getElementById('popupPowerBadge_' + assetId);
@@ -834,10 +839,23 @@ function checkAssetPowerInPopup(assetId) {
 }
 
 function updatePowerBadge(badge, status) {
-    var labels = { on: '전원 켜짐', off: '전원 꺼짐', error: '연결 실패', no_bmc: 'BMC 미등록', unknown: '알 수 없음' };
-    var colors = { on: '#22c55e', off: '#ef4444', error: '#eab308', no_bmc: '#1e293b', unknown: '#94a3b8' };
+    var labels = { on: '전원 켜짐', off: '전원 꺼짐', error: '연결 실패', no_bmc: 'BMC 미등록', no_cred: 'BMC 계정 미등록', unknown: '알 수 없음' };
+    var colors = { on: '#22c55e', off: '#ef4444', error: '#eab308', no_bmc: '#1e293b', no_cred: '#1e293b', unknown: '#94a3b8' };
     badge.textContent = labels[status] || status;
     badge.style.background = colors[status] || '#94a3b8';
+}
+
+// BUG-2(T1): no_bmc/no_cred 자산의 전원 버튼 비활성 + 사유 표시(reason=null이면 활성 복귀)
+function setPowerButtonsDisabled(assetId, reason) {
+    var sec = document.getElementById('powerControlSection_' + assetId);
+    if (!sec) return;
+    sec.querySelectorAll('button').forEach(function(b) {
+        b.disabled = !!reason;
+        b.style.opacity = reason ? '0.5' : '';
+        b.style.cursor = reason ? 'not-allowed' : '';
+    });
+    var msg = document.getElementById('powerControlMsg_' + assetId);
+    if (msg && reason) { msg.textContent = reason; msg.style.color = '#94a3b8'; }
 }
 
 function doPowerControl(assetId, action, assetName) {
@@ -851,7 +869,7 @@ function doPowerControl(assetId, action, assetName) {
 
     fetch('/racks/' + rackId + '/power-control', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
         body: JSON.stringify({ assetId: assetId, action: action })
     })
     .then(function(r) { return r.json(); })

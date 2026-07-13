@@ -7,7 +7,7 @@ const AuditLog = require('../models/auditLog');
 const { pool } = require('../config/database');
 const appConfig = require('../config/app');
 const credCrypto = require('../utils/credentialCrypto'); // BL-11
-const { requireMaintenance } = require('../middleware/auth');
+const { requireMaintenance, requireAdmin } = require('../middleware/auth');
 
 // Rack slots API - JSON for rack preview
 router.get('/:id/slots', async (req, res) => {
@@ -50,25 +50,37 @@ function ipmiPowerStatus(ip, user, pass) {
   });
 }
 
-// [BUG-2 트랙 이관] ipmiPowerControl — 전원제어는 신기능 트랙(BUG-2)에서 제공 예정
-// function ipmiPowerControl(ip, user, pass, action) {
-//   const validActions = ['on', 'off', 'reset', 'cycle', 'status'];
-//   if (!validActions.includes(action)) {
-//     return Promise.resolve({ success: false, message: '잘못된 액션: ' + action });
-//   }
-//   return new Promise((resolve) => {
-//     execFile('ipmitool', ['-I', 'lanplus', '-H', ip, '-U', user, '-P', pass, 'chassis', 'power', action],
-//       { timeout: 10000 },
-//       (err, stdout, stderr) => {
-//         if (err) {
-//           resolve({ success: false, message: '명령 실행 실패: ' + (stderr || err.message) });
-//           return;
-//         }
-//         resolve({ success: true, message: stdout.trim() });
-//       }
-//     );
-//   });
-// }
+// BUG-2(T1) 복원: BMC 전원제어. 화이트리스트 on/off/reset(랙 팝업 버튼과 일치, cycle 미노출).
+// 자격증명은 호출측에서 복호화한 평문을 넘김(power-status와 동일 경로).
+// ★ IPMI_DRYRUN=1 이면 실 BMC를 조작하지 않고 구성된 인자 배열만 반환(검증 전용, 운영 미설정).
+function ipmiPowerControl(ip, user, pass, action) {
+  const validActions = ['on', 'off', 'reset'];
+  if (!validActions.includes(action)) {
+    return Promise.resolve({ success: false, message: '허용되지 않은 전원 명령: ' + action });
+  }
+  const args = ['-I', 'lanplus', '-H', ip, '-U', user, '-P', pass, 'chassis', 'power', action];
+  if (process.env.IPMI_DRYRUN === '1') {
+    // 검증용: 실행하지 않고 구성만 반환(비밀번호는 마스킹해 노출 방지)
+    const masked = args.map((a, i) => (args[i - 1] === '-P' ? '***' : a));
+    return Promise.resolve({ success: true, message: 'DRYRUN', dryrun: true, args: masked });
+  }
+  return new Promise((resolve) => {
+    execFile('ipmitool', args, { timeout: 10000 }, (err, stdout, stderr) => {
+      if (err) {
+        const detail = (stderr || err.message || '').toLowerCase();
+        // BMC 미응답(도달 불가) vs 인증 실패 구분
+        const reason = /timeout|unable to establish|no route|network/.test(detail)
+          ? 'BMC 미응답(도달 불가 — IP·네트워크·전원 확인)'
+          : /auth|password|privilege|username|invalid user/.test(detail)
+            ? '인증 실패(BMC 자격증명 확인)'
+            : '명령 실행 실패: ' + (stderr || err.message);
+        resolve({ success: false, message: reason });
+        return;
+      }
+      resolve({ success: true, message: (stdout.trim() || (action + ' 명령 전송 완료')) });
+    });
+  });
+}
 
 // Switch slots API - get occupied switch slots for immersion rack
 router.get('/:id/switch-slots', async (req, res) => {
@@ -142,9 +154,49 @@ router.get('/:id/power-status', async (req, res) => {
   }
 });
 
-// IPMI power control — stub (BUG-2 신기능 트랙 이관)
-router.post('/:id/power-control', requireMaintenance, async (req, res) => {
-  res.status(503).json({ success: false, error: '전원제어는 BUG-2 신기능 트랙에서 제공 예정' });
+// BUG-2(T1): BMC 전원제어. 관리자 한정. 명령별 audit(값 미기록).
+router.post('/:id/power-control', requireAdmin, async (req, res) => {
+  const action = String(req.body.action || '');
+  const assetId = parseInt(req.body.assetId, 10);
+  try {
+    if (!['on', 'off', 'reset'].includes(action)) {
+      return res.status(400).json({ success: false, message: '허용되지 않은 전원 명령입니다.' });
+    }
+    if (!assetId) return res.status(400).json({ success: false, message: '대상 자산이 필요합니다.' });
+    const asset = await Asset.findById(assetId);
+    if (!asset) return res.status(404).json({ success: false, message: '자산을 찾을 수 없습니다.' });
+
+    // BMC IP + 자격증명 (power-status와 동일 조회)
+    const { rows: bmcRows } = await pool.query(
+      "SELECT ip_address FROM asset_ips WHERE asset_id = $1 AND ip_type = 'bmc' LIMIT 1", [assetId]);
+    if (!bmcRows[0] || !bmcRows[0].ip_address) {
+      return res.status(409).json({ success: false, status: 'no_bmc', message: 'BMC IP가 등록되지 않았습니다.' });
+    }
+    const { rows: credRows } = await pool.query(
+      "SELECT username, password, password_enc FROM asset_credentials WHERE asset_id = $1 AND credential_type = 'bmc' LIMIT 1", [assetId]);
+    if (!credRows[0]) {
+      return res.status(409).json({ success: false, status: 'no_cred', message: 'BMC 계정이 등록되지 않았습니다.' });
+    }
+    const bmcPass = credCrypto.decrypt(credRows[0].password_enc || credRows[0].password || '');
+
+    const result = await ipmiPowerControl(bmcRows[0].ip_address, credRows[0].username, bmcPass || '', action);
+
+    // audit: 대상·명령·결과만(자격증명 값 미포함)
+    await AuditLog.log(req, {
+      action: 'power_control', targetType: 'asset', targetId: assetId,
+      targetLabel: asset.management_number || asset.model_name,
+      details: { command: action, result: result.success ? 'success' : 'fail', message: result.message }
+    });
+
+    // 명령 후 상태 재조회(성공 시)
+    if (result.success && !result.dryrun) {
+      const st = await ipmiPowerStatus(bmcRows[0].ip_address, credRows[0].username, bmcPass || '');
+      result.status = st.status;
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 // Rack detail - 42U visualization
