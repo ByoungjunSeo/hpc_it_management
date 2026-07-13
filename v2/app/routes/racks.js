@@ -6,6 +6,7 @@ const Asset = require('../models/asset');
 const AuditLog = require('../models/auditLog');
 const { pool } = require('../config/database');
 const appConfig = require('../config/app');
+const credCrypto = require('../utils/credentialCrypto'); // BL-11
 const { requireMaintenance } = require('../middleware/auth');
 
 // Rack slots API - JSON for rack preview
@@ -118,7 +119,7 @@ router.get('/:id/power-status', async (req, res) => {
       }
 
       const { rows: credRows } = await pool.query(
-        "SELECT username, password FROM asset_credentials WHERE asset_id = $1 AND credential_type = 'bmc' LIMIT 1",
+        "SELECT username, password, password_enc FROM asset_credentials WHERE asset_id = $1 AND credential_type = 'bmc' LIMIT 1",
         [asset.id]
       );
       const bmcCred = credRows[0];
@@ -128,7 +129,9 @@ router.get('/:id/power-status', async (req, res) => {
         return;
       }
 
-      const result = await ipmiPowerStatus(bmcIp.ip_address, bmcCred.username, bmcCred.password || '');
+      // BL-11: password_enc 복호화(레거시 평문 password 잔존분도 통과)
+      const bmcPass = credCrypto.decrypt(bmcCred.password_enc || bmcCred.password || '');
+      const result = await ipmiPowerStatus(bmcIp.ip_address, bmcCred.username, bmcPass || '');
       result.bmc_ip = bmcIp.ip_address;
       results[asset.id] = result;
     }));

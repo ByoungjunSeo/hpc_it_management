@@ -116,7 +116,8 @@ CREATE TABLE asset_credentials (
     asset_id INTEGER NOT NULL
         REFERENCES assets(id) ON DELETE CASCADE ON UPDATE CASCADE,
     username TEXT NOT NULL,
-    password TEXT,
+    password TEXT,               -- BL-11: 레거시 평문 컬럼. 신규 설치는 미사용(NULL), 차기 릴리스에서 DROP 예정
+    password_enc TEXT,           -- BL-11: AES-256-GCM 암호문 (v1:iv:tag:ct). 신규 저장은 여기로
     credential_type TEXT NOT NULL DEFAULT 'root'
         CHECK(credential_type IN ('root', 'user', 'bmc', 'os', 'etc')),
     description TEXT,

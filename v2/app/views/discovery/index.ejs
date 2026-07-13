@@ -1681,11 +1681,12 @@ function lookupIp(ip) {
                 html += '<strong>등록된 자격증명:</strong>';
                 html += '<table style="margin-top:4px; font-size:12px; width:100%;"><thead><tr><th>유형</th><th>사용자</th><th>비밀번호</th><th></th></tr></thead><tbody>';
                 r.credentials.forEach(function(c) {
+                    // BL-11: 비밀번호 원문은 서버가 응답에 싣지 않음(has_password 플래그만). 화면은 등록 여부만 표시.
                     html += '<tr>';
                     html += '<td><span class="badge badge-info">' + escapeHtml(c.credential_type) + '</span></td>';
                     html += '<td>' + escapeHtml(c.username) + '</td>';
-                    html += '<td><code>' + escapeHtml(c.password || '') + '</code></td>';
-                    html += '<td><button class="btn btn-sm btn-outline" onclick="useCredential(\'' + escapeHtml(c.username) + '\', \'' + escapeHtml(c.password || '') + '\')">이 계정 사용</button></td>';
+                    html += '<td>' + (c.has_password ? '<code>●●●●●●</code> <span style="color:#94a3b8;font-size:11px;">등록됨</span>' : '<span style="color:#94a3b8;">-</span>') + '</td>';
+                    html += '<td><button class="btn btn-sm btn-outline" onclick="useCredential(\'' + escapeHtml(c.username) + '\')">사용자명 채우기</button></td>';
                     html += '</tr>';
                 });
                 html += '</tbody></table></div>';
@@ -1699,9 +1700,12 @@ function lookupIp(ip) {
     .catch(function(err) { console.error('IP lookup error:', err); });
 }
 
-function useCredential(username, password) {
+function useCredential(username) {
+    // BL-11: 비밀번호는 서버가 응답에 싣지 않으므로 사용자명만 채운다.
+    // 비밀번호는 직접 입력하거나, 자산에 등록된 자격증명은 자산 단위 스캔에서 서버측이 사용.
     document.getElementById('sshUser').value = username;
-    document.getElementById('sshPassword').value = password;
+    document.getElementById('sshPassword').value = '';
+    document.getElementById('sshPassword').focus();
 }
 
 function startManualScan() {

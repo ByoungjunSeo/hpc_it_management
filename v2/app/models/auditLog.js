@@ -1,9 +1,27 @@
 const { pool } = require('../config/database');
 const { formatTimestamp } = require('../utils/dateFix');
 
+// BL-11: 감사 로그 details에 자격증명성 값이 재유입되지 않도록 마스킹.
+// asset before/after 등이 ssh_password 컬럼을 포함하므로 저장 전 재귀 치환.
+const SENSITIVE_KEYS = new Set(['password', 'ssh_password', 'password_enc', 'bmc_password']);
+function maskSensitive(value) {
+  if (Array.isArray(value)) return value.map(maskSensitive);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const k of Object.keys(value)) {
+      out[k] = SENSITIVE_KEYS.has(k)
+        ? (value[k] ? '***REDACTED***' : value[k])
+        : maskSensitive(value[k]);
+    }
+    return out;
+  }
+  return value;
+}
+
 const AuditLog = {
   async log(req, { action, targetType, targetId, targetLabel, details }) {
     try {
+      details = maskSensitive(details);
       await pool.query(
         `INSERT INTO audit_logs (user_id, username, action, target_type, target_id, target_label, details, ip_address)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,

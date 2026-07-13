@@ -310,7 +310,9 @@ const Asset = {
     for (const ai of assetIps) {
       if (!assetIds.has(ai.asset_id)) {
         assetIds.add(ai.asset_id);
-        const { rows: credentials } = await pool.query('SELECT * FROM asset_credentials WHERE asset_id = $1', [ai.asset_id]);
+        // BL-11: 비밀번호는 응답에 싣지 않는다 — has_password 플래그만(평문 클라이언트 유출 차단)
+        const { rows: credentials } = await pool.query(
+          "SELECT id, username, credential_type, description, (COALESCE(password_enc, password) IS NOT NULL AND COALESCE(password_enc, password) <> '') AS has_password FROM asset_credentials WHERE asset_id = $1", [ai.asset_id]);
         results.push({
           asset_id: ai.asset_id,
           asset_number: ai.asset_number,
@@ -324,12 +326,14 @@ const Asset = {
     }
 
     if (legacyAsset && !assetIds.has(legacyAsset.asset_id)) {
-      const { rows: credentials } = await pool.query('SELECT * FROM asset_credentials WHERE asset_id = $1', [legacyAsset.asset_id]);
-      // Also include legacy ssh creds from asset table
+      // BL-11: 비밀번호 제외 — has_password 플래그만
+      const { rows: credentials } = await pool.query(
+        "SELECT id, username, credential_type, description, (COALESCE(password_enc, password) IS NOT NULL AND COALESCE(password_enc, password) <> '') AS has_password FROM asset_credentials WHERE asset_id = $1", [legacyAsset.asset_id]);
+      // Also include legacy ssh creds from asset table (비밀번호 값 미노출)
       const { rows: fullRows } = await pool.query('SELECT ssh_user, ssh_password, ssh_port FROM assets WHERE id = $1', [legacyAsset.asset_id]);
       const fullAsset = fullRows[0];
       if (fullAsset && fullAsset.ssh_user && credentials.length === 0) {
-        credentials.push({ username: fullAsset.ssh_user, password: fullAsset.ssh_password, credential_type: 'root', description: 'Legacy SSH' });
+        credentials.push({ username: fullAsset.ssh_user, has_password: !!fullAsset.ssh_password, credential_type: 'root', description: 'Legacy SSH' });
       }
       results.push({
         asset_id: legacyAsset.asset_id,

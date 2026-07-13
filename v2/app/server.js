@@ -11,6 +11,17 @@ if (!sessionSecret || sessionSecret.startsWith('CHANGE_ME')
   process.exit(1);
 }
 
+// BL-11: CREDENTIAL_ENCRYPTION_KEY 형식 검사 — 설정됐는데 형식이 틀리면(hex 64자 아님)
+// 잘못된 키로 기동해 자격증명 복호화가 전부 깨지는 것을 방지. 미설정은 허용(자격증명 기능
+// 미사용 설치 대비) 하되 경고 — 실제 암호문 복호화 시점에 credentialCrypto가 명확히 실패시킨다.
+const credKey = process.env.CREDENTIAL_ENCRYPTION_KEY || '';
+if (credKey && !/^[0-9a-fA-F]{64}$/.test(credKey)) {
+  console.error('[credential-key] 오류: CREDENTIAL_ENCRYPTION_KEY 형식 오류 — hex 64자(32바이트)여야 합니다. 생성: openssl rand -hex 32');
+  process.exit(1);
+} else if (!credKey) {
+  console.warn('[credential-key] 경고: CREDENTIAL_ENCRYPTION_KEY 미설정 — 장비 자격증명 저장/조회 기능 사용 시 .env에 설정 필요(openssl rand -hex 32).');
+}
+
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
