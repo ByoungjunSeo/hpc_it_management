@@ -9,7 +9,7 @@ HPC/AIDC 장비실의 서버·모듈·IP·입출고를 웹에서 통합 관리�
 전달물은 아래 1파일입니다.
 
 - `it-assets-dist-2.1.0.tar.gz`
-- sha256: `dfb111071cc81c985fbdbb659b571e3ffaf99a78069886eb8e467dcf28ff721f`
+- sha256: `418f21528a83742a275bd7f41847ace15f4ea072d01dadee6b11a678c2adf88a`
   — 수령 후 `sha256sum`으로 반드시 대조하세요.
 
 tar 안에 앱/DB docker 이미지 2종(오프라인 설치용), 설치 문서(DEPLOY.md),
