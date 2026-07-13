@@ -217,7 +217,16 @@
                 <tr>
                     <td><span class="badge badge-info"><%= appConfig.credentialTypes.find(t => t.value === cred.credential_type)?.label || cred.credential_type %></span></td>
                     <td><%= cred.username %></td>
-                    <td><code><%= cred.password || '-' %></code></td>
+                    <%# BL-11 후속: 비밀번호 값은 서버 렌더에 미포함. [보기] 클릭 시에만 조회. %>
+                    <td>
+                        <% if (cred.has_password) { %>
+                        <span class="cred-cell" data-asset="<%= asset.id %>" data-cred="<%= cred.id %>" data-shown="0">
+                            <code class="cred-mask">●●●●●●</code>
+                            <button type="button" class="btn btn-sm btn-outline cred-reveal" onclick="revealCredential(this)">보기</button>
+                            <button type="button" class="btn btn-sm btn-outline cred-copy" onclick="copyCredential(this)" hidden>복사</button>
+                        </span>
+                        <% } else { %><span style="color:#94a3b8;">-</span><% } %>
+                    </td>
                     <td><%= cred.description || '-' %></td>
                 </tr>
                 <% }) %>

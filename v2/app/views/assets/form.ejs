@@ -340,9 +340,11 @@
 
     <input type="hidden" name="_cred_section_present" value="1">
     <div id="credRows">
-        <% const creds = (typeof assetCredentials !== 'undefined' && assetCredentials.length > 0) ? assetCredentials : (asset && asset.ssh_user ? [{ username: asset.ssh_user, password: asset.ssh_password || '', credential_type: 'root', description: '' }] : []); %>
+        <%# BL-11 후속: 마스킹된 자격증명(has_password) 사용. 비번 값은 폼에 미포함(빈칸=유지). %>
+        <% const creds = (typeof assetCredentials !== 'undefined' && assetCredentials.length > 0) ? assetCredentials : (asset && asset.ssh_user ? [{ username: asset.ssh_user, credential_type: 'root', description: '' }] : []); %>
         <% creds.forEach((cred, idx) => { %>
         <div class="form-row cred-row">
+            <input type="hidden" name="cred_ids[]" value="<%= cred.id || '' %>">
             <div class="form-group" style="flex:0 0 120px;">
                 <% if (idx === 0) { %><label>유형</label><% } %>
                 <select name="cred_types[]" class="form-control">
@@ -357,7 +359,14 @@
             </div>
             <div class="form-group">
                 <% if (idx === 0) { %><label>비밀번호</label><% } %>
-                <input type="text" name="cred_passwords[]" class="form-control" value="<%= cred.password || '' %>" placeholder="password">
+                <input type="text" name="cred_passwords[]" class="form-control" value="" placeholder="<%= cred.has_password ? '기존 값 유지(변경 시에만 입력)' : 'password' %>">
+                <% if (cred.has_password) { %>
+                <span class="cred-cell" data-asset="<%= asset.id %>" data-cred="<%= cred.id %>" data-shown="0" style="font-size:11px; display:inline-flex; align-items:center; gap:4px; margin-top:2px;">
+                    <code class="cred-mask">●●●●●●</code>
+                    <button type="button" class="btn btn-sm btn-outline cred-reveal" onclick="revealCredential(this)">보기</button>
+                    <button type="button" class="btn btn-sm btn-outline cred-copy" onclick="copyCredential(this)" hidden>복사</button>
+                </span>
+                <% } %>
             </div>
             <div class="form-group">
                 <% if (idx === 0) { %><label>설명</label><% } %>
@@ -750,6 +759,7 @@ function addIpRow() {
 var credTypeOptions = '<% appConfig.credentialTypes.forEach(t => { %><option value="<%= t.value %>"><%= t.label %></option><% }) %>';
 function addCredRow() {
     var html = '<div class="form-row cred-row">' +
+        '<input type="hidden" name="cred_ids[]" value="">' + // BL-11: 신규 행은 id 빈값 → INSERT
         '<div class="form-group" style="flex:0 0 120px;"><select name="cred_types[]" class="form-control">' + credTypeOptions + '</select></div>' +
         '<div class="form-group"><input type="text" name="cred_usernames[]" class="form-control" placeholder="root"></div>' +
         '<div class="form-group"><input type="text" name="cred_passwords[]" class="form-control" placeholder="password"></div>' +

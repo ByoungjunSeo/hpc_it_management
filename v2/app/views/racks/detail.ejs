@@ -705,7 +705,11 @@ function renderPopup(assetId, data) {
     if (data.credentials && data.credentials.length > 0) {
         html += '<div style="margin-top:8px;"><label style="font-weight:600;font-size:12px;">접속정보</label>';
         data.credentials.forEach(function(c) {
-            html += '<div style="font-size:13px;"><span class="badge" style="font-size:10px;">' + esc(c.credential_type) + '</span> ' + esc(c.username) + ' / <code>' + esc(c.password || '') + '</code></div>';
+            // BL-11 후속: 비번 값은 응답에 없음(has_password). [보기] 클릭 시에만 조회.
+            var pwCell = c.has_password
+                ? '<span class="cred-cell" data-asset="' + assetId + '" data-cred="' + c.id + '" data-shown="0"><code class="cred-mask">●●●●●●</code> <button type="button" class="btn btn-sm btn-outline cred-reveal" onclick="revealCredential(this)">보기</button> <button type="button" class="btn btn-sm btn-outline cred-copy" onclick="copyCredential(this)" hidden>복사</button></span>'
+                : '<span style="color:#94a3b8;">-</span>';
+            html += '<div style="font-size:13px;"><span class="badge" style="font-size:10px;">' + esc(c.credential_type) + '</span> ' + esc(c.username) + ' / ' + pwCell + '</div>';
         });
         html += '</div>';
     }

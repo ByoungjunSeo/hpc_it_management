@@ -300,10 +300,31 @@ router.get('/:id/json', async (req, res) => {
     if (!asset) return res.status(404).json({ error: 'Not found' });
     const modules = await ComputingModule.findByAsset(asset.id);
     const assetIps = await AssetIp.findByAsset(asset.id);
-    const credentials = await AssetCredential.findByAsset(asset.id);
+    const credentials = await AssetCredential.findByAssetMasked(asset.id);
     const parent = asset.parent_asset_id ? await Asset.findById(asset.parent_asset_id) : null;
     const children = await Asset.findChildren(asset.id);
+    // BL-11 후속: 응답에 자격증명 평문 미포함. 레거시 asset.ssh_password도 제거([보기] API로만).
+    if (asset && 'ssh_password' in asset) { asset.ssh_password = undefined; }
     res.json({ asset, modules, assetIps, credentials, parent, children });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// BL-11 후속: [보기] 전용 — 단일 자격증명 복호화 값 반환 + 조회 이력 기록.
+// 권한은 기존 화면과 동일(requireLogin 전역). 값은 audit에 미기록.
+router.get('/:id/credential/:credId/reveal', async (req, res) => {
+  try {
+    const asset = await Asset.findById(req.params.id);
+    if (!asset) return res.status(404).json({ error: 'Not found' });
+    const password = await AssetCredential.revealPassword(req.params.credId, req.params.id);
+    if (password === null || password === undefined) return res.status(404).json({ error: '자격증명을 찾을 수 없습니다.' });
+    await AuditLog.log(req, {
+      action: 'credential_reveal', targetType: 'asset', targetId: parseInt(req.params.id, 10),
+      targetLabel: asset.management_number || asset.asset_number,
+      details: { credential_id: parseInt(req.params.credId, 10) }
+    });
+    res.json({ password });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -319,7 +340,7 @@ router.get('/:id', async (req, res) => {
     }
     let modules = await ComputingModule.findByAsset(asset.id);
     const assetIps = await AssetIp.findByAsset(asset.id);
-    const assetCredentials = await AssetCredential.findByAsset(asset.id);
+    const assetCredentials = await AssetCredential.findByAssetMasked(asset.id);
     // EUL history — deferred to B-4d-6 (v2 EUL has different column structure)
     const equipmentLogs = [];
     // Module change/transfer logs — deferred to B-4d-3/4
@@ -748,7 +769,7 @@ router.get('/:id/edit', async (req, res) => {
     const racks = await Rack.findAll();
     const vendors = await Vendor.findAll();
     const assetIps = await AssetIp.findByAsset(asset.id);
-    const assetCredentials = await AssetCredential.findByAsset(asset.id);
+    const assetCredentials = await AssetCredential.findByAssetMasked(asset.id);
     const modules = await ComputingModule.findByAsset(asset.id);
     const linkedRack = (asset.asset_type === 'immersion_tank') ? await Rack.findByLinkedAsset(asset.id) : null;
     const allAssets = await Asset.findAll();
@@ -902,12 +923,14 @@ router.post('/:id', requireMaintenance, async (req, res) => {
       })));
     }
 
-    // Re-create credentials: delete then bulk create (only if form contains credential fields)
+    // BL-11 후속: id 기반 upsert(빈 password=유지). delete+bulkCreate 대체.
+    const credIds = req.body['cred_ids[]'] || req.body.cred_ids || [];
     const credUsernames = req.body['cred_usernames[]'] || req.body.cred_usernames || [];
     const credPasswords = req.body['cred_passwords[]'] || req.body.cred_passwords || [];
     const credTypes = req.body['cred_types[]'] || req.body.cred_types || [];
     const credDescs = req.body['cred_descriptions[]'] || req.body.cred_descriptions || [];
     const creds = (Array.isArray(credUsernames) ? credUsernames : [credUsernames]).map((u, i) => ({
+      id: (Array.isArray(credIds) ? credIds : [credIds])[i] || '',
       username: u,
       password: (Array.isArray(credPasswords) ? credPasswords : [credPasswords])[i] || '',
       credential_type: (Array.isArray(credTypes) ? credTypes : [credTypes])[i] || 'root',
@@ -915,10 +938,7 @@ router.post('/:id', requireMaintenance, async (req, res) => {
     })).filter(c => c.username && c.username.trim());
     const hasCredFieldsInForm = req.body.hasOwnProperty('cred_usernames[]') || req.body.hasOwnProperty('cred_usernames') || req.body.hasOwnProperty('_cred_section_present');
     if (hasCredFieldsInForm) {
-      await AssetCredential.deleteByAsset(req.params.id);
-      if (creds.length > 0) {
-        await AssetCredential.bulkCreate(req.params.id, creds);
-      }
+      await AssetCredential.syncForAsset(req.params.id, creds);
     }
 
     const afterAsset = await Asset.findById(req.params.id);

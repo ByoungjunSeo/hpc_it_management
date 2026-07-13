@@ -430,14 +430,18 @@ function renderAdpTab(data, tab) {
         if (data.credentials && data.credentials.length > 0) {
             html = '<table class="adp-table"><tr><th>유형</th><th>사용자</th><th>비밀번호</th><th>설명</th></tr>';
             data.credentials.forEach(function(c) {
-                html += '<tr><td>' + esc(credTypeLabel(c.credential_type)) + '</td><td>' + esc(c.username) + '</td><td><code class="pw-hide" onclick="this.classList.toggle(\'pw-show\')">' + esc(c.password || '') + '</code></td><td>' + esc(c.description || '') + '</td></tr>';
+                // BL-11 후속: 비번 값 미포함(has_password). CSS 가림(pw-hide) 대신 [보기] API 조회.
+                var pwCell = c.has_password
+                    ? '<span class="cred-cell" data-asset="' + a.id + '" data-cred="' + c.id + '" data-shown="0"><code class="cred-mask">●●●●●●</code> <button type="button" class="btn btn-sm btn-outline cred-reveal" onclick="revealCredential(this)">보기</button> <button type="button" class="btn btn-sm btn-outline cred-copy" onclick="copyCredential(this)" hidden>복사</button></span>'
+                    : '<span style="color:#94a3b8;">-</span>';
+                html += '<tr><td>' + esc(credTypeLabel(c.credential_type)) + '</td><td>' + esc(c.username) + '</td><td>' + pwCell + '</td><td>' + esc(c.description || '') + '</td></tr>';
             });
             html += '</table>';
         } else if (a.ssh_user) {
+            // 레거시 ssh_user 표시(마이그레이션 후 ssh_password는 응답에서 제거됨)
             html = '<table class="adp-table">' +
                 tr('SSH 사용자', a.ssh_user) +
                 tr('SSH 포트', a.ssh_port) +
-                '<tr><td>SSH 비밀번호</td><td><code class="pw-hide" onclick="this.classList.toggle(\'pw-show\')">' + esc(a.ssh_password || '-') + '</code></td></tr>' +
                 '</table>';
         } else {
             html = '<p class="text-muted">등록된 접속 정보가 없습니다.</p>';
