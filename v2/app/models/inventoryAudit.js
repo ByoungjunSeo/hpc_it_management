@@ -153,10 +153,62 @@ const InventoryAudit = {
 
   async getCorrections(auditId) {
     const { rows } = await pool.query(
-      `SELECT c.*, u.display_name AS approver_name FROM inventory_corrections c
+      `SELECT c.*, u.display_name AS approver_name, ru.display_name AS reverter_name
+         FROM inventory_corrections c
          LEFT JOIN users u ON c.approved_by = u.id
+         LEFT JOIN users ru ON c.reverted_by = ru.id
         WHERE c.audit_id = $1 ORDER BY c.created_at`, [auditId]);
     return rows.map(fixDates);
+  },
+
+  // BL-12 후속: 보정 원복(undo). DELETE 없이 corrections에 원복 표기.
+  // 가드: 미원복(reverted_at NULL) + 현재 storage == 보정 after_qty(적용 이후 변경분 보호)일 때만.
+  // 반환: {ok:true, item_code, before, after} 또는 {ok:false, reason, current}.
+  async revertCorrection(correctionId, revertedByUserId) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rows: cr } = await client.query(
+        'SELECT * FROM inventory_corrections WHERE id = $1 FOR UPDATE', [correctionId]);
+      const corr = cr[0];
+      if (!corr) { await client.query('ROLLBACK'); return { ok: false, reason: 'not_found' }; }
+      if (corr.reverted_at) { await client.query('ROLLBACK'); return { ok: false, reason: 'already_reverted' }; }
+
+      const { rows: mi } = await client.query(
+        'SELECT storage_quantity, in_use_quantity, total_quantity, spare_quantity FROM module_inventory WHERE item_code = $1 FOR UPDATE',
+        [corr.item_code]);
+      if (!mi[0]) { await client.query('ROLLBACK'); return { ok: false, reason: 'module_missing' }; }
+      const cur = mi[0];
+      // 적용 이후 수량이 변경됐으면 원복 거부(이후 변경분 보호)
+      if (cur.storage_quantity !== corr.after_qty) {
+        await client.query('ROLLBACK');
+        return { ok: false, reason: 'changed_since', current: cur.storage_quantity };
+      }
+
+      // 옵션 B 대칭 원복: storage=spare=before_qty, total=before + 현재 in_use, in_use 불변
+      const beforeStorage = corr.before_qty;
+      const newTotal = beforeStorage + cur.in_use_quantity;
+      await client.query(
+        `UPDATE module_inventory SET storage_quantity = $1, spare_quantity = $1, total_quantity = $2, updated_at = NOW()
+          WHERE item_code = $3`, [beforeStorage, newTotal, corr.item_code]);
+      await client.query(
+        'UPDATE inventory_corrections SET reverted_at = NOW(), reverted_by = $1 WHERE id = $2',
+        [revertedByUserId || null, correctionId]);
+      await client.query(
+        `INSERT INTO module_inventory_logs
+           (item_code, event_type, quantity_change, before_total, after_total, before_spare, after_spare, asset_label, user_id, notes)
+         VALUES ($1, 'audit_correction_revert', $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [corr.item_code, beforeStorage - corr.after_qty, cur.total_quantity, newTotal, cur.spare_quantity, beforeStorage,
+         corr.item_code, revertedByUserId || null,
+         `재고 점검 보정 원복 (점검 #${corr.audit_id}): 보관 ${corr.after_qty}→${beforeStorage}`]);
+      await client.query('COMMIT');
+      return { ok: true, item_code: corr.item_code, before: corr.after_qty, after: beforeStorage, audit_id: corr.audit_id };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 };
 

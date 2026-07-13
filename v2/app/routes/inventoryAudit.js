@@ -95,6 +95,33 @@ router.post('/:id/apply', requireMaintenance, async (req, res) => {
   }
 });
 
+// 보정 원복(undo) — 가드: 적용 이후 수량 미변경 + 미원복일 때만
+router.post('/:id/correction/:cid/revert', requireMaintenance, async (req, res) => {
+  try {
+    const result = await InventoryAudit.revertCorrection(req.params.cid, req.session.userId);
+    if (!result.ok) {
+      const msg = {
+        already_reverted: '이미 원복된 보정입니다.',
+        changed_since: '적용 이후 수량이 변경되어 원복할 수 없습니다 (현재 ' + result.current + ').',
+        module_missing: '해당 부품을 찾을 수 없습니다.',
+        not_found: '보정 내역을 찾을 수 없습니다.'
+      }[result.reason] || '원복할 수 없습니다.';
+      req.flash('error', msg);
+    } else {
+      await AuditLog.log(req, {
+        action: 'inventory_correction_revert', targetType: 'inventory_audit', targetId: parseInt(req.params.id, 10),
+        targetLabel: '재고 점검 #' + req.params.id,
+        details: { correction_id: parseInt(req.params.cid, 10), item_code: result.item_code, before: result.before, after: result.after }
+      });
+      req.flash('success', result.item_code + ' 보정을 원복했습니다 (' + result.before + ' → ' + result.after + ').');
+    }
+    res.redirect('/inventory-audit/' + req.params.id);
+  } catch (err) {
+    req.flash('error', '원복 실패: ' + err.message);
+    res.redirect('/inventory-audit/' + req.params.id);
+  }
+});
+
 // 점검 취소
 router.post('/:id/cancel', requireMaintenance, async (req, res) => {
   try {

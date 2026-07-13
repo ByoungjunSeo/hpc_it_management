@@ -185,6 +185,8 @@ CREATE TABLE inventory_corrections (
     approved_at TIMESTAMPTZ,
     status TEXT NOT NULL DEFAULT 'pending'
         CHECK(status IN ('pending','approved','rejected')),
+    reverted_at TIMESTAMPTZ,                                    -- BL-12 후속: 원복 시각(NULL=미원복)
+    reverted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,-- BL-12 후속: 원복 실행자
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_corrections_item ON inventory_corrections(item_code);

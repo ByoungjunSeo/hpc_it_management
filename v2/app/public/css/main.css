@@ -254,6 +254,17 @@ body {
     font-weight: 700;
 }
 
+/* BL-12 후속: 제목 아래 메타 줄(부제). * { margin:0 } reset 탓에 이전엔 다음 카드와
+   붙어 상단 테두리에 물려 잘려 보였음 — page-header 큰 하단마진을 일부 당겨 헤더에
+   붙이고, 아래는 카드와 분리(인라인 style 대신 클래스: BUG-7/8 원칙). */
+.page-meta {
+    margin-top: -14px;
+    margin-bottom: 20px;
+    color: var(--text-secondary, #64748b);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
 /* Cards */
 .card {
     background: var(--bg-white);

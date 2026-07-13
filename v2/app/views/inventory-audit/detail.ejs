@@ -14,7 +14,7 @@
     </div>
 </div>
 
-<p style="color:#64748b; font-size:13px;">
+<p class="page-meta">
     시작 <%= audit.started_at %> · 점검자 <%= audit.auditor_name || '-' %>
     · 범위 <%= audit.scope_owner === 'company' ? '자사' : (audit.scope_owner === 'vendor' ? '업체' : '전체') %><%= audit.scope_module_type ? ' / ' + audit.scope_module_type : '' %>
     · 항목 <%= items.length %>건
@@ -88,20 +88,30 @@
 <div class="card">
     <div class="card-header"><h2>적용된 보정 (<%= corrections.length %>건)</h2></div>
     <table class="data-table">
-        <thead><tr><th>부품코드</th><th>이전</th><th>이후</th><th>사유</th><th>적용자</th><th>적용 시각</th></tr></thead>
+        <thead><tr><th>부품코드</th><th>이전</th><th>이후</th><th>사유</th><th>적용자</th><th>적용 시각</th><th>상태</th></tr></thead>
         <tbody>
             <% corrections.forEach(function(c){ %>
-            <tr>
+            <tr<%= c.reverted_at ? ' style="color:#94a3b8;"' : '' %>>
                 <td><code><%= c.item_code %></code></td>
                 <td style="text-align:right;"><%= c.before_qty %></td>
                 <td style="text-align:right;"><%= c.after_qty %></td>
                 <td><%= c.reason %></td>
                 <td><%= c.approver_name || '-' %></td>
                 <td><%= c.approved_at || '-' %></td>
+                <td>
+                    <% if (c.reverted_at) { %>
+                        <span class="badge">원복됨</span> <span style="font-size:11px;"><%= c.reverted_at %><%= c.reverter_name ? ' · ' + c.reverter_name : '' %></span>
+                    <% } else { %>
+                        <form method="POST" action="/inventory-audit/<%= audit.id %>/correction/<%= c.id %>/revert" style="display:inline;" onsubmit="return confirm('<%= c.item_code %> 보정을 원복합니다 (<%= c.after_qty %> → <%= c.before_qty %>). 계속하시겠습니까?');">
+                            <button type="submit" class="btn btn-sm btn-secondary">원복</button>
+                        </form>
+                    <% } %>
+                </td>
             </tr>
             <% }) %>
         </tbody>
     </table>
+    <p style="font-size:11px; color:#94a3b8; padding:8px 0 0;">원복은 적용 이후 수량이 바뀌지 않은 보정만 가능합니다(이후 변경분 보호). 원복 시 보관 수량이 이전 값으로 복귀하고 이력이 남습니다.</p>
 </div>
 <% } %>
 <% } %>
