@@ -161,6 +161,36 @@ const Asset = {
     return rows;
   },
 
+  // BL-2: 블레이드 노드 일괄 생성 — 단일 트랜잭션(전체 성공 또는 전체 롤백).
+  // nodes: [{ management_number, blade_slot, model_name, manufacturer, serial_number }]
+  // inherited: { asset_type, ownership, status, room_id, rack_id, rack_unit_start, rack_unit_size }
+  async bulkCreateNodes(parentId, nodes, inherited) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const ids = [];
+      for (const n of nodes) {
+        const { rows } = await client.query(
+          `INSERT INTO assets (management_number, asset_type, ownership, model_name, manufacturer, serial_number,
+             room_id, rack_id, rack_unit_start, rack_unit_size, parent_asset_id, blade_slot, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+          [n.management_number, inherited.asset_type, inherited.ownership || 'company',
+           n.model_name || null, n.manufacturer || null, n.serial_number || null,
+           inherited.room_id || null, inherited.rack_id || null,
+           inherited.rack_unit_start || null, normalizeUnitSize(inherited.rack_unit_size),
+           parentId, n.blade_slot, inherited.status || 'active']);
+        ids.push(rows[0].id);
+      }
+      await client.query('COMMIT');
+      return ids;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
   async checkDuplicateAssetNumber(assetNumber, excludeId) {
     if (!assetNumber || !assetNumber.trim()) return null;
     const trimmed = assetNumber.trim();
