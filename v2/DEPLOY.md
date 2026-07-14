@@ -113,6 +113,9 @@ docker compose -f docker-compose.prod.yml up -d
 | SUBNETS_JSON | | **선택(레거시)**. 최초 기동 시 대역 자동 시드용. 표준은 IP 관리 화면 등록 |
 | LENDING_ORG_LABEL | | 대여 라벨 기관명 (예: TTA) |
 | SSH_DEFAULT_USER / SSH_DEFAULT_PASSWORD | | 스캔 fallback 계정/비번. **(.env 파일 권한으로 보호되는 영역 — DB 암호화 대상과 위협 모델이 다름)** |
+| SSH_TERM_MAX_TOTAL | | 웹 SSH 터미널 전체 동시 세션 상한(기본 5) |
+| SSH_TERM_MAX_PER_USER | | 웹 SSH 터미널 사용자당 동시 세션 상한(기본 2) |
+| SSH_TERM_IDLE_MINUTES | | 웹 SSH 터미널 유휴(무입력) 타임아웃 분(기본 15) |
 | OLLAMA_HOST / PORT / MODEL | | AI 스펙조회(선택). 미기동이어도 앱 정상 |
 
 > **서브넷 등록은 IP 관리 화면의 [＋ 서브넷 등록]이 표준입니다** (CIDR /16~/30, 등록 시 IP 풀 자동 생성).
@@ -120,6 +123,15 @@ docker compose -f docker-compose.prod.yml up -d
 > 설정하지 않아도 화면에서 얼마든지 등록·삭제할 수 있습니다.
 
 ---
+
+> **웹 SSH 터미널(관리자 한정)**: 자산 상세의 [SSH 터미널] 버튼 → 브라우저 셸.
+> - **호스트가 대상 장비망에 도달 가능한 위치**에 설치돼야 동작합니다(미도달 시 이 기능만
+>   실패, 다른 기능 무영향). 접속 비밀번호는 서버 내부에서만 복호화되어 브라우저로 전송되지
+>   않습니다. 호스트키는 TOFU(최초 저장, 이후 불일치 시 경고만).
+> - **앞단에 reverse proxy(nginx 등)를 두는 경우** WebSocket이 통과하도록 `/ws/ssh-terminal`
+>   경로에 `Upgrade`/`Connection` 헤더 전달 설정이 필요합니다(예: nginx `proxy_set_header
+>   Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`). 직노출(프록시 없음)이면 불요.
+> - 동시 세션·유휴 타임아웃은 위 표의 `SSH_TERM_*` env로 조정합니다.
 
 ## 4. SSH 수집(스캔) 기능 활성화
 
