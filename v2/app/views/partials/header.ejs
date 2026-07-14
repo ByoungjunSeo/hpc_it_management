@@ -20,12 +20,13 @@
             <%# v2.1 복원 대상 (AI채팅 — v1 정찰: Ollama 모델/데이터 접근 범위 확인 후 복원.
                 복원 시: <li><a href="/chat">AI 채팅</a></li> + currentPath /chat active 클래스) %>
             <li><a href="/inventory" class="<%= (currentPath === '/inventory' || currentPath.startsWith('/inventory/') || currentPath.startsWith('/inventory?')) ? 'active' : '' %>">입출고</a></li>
-            <li class="nav-dropdown<%= currentPath.startsWith('/assets') || currentPath.startsWith('/module-inventory') || currentPath.startsWith('/inventory-audit') ? ' dropdown-active' : '' %>">
+            <li class="nav-dropdown<%= currentPath.startsWith('/assets') || currentPath.startsWith('/module-inventory') || currentPath.startsWith('/inventory-audit') || currentPath.startsWith('/lendings') ? ' dropdown-active' : '' %>">
                 <a href="#" class="nav-dropdown-toggle">자산 ▾</a>
                 <ul class="nav-dropdown-menu">
                     <li><a href="/assets" class="<%= currentPath.startsWith('/assets') ? 'active' : '' %>">자산현황</a></li>
                     <li><a href="/module-inventory" class="<%= currentPath.startsWith('/module-inventory') ? 'active' : '' %>">부품현황</a></li>
                     <li><a href="/inventory-audit" class="<%= currentPath.startsWith('/inventory-audit') ? 'active' : '' %>">재고 점검</a></li>
+                    <li><a href="/lendings" class="<%= currentPath.startsWith('/lendings') ? 'active' : '' %>">대여관리</a></li><%# BL-13: v1부터 메뉴 미노출로 고립됐던 화면의 진입점 신설 %>
                 </ul>
             </li>
             <li class="nav-dropdown<%= currentPath.startsWith('/rooms') || currentPath.startsWith('/racks') || currentPath.startsWith('/offices') || currentPath.startsWith('/storage') ? ' dropdown-active' : '' %>">

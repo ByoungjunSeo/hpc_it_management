@@ -53,7 +53,16 @@
         </div>
         <div class="form-group">
             <label>상태</label>
-            <p><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'returned' ? 'info' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label %></span></p>
+            <p><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'returned' ? 'info' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label %></span>
+            <%# BL-13: 이 자산이 걸린 active 대여 건 배지 — 잔여 수량 기준 역조회 %>
+            <% (typeof activeLendings !== 'undefined' ? activeLendings : []).forEach(l => { %>
+            <a href="/lendings/<%= l.id %>/edit" style="text-decoration:none">
+                <span class="badge badge-<%= l.overdue ? 'danger' : 'warning' %>" title="대여일 <%= l.loan_date || '-' %> / 예정일 <%= l.due_date || '-' %>">
+                    <%= l.direction === 'outbound' ? '대여중' : '차입' %>: <%= l.counterparty %><%= l.overdue ? ' (연체)' : '' %>
+                </span>
+            </a>
+            <% }) %>
+            </p>
         </div>
     </div>
 </div>

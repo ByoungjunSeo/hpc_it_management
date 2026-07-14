@@ -13,7 +13,8 @@
         <div class="form-row">
             <div class="form-group">
                 <label>방향 *</label>
-                <select name="direction" class="form-control" required>
+                <%# BL-13: 방향은 등록 후 불변 — 재고 차감/복귀 정합. 수정 화면에선 표시만. %>
+                <select name="direction" id="directionSelect" class="form-control" required <%= lending ? 'disabled' : '' %>>
                     <% appConfig.lendingDirections.forEach(d => { %>
                     <option value="<%= d.value %>" <%= lending && lending.direction === d.value ? 'selected' : '' %>><%= d.label %></option>
                     <% }) %>
@@ -22,6 +23,7 @@
             <div class="form-group">
                 <label>대상 기관 *</label>
                 <input type="text" name="counterparty" class="form-control" value="<%= lending ? lending.counterparty : '' %>" required>
+                <small class="text-muted">거래처명과 정확히 일치하면 자동 연결됩니다.</small>
             </div>
         </div>
         <div class="form-row">
@@ -30,17 +32,20 @@
                 <input type="date" name="loan_date" class="form-control" value="<%= lending && lending.loan_date ? lending.loan_date : '' %>">
             </div>
             <div class="form-group">
-                <label>반납일</label>
-                <input type="date" name="return_date" class="form-control" value="<%= lending && lending.return_date ? lending.return_date : '' %>">
+                <label>반납 예정일</label>
+                <input type="date" name="due_date" class="form-control" value="<%= lending && lending.due_date ? lending.due_date : '' %>">
+                <small class="text-muted">지나면 목록에 연체로 표시됩니다.</small>
             </div>
             <% if (lending) { %>
             <div class="form-group">
                 <label>상태</label>
-                <select name="status" class="form-control">
-                    <% appConfig.lendingStatuses.forEach(s => { %>
-                    <option value="<%= s.value %>" <%= lending.status === s.value ? 'selected' : '' %>><%= s.label %></option>
-                    <% }) %>
-                </select>
+                <p>
+                    <span class="badge badge-<%= lending.status === 'active' ? 'danger' : 'success' %>">
+                        <%= lending.status === 'active' ? '대여중' : '반납완료' %>
+                    </span>
+                    <% if (lending.return_date) { %> 실반납일: <%= lending.return_date %><% } %>
+                </p>
+                <small class="text-muted">상태는 목록의 반납 처리로만 변경됩니다.</small>
             </div>
             <% } %>
         </div>
@@ -51,66 +56,80 @@
 
         <div class="card-header mt-2">
             <h2>품목 목록</h2>
+            <% if (!lending || lending.status === 'active') { %>
             <button type="button" class="btn btn-sm btn-outline" onclick="addItemRow()">+ 품목 추가</button>
+            <% } %>
         </div>
+        <p class="text-muted" style="font-size:0.85em">
+            ※ 대출(외부로) 부품 품목이 재고 코드와 일치하면 등록 시 보관 수량에서 차감되고, 반납 시 복귀됩니다. 보관 수량이 부족하면 등록이 거부됩니다.<br>
+            ※ 장비 품목은 자산을 연결할 수 있고, 대출 시 "랙에서 해제"를 선택하면 실장 위치가 해제됩니다. 반납 시 자동 재실장은 없습니다 — 필요 시 랙에 수동 배치하세요.
+        </p>
 
         <div id="itemsContainer">
             <% if (lending && lending.items && lending.items.length > 0) { %>
-            <% lending.items.forEach((item, idx) => { %>
+            <% lending.items.forEach((item) => { %>
+            <% const locked = (item.returned_quantity || 0) > 0; %>
             <div class="form-row item-row" style="align-items:flex-end;">
+                <input type="hidden" name="item_id" value="<%= item.id %>">
                 <div class="form-group">
                     <label>유형</label>
-                    <select name="item_type" class="form-control">
+                    <% if (locked) { %>
+                    <input type="hidden" name="item_type" value="<%= item.item_type %>">
+                    <p><%= (appConfig.allIncomingTypes.find(t => t.value === item.item_type) || { label: item.item_type }).label %> 🔒</p>
+                    <% } else { %>
+                    <select name="item_type" class="form-control item-type-select" onchange="onTypeChange(this)">
                         <option value="">선택</option>
-                        <% appConfig.moduleTypes.forEach(m => { %>
-                        <option value="<%= m.value %>" <%= item.item_type === m.value ? 'selected' : '' %>><%= m.label %></option>
-                        <% }) %>
+                        <optgroup label="장비">
+                            <% appConfig.allIncomingTypes.filter(t => t.category === 'equipment').forEach(t => { %>
+                            <option value="<%= t.value %>" <%= item.item_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                            <% }) %>
+                        </optgroup>
+                        <optgroup label="부품">
+                            <% appConfig.allIncomingTypes.filter(t => t.category === 'module').forEach(t => { %>
+                            <option value="<%= t.value %>" <%= item.item_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                            <% }) %>
+                        </optgroup>
                     </select>
+                    <% } %>
+                </div>
+                <div class="form-group code-group">
+                    <label>코드(부품)</label>
+                    <input type="text" name="item_code" class="form-control" list="miCodes"
+                        value="<%= item.item_code || '' %>" placeholder="재고 코드 일치 시 연동"
+                        oninput="onCodeInput(this)" <%= locked ? 'readonly' : '' %>>
+                    <small class="inv-hint text-muted"><%= item.inventory_linked ? '재고 연동됨(차감 적용)' : '' %></small>
+                </div>
+                <div class="form-group asset-group" style="display:none">
+                    <label>자산(장비)</label>
+                    <input type="text" class="form-control asset-search-input" placeholder="관리번호/모델 검색..." autocomplete="off"
+                        oninput="onAssetSearch(this)">
+                    <input type="hidden" name="item_asset_id" value="<%= item.asset_id || '' %>">
+                    <div class="asset-results"></div>
+                    <div class="asset-selected text-muted" style="font-size:0.85em">
+                        <%= item.asset_id ? ('연결: ' + (item.asset_management_number || item.asset_model_name || ('ID:' + item.asset_id))) : '' %>
+                    </div>
+                    <label class="rack-release-label" style="display:none; font-size:0.85em">
+                        <input type="checkbox" class="rack-release-cb" onchange="onRackReleaseToggle(this)"> 랙에서 해제
+                    </label>
+                    <input type="hidden" name="item_release_rack" value="0">
                 </div>
                 <div class="form-group">
-                    <label>코드</label>
-                    <input type="text" name="item_code" class="form-control" value="<%= item.item_code || '' %>" placeholder="CPU-A, mem-64-A...">
-                </div>
-                <div class="form-group">
-                    <label>수량</label>
-                    <input type="number" name="item_quantity" class="form-control" value="<%= item.quantity || 1 %>" min="1">
+                    <label>수량<% if (lending) { %> (반납 <%= item.returned_quantity || 0 %>/<%= item.quantity || 1 %>)<% } %></label>
+                    <input type="number" name="item_quantity" class="form-control" value="<%= item.quantity || 1 %>" min="1" <%= locked ? 'readonly' : '' %>>
                 </div>
                 <div class="form-group">
                     <label>설명</label>
                     <input type="text" name="item_description" class="form-control" value="<%= item.description || '' %>">
                 </div>
                 <div class="form-group">
+                    <% if (locked) { %>
+                    <span class="text-muted" style="font-size:0.8em">반납 이력 — 삭제/구조 변경 불가</span>
+                    <% } else if (!lending || lending.status === 'active') { %>
                     <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.item-row').remove()">삭제</button>
+                    <% } %>
                 </div>
             </div>
             <% }) %>
-            <% } else { %>
-            <div class="form-row item-row" style="align-items:flex-end;">
-                <div class="form-group">
-                    <label>유형</label>
-                    <select name="item_type" class="form-control">
-                        <option value="">선택</option>
-                        <% appConfig.moduleTypes.forEach(m => { %>
-                        <option value="<%= m.value %>"><%= m.label %></option>
-                        <% }) %>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>코드</label>
-                    <input type="text" name="item_code" class="form-control" placeholder="CPU-A, mem-64-A...">
-                </div>
-                <div class="form-group">
-                    <label>수량</label>
-                    <input type="number" name="item_quantity" class="form-control" value="1" min="1">
-                </div>
-                <div class="form-group">
-                    <label>설명</label>
-                    <input type="text" name="item_description" class="form-control">
-                </div>
-                <div class="form-group">
-                    <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.item-row').remove()">삭제</button>
-                </div>
-            </div>
             <% } %>
         </div>
 
@@ -121,27 +140,188 @@
     </form>
 </div>
 
+<datalist id="miCodes">
+    <% (typeof inventoryCodes !== 'undefined' ? inventoryCodes : []).forEach(c => { %>
+    <option value="<%= c.item_code %>"><%= c.module_type %> · 보관 <%= c.storage_quantity %>개</option>
+    <% }) %>
+</datalist>
+
 <% if (lending) { %>
 <%- include('../partials/photo-section', { entityType: 'lending', entityId: lending.id, photos: typeof lendingPhotos !== 'undefined' ? lendingPhotos : [], editable: true }) %>
 <% } %>
 
 <script>
-var moduleTypes = <%- JSON.stringify(appConfig.moduleTypes) %>;
-function addItemRow() {
-    var options = '<option value="">선택</option>';
-    moduleTypes.forEach(function(m) {
-        options += '<option value="' + m.value + '">' + m.label + '</option>';
+var incomingTypes = <%- JSON.stringify(appConfig.allIncomingTypes) %>;
+var moduleTypeValues = <%- JSON.stringify(appConfig.moduleTypes.map(m => m.value)) %>;
+var inventoryByCode = {};
+<%- '' /* 코드 → 보관 수량 맵 (차감 안내용) */ %>
+<% (typeof inventoryCodes !== 'undefined' ? inventoryCodes : []).forEach(c => { %>
+inventoryByCode[<%- JSON.stringify(c.item_code) %>] = <%= c.storage_quantity || 0 %>;
+<% }) %>
+var isEdit = <%= lending ? 'true' : 'false' %>;
+var fixedDirection = <%- lending ? JSON.stringify(lending.direction) : 'null' %>;
+
+function currentDirection() {
+    if (fixedDirection) return fixedDirection;
+    var sel = document.getElementById('directionSelect');
+    return sel ? sel.value : 'outbound';
+}
+
+function isModuleType(v) { return moduleTypeValues.indexOf(v) >= 0; }
+
+// 유형에 따라 코드(부품) / 자산(장비) 위젯 전환
+function onTypeChange(sel) {
+    var row = sel.closest('.item-row');
+    var codeGroup = row.querySelector('.code-group');
+    var assetGroup = row.querySelector('.asset-group');
+    if (!sel.value) {
+        codeGroup.style.display = '';
+        assetGroup.style.display = 'none';
+        return;
+    }
+    if (isModuleType(sel.value)) {
+        codeGroup.style.display = '';
+        assetGroup.style.display = 'none';
+        assetGroup.querySelector('input[name="item_asset_id"]').value = '';
+        assetGroup.querySelector('.asset-selected').textContent = '';
+        setReleaseRack(row, false, false);
+    } else {
+        codeGroup.style.display = 'none';
+        codeGroup.querySelector('input[name="item_code"]').value = '';
+        codeGroup.querySelector('.inv-hint').textContent = '';
+        assetGroup.style.display = '';
+    }
+}
+
+function onCodeInput(input) {
+    var row = input.closest('.item-row');
+    var hint = row.querySelector('.inv-hint');
+    var code = input.value.trim();
+    if (!code) { hint.textContent = ''; return; }
+    if (Object.prototype.hasOwnProperty.call(inventoryByCode, code)) {
+        if (currentDirection() === 'outbound') {
+            hint.textContent = '재고 연동: 보관 ' + inventoryByCode[code] + '개 — 등록 시 차감';
+        } else {
+            hint.textContent = '재고 코드 일치 (차입은 재고 무연동)';
+        }
+    } else {
+        hint.textContent = '재고 미연동(장부만 기록)';
+    }
+}
+
+var assetSearchTimer = null;
+function onAssetSearch(input) {
+    var row = input.closest('.item-row');
+    var resultsDiv = row.querySelector('.asset-results');
+    clearTimeout(assetSearchTimer);
+    var q = input.value.trim();
+    if (q.length < 1) { resultsDiv.innerHTML = ''; return; }
+    assetSearchTimer = setTimeout(function() {
+        fetch('/lendings/asset-search?q=' + encodeURIComponent(q))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                resultsDiv.innerHTML = '';
+                (data.assets || []).forEach(function(a) {
+                    var label = (a.management_number || a.asset_number || 'ID:' + a.id) + ' / ' + (a.model_name || '-');
+                    var div = document.createElement('div');
+                    div.className = 'asset-result-item';
+                    div.textContent = label + (a.rack_id ? ' [실장중]' : '');
+                    div.onclick = function() { selectAsset(row, a, label); };
+                    resultsDiv.appendChild(div);
+                });
+                if ((data.assets || []).length === 0) {
+                    resultsDiv.innerHTML = '<div class="text-muted" style="padding:4px; font-size:0.85em">검색 결과 없음</div>';
+                }
+            })
+            .catch(function() { resultsDiv.innerHTML = ''; });
+    }, 250);
+}
+
+function selectAsset(row, asset, label) {
+    row.querySelector('input[name="item_asset_id"]').value = asset.id;
+    row.querySelector('.asset-selected').textContent = '연결: ' + label;
+    row.querySelector('.asset-results').innerHTML = '';
+    row.querySelector('.asset-search-input').value = '';
+    // 대출 + 실장 중 자산 → 랙 해제 제안(기본 체크)
+    var racked = !!asset.rack_id;
+    var show = racked && currentDirection() === 'outbound';
+    setReleaseRack(row, show, show);
+}
+
+function setReleaseRack(row, show, checked) {
+    var lbl = row.querySelector('.rack-release-label');
+    var cb = row.querySelector('.rack-release-cb');
+    var hidden = row.querySelector('input[name="item_release_rack"]');
+    if (!lbl) return;
+    lbl.style.display = show ? '' : 'none';
+    cb.checked = !!checked;
+    hidden.value = (show && checked) ? '1' : '0';
+}
+
+function onRackReleaseToggle(cb) {
+    var row = cb.closest('.item-row');
+    row.querySelector('input[name="item_release_rack"]').value = cb.checked ? '1' : '0';
+}
+
+function buildTypeOptions() {
+    var html = '<option value="">선택</option><optgroup label="장비">';
+    incomingTypes.forEach(function(t) {
+        if (t.category === 'equipment') html += '<option value="' + t.value + '">' + t.label + '</option>';
     });
+    html += '</optgroup><optgroup label="부품">';
+    incomingTypes.forEach(function(t) {
+        if (t.category === 'module') html += '<option value="' + t.value + '">' + t.label + '</option>';
+    });
+    html += '</optgroup>';
+    return html;
+}
+
+function addItemRow() {
     var html =
         '<div class="form-row item-row" style="align-items:flex-end;">' +
-        '<div class="form-group"><label>유형</label><select name="item_type" class="form-control">' + options + '</select></div>' +
-        '<div class="form-group"><label>코드</label><input type="text" name="item_code" class="form-control" placeholder="CPU-A, mem-64-A..."></div>' +
+        '<input type="hidden" name="item_id" value="">' +
+        '<div class="form-group"><label>유형</label><select name="item_type" class="form-control item-type-select" onchange="onTypeChange(this)">' + buildTypeOptions() + '</select></div>' +
+        '<div class="form-group code-group"><label>코드(부품)</label><input type="text" name="item_code" class="form-control" list="miCodes" placeholder="재고 코드 일치 시 연동" oninput="onCodeInput(this)"><small class="inv-hint text-muted"></small></div>' +
+        '<div class="form-group asset-group" style="display:none"><label>자산(장비)</label>' +
+        '<input type="text" class="form-control asset-search-input" placeholder="관리번호/모델 검색..." autocomplete="off" oninput="onAssetSearch(this)">' +
+        '<input type="hidden" name="item_asset_id" value="">' +
+        '<div class="asset-results"></div>' +
+        '<div class="asset-selected text-muted" style="font-size:0.85em"></div>' +
+        '<label class="rack-release-label" style="display:none; font-size:0.85em"><input type="checkbox" class="rack-release-cb" onchange="onRackReleaseToggle(this)"> 랙에서 해제</label>' +
+        '<input type="hidden" name="item_release_rack" value="0">' +
+        '</div>' +
         '<div class="form-group"><label>수량</label><input type="number" name="item_quantity" class="form-control" value="1" min="1"></div>' +
         '<div class="form-group"><label>설명</label><input type="text" name="item_description" class="form-control"></div>' +
         '<div class="form-group"><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.item-row\').remove()">삭제</button></div>' +
         '</div>';
     document.getElementById('itemsContainer').insertAdjacentHTML('beforeend', html);
 }
+
+// 초기화: 기존 행의 유형에 맞춰 위젯 표시, 신규 화면이면 빈 행 1개
+document.addEventListener('DOMContentLoaded', function() {
+    var rows = document.querySelectorAll('#itemsContainer .item-row');
+    rows.forEach(function(row) {
+        var sel = row.querySelector('.item-type-select');
+        if (sel) onTypeChange(sel);
+        else {
+            // 잠금 행(hidden item_type): 장비면 자산 표시 유지
+            var hiddenType = row.querySelector('input[name="item_type"][type="hidden"]');
+            if (hiddenType && !isModuleType(hiddenType.value)) {
+                row.querySelector('.code-group').style.display = 'none';
+                row.querySelector('.asset-group').style.display = '';
+            }
+        }
+        var codeInput = row.querySelector('input[name="item_code"]');
+        if (codeInput && codeInput.value) onCodeInput(codeInput);
+    });
+    if (rows.length === 0) addItemRow();
+});
 </script>
+
+<style>
+.asset-results { position:relative; }
+.asset-result-item { padding:4px 8px; border:1px solid #ddd; border-top:none; cursor:pointer; font-size:0.85em; background:#fff; }
+.asset-result-item:hover { background:#f0f4f8; }
+</style>
 
 <%- include('../partials/footer', { extraJs }) %>

@@ -7,7 +7,7 @@
 -- 변환 기준: MIGRATION_PLAN.md §2~§4
 -- ============================================================
 
--- 1. lending_items (→ lendings)
+-- 1. lending_items (→ lendings, → assets[BL-13])
 CREATE TABLE lending_items (
     id SERIAL PRIMARY KEY,
     lending_id INTEGER NOT NULL
@@ -15,10 +15,16 @@ CREATE TABLE lending_items (
     item_type TEXT NOT NULL,
     item_code TEXT,
     quantity INTEGER DEFAULT 1,
-    description TEXT
+    description TEXT,
+    asset_id INTEGER                              -- BL-13: 장비 품목의 자산 개체 연결
+        REFERENCES assets(id) ON DELETE SET NULL ON UPDATE CASCADE,
+    returned_quantity INTEGER NOT NULL DEFAULT 0, -- BL-13: 부분 반납 누적(<= quantity)
+    last_returned_at TIMESTAMPTZ,                 -- BL-13: 최종 반납 시각
+    inventory_linked BOOLEAN NOT NULL DEFAULT FALSE -- BL-13: 등록 시 재고 차감 여부(복귀 판단 근거)
 );
 
 CREATE INDEX idx_lending_items_lending ON lending_items(lending_id);
+CREATE INDEX idx_lending_items_asset ON lending_items(asset_id);
 
 -- 2. vendor_intake_requests (→ assets)
 -- 기능 토글: FEATURE_VENDOR_INTAKE (기본 true)

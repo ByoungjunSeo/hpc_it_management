@@ -12,6 +12,50 @@ const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
 const { pool } = require('../config/database');
 
+function actorOf(req) {
+  return {
+    userId: req.session ? req.session.userId || null : null,
+    username: req.session ? (req.session.displayName || req.session.username || null) : null
+  };
+}
+
+// BL-13: 폼 병렬 배열 파싱 — item_id(기존 품목 보존 갱신), asset_id(장비 연결),
+// release_rack(랙 해제 요청, hidden '0'/'1'로 정렬 유지)
+function parseItems(body) {
+  const toArr = v => (v === undefined ? [] : (Array.isArray(v) ? v : [v]));
+  const ids = toArr(body.item_id);
+  const types = toArr(body.item_type);
+  const codes = toArr(body.item_code);
+  const quantities = toArr(body.item_quantity);
+  const descriptions = toArr(body.item_description);
+  const assetIds = toArr(body.item_asset_id);
+  const releaseRacks = toArr(body.item_release_rack);
+
+  const items = [];
+  for (let i = 0; i < types.length; i++) {
+    if (!types[i]) continue;
+    items.push({
+      item_id: ids[i] || null,
+      item_type: types[i],
+      item_code: (codes[i] || '').trim() || null,
+      quantity: parseInt(quantities[i]) || 1,
+      description: descriptions[i] || null,
+      asset_id: parseInt(assetIds[i]) || null,
+      release_rack: releaseRacks[i] === '1'
+    });
+  }
+  return items;
+}
+
+// 폼의 부품 코드 datalist용 재고 코드 목록
+async function loadInventoryCodes() {
+  const { rows } = await pool.query(`
+    SELECT item_code, module_type, label, storage_quantity
+    FROM module_inventory WHERE item_code IS NOT NULL ORDER BY item_code
+  `);
+  return rows;
+}
+
 // List
 router.get('/', async (req, res, next) => {
   try {
@@ -23,8 +67,8 @@ router.get('/', async (req, res, next) => {
     const lendings = await Lending.findAll(filters);
     const stats = await Lending.getStats();
 
-    const summary = { outbound_active: 0, inbound_active: 0 };
-    stats.forEach(s => {
+    const summary = { outbound_active: 0, inbound_active: 0, overdue: stats.overdue };
+    stats.byDirection.forEach(s => {
       if (s.direction === 'outbound' && s.status === 'active') summary.outbound_active = parseInt(s.count);
       if (s.direction === 'inbound' && s.status === 'active') summary.inbound_active = parseInt(s.count);
     });
@@ -45,73 +89,139 @@ router.get('/', async (req, res, next) => {
 });
 
 // New form
-router.get('/new', (req, res) => {
-  res.render('lendings/form', {
-    title: '대여 등록',
-    currentPath: '/lendings',
-    extraCss: null,
-    extraJs: null,
-    lending: null,
-    appConfig
-  });
+router.get('/new', async (req, res, next) => {
+  try {
+    res.render('lendings/form', {
+      title: '대여 등록',
+      currentPath: '/lendings',
+      extraCss: null,
+      extraJs: null,
+      lending: null,
+      inventoryCodes: await loadInventoryCodes(),
+      appConfig
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// BL-13: 장비 품목의 자산 검색 위젯
+router.get('/asset-search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json({ assets: [] });
+    const s = '%' + q + '%';
+    const { rows } = await pool.query(`
+      SELECT id, management_number, asset_number, model_name, asset_type, status, rack_id
+      FROM assets
+      WHERE status <> 'decommissioned'
+        AND (management_number ILIKE $1 OR asset_number ILIKE $1 OR model_name ILIKE $1)
+      ORDER BY management_number NULLS LAST LIMIT 20
+    `, [s]);
+    res.json({ assets: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Create
 router.post('/', requireMaintenance, async (req, res) => {
   try {
-    const items = [];
-    const types = req.body.item_type || [];
-    const codes = req.body.item_code || [];
-    const quantities = req.body.item_quantity || [];
-    const descriptions = req.body.item_description || [];
-
-    const typesArr = Array.isArray(types) ? types : [types];
-    const codesArr = Array.isArray(codes) ? codes : [codes];
-    const quantitiesArr = Array.isArray(quantities) ? quantities : [quantities];
-    const descriptionsArr = Array.isArray(descriptions) ? descriptions : [descriptions];
-
-    for (let i = 0; i < typesArr.length; i++) {
-      if (typesArr[i]) {
-        items.push({
-          item_type: typesArr[i],
-          item_code: codesArr[i] || null,
-          quantity: parseInt(quantitiesArr[i]) || 1,
-          description: descriptionsArr[i] || null
-        });
-      }
+    const items = parseItems(req.body);
+    const { id, releasedAssets } = await Lending.create(req.body, items, actorOf(req));
+    await AuditLog.log(req, { action: 'create', targetType: 'lending', targetId: id, targetLabel: req.body.counterparty + ' ' + req.body.direction });
+    for (const a of releasedAssets) {
+      await AuditLog.log(req, {
+        action: 'update', targetType: 'asset', targetId: a.id,
+        targetLabel: `랙 해제(대여장부 #${id}): ${a.label}`
+      });
     }
-
-    await Lending.create(req.body, items);
-    await AuditLog.log(req, { action: 'create', targetType: 'lending', targetLabel: req.body.counterparty + ' ' + req.body.direction });
-    req.flash('success', '대여가 등록되었습니다.');
+    let msg = '대여가 등록되었습니다.';
+    if (releasedAssets.length > 0) {
+      msg += ` 랙 해제 ${releasedAssets.length}건: ` + releasedAssets.map(a => a.label).join(', ');
+    }
+    req.flash('success', msg);
   } catch (err) {
     req.flash('error', '등록 실패: ' + err.message);
   }
   res.redirect(req.body.returnTo || '/lendings');
 });
 
+// BL-13: 부분 반납 모달용 품목 조회
+router.get('/:id/items.json', async (req, res) => {
+  try {
+    const lending = await Lending.findById(req.params.id);
+    if (!lending) return res.status(404).json({ error: '대여 정보를 찾을 수 없습니다.' });
+    res.json({
+      id: lending.id,
+      counterparty: lending.counterparty,
+      status: lending.status,
+      items: lending.items.map(it => ({
+        id: it.id,
+        item_type: it.item_type,
+        item_code: it.item_code,
+        description: it.description,
+        quantity: it.quantity || 1,
+        returned_quantity: it.returned_quantity || 0,
+        outstanding: (it.quantity || 1) - (it.returned_quantity || 0),
+        asset_label: it.asset_management_number || it.asset_model_name || null,
+        inventory_linked: it.inventory_linked
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// BL-13: 품목 부분 반납 (수량 지정) — 전 품목 완납 시 상태 자동 'returned'
+router.post('/:id/items/:itemId/return', requireMaintenance, async (req, res) => {
+  try {
+    const { completed, item } = await Lending.returnItem(
+      req.params.id, req.params.itemId, req.body.quantity, actorOf(req));
+    await AuditLog.log(req, {
+      action: 'update', targetType: 'lending', targetId: req.params.id,
+      targetLabel: `품목반납: ${item.item_type}:${item.item_code || '-'} x${req.body.quantity}`
+    });
+    let msg = '품목이 반납 처리되었습니다.';
+    if (item.asset_id) msg += ' (자산은 자동 재실장되지 않습니다 — 필요 시 랙에 수동 배치하세요.)';
+    if (completed) msg += ' 전 품목 반납 완료 — 대여 건이 반납완료로 전환되었습니다.';
+    req.flash('success', msg);
+  } catch (err) {
+    req.flash('error', '품목 반납 실패: ' + err.message);
+  }
+  res.redirect(req.body.returnTo || req.get('Referer') || '/lendings');
+});
+
 // Vendor assets for fault return modal
+// BL-13: counterparty_vendor_id FK 우선 매칭(ILIKE 취약점 해소), 이름 매칭은 폴백
 router.get('/vendor-assets', async (req, res) => {
   try {
+    let vendor = null;
+    if (req.query.lending_id) {
+      const { rows } = await pool.query(`
+        SELECT v.id, v.vendor_name FROM lendings l
+        JOIN vendor_info v ON v.id = l.counterparty_vendor_id
+        WHERE l.id = $1
+      `, [req.query.lending_id]);
+      vendor = rows[0] || null;
+    }
     const counterparty = req.query.counterparty;
-    if (!counterparty) {
+    if (!vendor && counterparty) {
+      let { rows: vendors } = await pool.query(
+        'SELECT id, vendor_name FROM vendor_info WHERE vendor_name = $1', [counterparty]
+      );
+      if (vendors.length === 0) {
+        ({ rows: vendors } = await pool.query(
+          `SELECT id, vendor_name FROM vendor_info
+           WHERE $1 ILIKE '%' || vendor_name || '%' OR vendor_name ILIKE '%' || $1 || '%'`,
+          [counterparty]
+        ));
+      }
+      vendor = vendors[0] || null;
+    }
+    if (!vendor) {
       return res.json({ assets: [] });
     }
-    // Find vendor by name matching counterparty
-    let { rows: vendors } = await pool.query(
-      'SELECT id, vendor_name FROM vendor_info WHERE vendor_name = $1', [counterparty]
-    );
-    if (vendors.length === 0) {
-      ({ rows: vendors } = await pool.query(
-        `SELECT id, vendor_name FROM vendor_info
-         WHERE $1 ILIKE '%' || vendor_name || '%' OR vendor_name ILIKE '%' || $1 || '%'`,
-        [counterparty]
-      ));
-    }
-    if (vendors.length === 0) {
-      return res.json({ assets: [] });
-    }
-    const vendor = vendors[0];
     const { rows: assets } = await pool.query(`
       SELECT a.id, a.management_number, a.model_name, a.asset_number, a.status
       FROM assets a
@@ -233,8 +343,8 @@ router.post('/:id/fault-return', requireMaintenance, async (req, res) => {
             await pool.query(`
               UPDATE module_inventory
               SET storage_quantity = storage_quantity + $1,
-                  total_quantity = total_quantity + $1,
                   spare_quantity = spare_quantity + $1,
+                  total_quantity = total_quantity + $1,
                   updated_at = CURRENT_TIMESTAMP
               WHERE item_code = $2
             `, [cm.count || 1, tmpCode]);
@@ -300,7 +410,7 @@ router.post('/:id/fault-return', requireMaintenance, async (req, res) => {
     await pool.query("UPDATE assets SET status = 'maintenance', updated_at = CURRENT_TIMESTAMP WHERE id = $1", [asset_id]);
 
     // Mark lending as fault-returned
-    await Lending.markFaultReturned(lendingId, { reason, expected_return_date, fault_notes });
+    await Lending.markFaultReturned(lendingId, { reason, expected_return_date, fault_notes }, actorOf(req));
 
     // Recalculate in_use quantities (maintenance assets excluded)
     await ModuleInventory.recalculateInUse();
@@ -335,6 +445,7 @@ router.get('/:id/edit', async (req, res, next) => {
       extraJs: null,
       lending,
       lendingPhotos,
+      inventoryCodes: await loadInventoryCodes(),
       appConfig,
       returnTo: req.query.returnTo || req.get('Referer') || ''
     });
@@ -343,45 +454,34 @@ router.get('/:id/edit', async (req, res, next) => {
   }
 });
 
-// Update
+// Update — 방향·상태는 모델에서 불변 처리(기존 값 유지)
 router.post('/:id', requireMaintenance, async (req, res) => {
   try {
-    const items = [];
-    const types = req.body.item_type || [];
-    const codes = req.body.item_code || [];
-    const quantities = req.body.item_quantity || [];
-    const descriptions = req.body.item_description || [];
-
-    const typesArr = Array.isArray(types) ? types : [types];
-    const codesArr = Array.isArray(codes) ? codes : [codes];
-    const quantitiesArr = Array.isArray(quantities) ? quantities : [quantities];
-    const descriptionsArr = Array.isArray(descriptions) ? descriptions : [descriptions];
-
-    for (let i = 0; i < typesArr.length; i++) {
-      if (typesArr[i]) {
-        items.push({
-          item_type: typesArr[i],
-          item_code: codesArr[i] || null,
-          quantity: parseInt(quantitiesArr[i]) || 1,
-          description: descriptionsArr[i] || null
-        });
-      }
-    }
-
-    await Lending.update(req.params.id, req.body, items);
+    const items = parseItems(req.body);
+    const { releasedAssets } = await Lending.update(req.params.id, req.body, items, actorOf(req));
     await AuditLog.log(req, { action: 'update', targetType: 'lending', targetId: req.params.id, targetLabel: req.body.counterparty });
-    req.flash('success', '대여가 수정되었습니다.');
+    for (const a of releasedAssets) {
+      await AuditLog.log(req, {
+        action: 'update', targetType: 'asset', targetId: a.id,
+        targetLabel: `랙 해제(대여장부 #${req.params.id}): ${a.label}`
+      });
+    }
+    let msg = '대여가 수정되었습니다.';
+    if (releasedAssets.length > 0) {
+      msg += ` 랙 해제 ${releasedAssets.length}건: ` + releasedAssets.map(a => a.label).join(', ');
+    }
+    req.flash('success', msg);
   } catch (err) {
     req.flash('error', '수정 실패: ' + err.message);
   }
   res.redirect(req.body.returnTo || '/lendings');
 });
 
-// Delete
+// Delete — 미반납 잔여 차감분은 모델에서 재고 복귀 후 삭제
 router.post('/:id/delete', requireMaintenance, async (req, res) => {
   try {
     await Photo.deleteByEntity('lending', parseInt(req.params.id));
-    await Lending.delete(req.params.id);
+    await Lending.delete(req.params.id, actorOf(req));
     await AuditLog.log(req, { action: 'delete', targetType: 'lending', targetId: req.params.id });
     req.flash('success', '대여가 삭제되었습니다.');
   } catch (err) {
@@ -390,12 +490,12 @@ router.post('/:id/delete', requireMaintenance, async (req, res) => {
   res.redirect(req.body.returnTo || req.get('Referer') || '/lendings');
 });
 
-// Return
+// Return — 전 품목 일괄 반납 (부분 반납은 /:id/items/:itemId/return)
 router.post('/:id/return', requireMaintenance, async (req, res) => {
   try {
-    await Lending.markReturned(req.params.id);
-    await AuditLog.log(req, { action: 'update', targetType: 'lending', targetId: req.params.id, targetLabel: '반납처리' });
-    req.flash('success', '반납 처리되었습니다.');
+    await Lending.returnAll(req.params.id, actorOf(req));
+    await AuditLog.log(req, { action: 'update', targetType: 'lending', targetId: req.params.id, targetLabel: '전 품목 일괄 반납' });
+    req.flash('success', '전 품목이 반납 처리되었습니다. (대여 중 랙에서 해제했던 자산은 자동 재실장되지 않습니다.)');
   } catch (err) {
     req.flash('error', '반납 처리 실패: ' + err.message);
   }

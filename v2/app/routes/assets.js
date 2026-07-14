@@ -17,6 +17,7 @@ const ModuleInventoryLog = require('../models/moduleInventoryLog');
 const ModuleTransferLog = require('../models/moduleTransferLog');
 const moduleInventoryRouter = require('./moduleInventory');
 const Photo = require('../models/photo');
+const Lending = require('../models/lending');
 const { pool } = require('../config/database');
 
 // Asset list
@@ -350,6 +351,9 @@ router.get('/:id', async (req, res) => {
     // Auto-sync: skipped — depends on EUL + ComputingModule.create (B-4d-3/4 scope)
     // Module enrichment with item_code: skipped — depends on ModuleInventory (B-4d-3/4 scope)
 
+    // BL-13: 이 자산이 잔여 수량으로 걸린 active 대여 건 — 상세 배지 표시용
+    const activeLendings = await Lending.findActiveByAsset(asset.id);
+
     // Get rooms for restore modal
     const rooms = await ServerRoom.findAll();
 
@@ -398,6 +402,7 @@ router.get('/:id', async (req, res) => {
       childInfraAssets,
       rooms,
       assetPhotos,
+      activeLendings,
       appConfig
     });
   } catch (err) {

@@ -61,8 +61,11 @@ CREATE TABLE lendings (
     direction TEXT NOT NULL
         CHECK(direction IN ('outbound', 'inbound')),
     counterparty TEXT NOT NULL,
+    counterparty_vendor_id INTEGER                -- BL-13: 거래처 FK 보조(자유 텍스트 본선)
+        REFERENCES vendor_info(id) ON DELETE SET NULL ON UPDATE CASCADE,
     loan_date DATE,
-    return_date DATE,
+    due_date DATE,                                -- BL-13: 반납 예정일(연체 판정 기준)
+    return_date DATE,                             -- 실반납일 전용(BL-13에서 의미 정리)
     status TEXT NOT NULL DEFAULT 'active'
         CHECK(status IN ('active', 'returned')),
     notes TEXT,
@@ -70,6 +73,7 @@ CREATE TABLE lendings (
 );
 
 CREATE INDEX idx_lendings_status ON lendings(status);
+CREATE INDEX idx_lendings_due ON lendings(due_date);
 
 -- 5. module_inventory
 CREATE TABLE module_inventory (

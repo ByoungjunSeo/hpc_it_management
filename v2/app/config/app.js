@@ -105,6 +105,8 @@ module.exports = {
   })(),
 
   // B-5b \ubc30\ud3ec \uc124\uc815\ud654: \uae30\uad00\uba85 \ub77c\ubca8 (\uae30\ubcf8 TTA \u2014 \uc6b0\ub9ac \uc778\uc2a4\ud134\uc2a4 \ubb34\uc601\ud5a5)
+  // BL-13: \ubdf0\uc758 \ud1b5\uacc4 \uce74\ub4dc\u00b7\ubc30\uc9c0\ub3c4 \uc774 \uac12\uc744 \uc4f0\ub3c4\ub85d orgLabel \ubd84\ub9ac(\ud558\ub4dc\ucf54\ub529 \uc815\ud569)
+  orgLabel: process.env.LENDING_ORG_LABEL || 'TTA',
   lendingDirections: (() => {
     const org = process.env.LENDING_ORG_LABEL || 'TTA';
     return [
