@@ -307,7 +307,10 @@ router.get('/:id/json', async (req, res) => {
     const children = await Asset.findChildren(asset.id);
     // BL-11 후속: 응답에 자격증명 평문 미포함. 레거시 asset.ssh_password도 제거([보기] API로만).
     if (asset && 'ssh_password' in asset) { asset.ssh_password = undefined; }
-    res.json({ asset, modules, assetIps, credentials, parent, children });
+    // T2 랙 팝업: SSH 진입점 활성 판정용 불리언(자격증명 상세는 싣지 않음).
+    //   자산 상세 [SSH 터미널] 버튼과 동일 기준(sshTerminal 상수 재사용) — BMC/IPMI 제외 + 값 있음.
+    const sshAvailable = credentials.some(c => !sshTerminal.SSH_EXCLUDED_TYPES.includes(c.credential_type) && c.has_password);
+    res.json({ asset, modules, assetIps, credentials, parent, children, sshAvailable });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
