@@ -368,3 +368,53 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
   심각도 경미(예시 문구).
 - 조치: `<설치 디렉토리>` 일반형 + 예시 경로로 수정 완료(repo). **2.0.1 tar 미반영** —
   공지문 §5 정오표로 보완, 차기 패키징에 자동 반영.
+
+---
+
+## BUG-9: 자식 노드 사용등록이 부모 섀시 위치를 덮어씀
+- 상태: [수정 완료] 2026-07-15 (운영 반영 대기) | 방침: (나) 이식하며 수정 — 동기화 로직 전면 제거
+- 관련: app/routes/inventory.js(사용등록 POST), app/models/asset.js(update/create),
+  app/views/assets/form.ejs(자식 위치 입력 숨김)
+
+### 증상 (조사 6cCB 확정)
+입출고 **사용등록** 핸들러(inventory.js 구 847-858)의 "자식→부모 위치 동기화" 블록이
+자식 노드의 신규 U 위치를 부모 섀시 행에 복사. 재현: test-001-N1(id 1196)을 U40에
+등록 → 부모 test-001(1195)의 U36-U39가 U40으로 소실(두 행 updated_at 동일 초).
+역방향 동기화는 없음. 랙 뷰의 "U36-U39 사라짐"은 렌더 버그가 아니라 실제 데이터 이동.
+
+### 기대 동작 (수정된 모습)
+- inventory.js 동기화 블록 **제거** — 자식 등록이 부모 위치를 건드리지 않는다.
+- 블레이드 노드(parent_asset_id 있음)는 물리적으로 섀시를 벗어날 수 없으므로
+  **독립 위치를 갖지 않는다**: Asset.update/create가 parent 있으면 room_id/rack_id/
+  rack_unit_start를 강제 NULL(모델 가드). 자산 수정 폼은 자식이면 위치 섹션 숨김+안내.
+- 오염 데이터 원복: 1195 → U36-U39(106/12), 자식(1188·1189·1196) 독립 위치 NULL
+  (/tmp → db 게이트 SQL).
+
+### 검증 (격리 HTTP 실경로)
+섀시 U36-U39 등록 후 노드 N1 U40 등록 → **부모 위치 불변 + 자식 위치 미기록** 확인.
+자식 수정 폼 위치 변경 시도 → 무시. 데이터 보정 리허설 PASS.
+
+---
+
+## BUG-10: 다노드 입고 노드의 blade_slot 미저장 + blade_slot 의미 충돌
+- 상태: [수정 완료] 2026-07-15 (운영 반영 대기) | 방침: (나) 이식하며 수정 — node_index 분리
+- 관련: app/routes/inventory.js(다노드 입고), app/routes/assets.js(BL-2), app/models/asset.js,
+  app/views/assets/node-bulk.ejs, db/02_schema_assets.sql, db/migrations/2026-07-15_1_*.sql
+
+### 증상 (조사 6cCB 확정)
+다노드 입고(inventory.js 316-342)의 Asset.create에 blade_slot 키 부재 → 입고 노드
+전부 NULL(1196~1199 등). 구 부분 유니크 인덱스(idx_assets_parent_slot_unique,
+blade_slot 기반)는 NULL을 WHERE에서 제외 → 아무것도 막지 못함. 또한 blade_slot이
+랙 렌더용(left/right/SW)과 BL-2 노드슬롯(숫자) 두 의미를 겸해 충돌. BL-2 라우트 자체는
+정상이나 실사용 본선(입고)을 커버하는 검증 부재(6cCA는 모델 직접 호출).
+
+### 기대 동작 (수정된 모습)
+- **node_index INTEGER** 신설(블레이드 노드 번호 전용). blade_slot은 렌더용 의미로 원복.
+- 부분 유니크 인덱스 교체: (parent_asset_id, node_index) WHERE 둘 다 NOT NULL.
+- 다노드 입고·BL-2 양쪽에서 node_index 자동/입력 부여, 같은 부모 내 유일성 보장.
+- 랙 노드 배지는 node_index 참조(없으면 순번 fallback).
+
+### 검증 (격리 HTTP 실경로)
+입고 4노드 → node_index 1~4 자동. BL-2 5·6 등록 → 저장·blade_slot NULL 유지. 같은
+node_index 재시도 → 앱 거절 + 전체 롤백, DB 유니크 인덱스 위반도 backstop 확인.
+신규설치/업그레이드(마이그레이션) 스키마 동등성 확인. blade_slot left/right 렌더 정상.
