@@ -9,7 +9,8 @@ const AssetCredential = require('../models/assetCredential');
 const IpAddress = require('../models/ipAddress');
 const Subnet = require('../models/subnet');
 const appConfig = require('../config/app');
-const { requireMaintenance } = require('../middleware/auth');
+const { requireMaintenance, requireAdmin } = require('../middleware/auth');
+const sshTerminal = require('../services/sshTerminal');
 const AuditLog = require('../models/auditLog');
 const ComputingModule = require('../models/computingModule');
 const ModuleInventory = require('../models/moduleInventory');
@@ -328,6 +329,28 @@ router.get('/:id/credential/:credId/reveal', async (req, res) => {
     res.json({ password });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// T2: 웹 SSH 터미널 페이지 (관리자 한정). 비밀번호 값은 뷰에 일절 내리지 않는다.
+router.get('/:id/terminal', requireAdmin, async (req, res) => {
+  try {
+    const asset = await Asset.findById(req.params.id);
+    if (!asset) { req.flash('error', '자산을 찾을 수 없습니다.'); return res.redirect('/assets'); }
+    const ips = await AssetIp.findByAsset(asset.id);
+    const creds = await AssetCredential.findByAssetMasked(asset.id); // 값 없음(id/username/type/has_password)
+    // 수동 선택 목록: BMC/IPMI만 숨기고 그 외(root/os/user/etc)는 허용. 값 있는 것만.
+    const sshCreds = creds.filter(c => !sshTerminal.SSH_EXCLUDED_TYPES.includes(c.credential_type) && c.has_password);
+    const target = sshTerminal.resolveTarget(asset, ips); // { ip, port } — 비밀번호 무관
+    res.render('assets/terminal', {
+      title: 'SSH 터미널 - ' + (asset.management_number || asset.model_name || asset.id),
+      currentPath: '/assets', extraCss: null, extraJs: null,
+      asset, prefillIp: target.ip || '', prefillPort: target.port || 22,
+      sshCreds, // 선택 목록(복수일 때) — username/type/id만
+    });
+  } catch (err) {
+    req.flash('error', 'SSH 터미널 로드 실패: ' + err.message);
+    res.redirect('/assets/' + req.params.id);
   }
 });
 

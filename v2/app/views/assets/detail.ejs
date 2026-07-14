@@ -4,6 +4,16 @@
     <h1>자산 상세</h1>
     <div class="btn-group">
         <a href="/assets/<%= asset.id %>/edit" class="btn btn-primary">수정</a>
+        <%# T2: SSH 터미널 — 관리자 한정, SSH 자격증명(bmc/etc 제외) 있어야 활성 %>
+        <% if (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') {
+             const sshExcluded = ['bmc', 'ipmi']; // BMC/IPMI는 SSH 후보 아님(sshTerminal.SSH_EXCLUDED_TYPES와 일치)
+             const sshOk = (typeof assetCredentials !== 'undefined') && assetCredentials.some(c => !sshExcluded.includes(c.credential_type) && c.has_password); %>
+          <% if (sshOk) { %>
+          <a href="/assets/<%= asset.id %>/terminal" class="btn btn-secondary">SSH 터미널</a>
+          <% } else { %>
+          <button class="btn btn-secondary" disabled title="등록된 SSH 자격증명 없음" style="opacity:.5;cursor:not-allowed;">SSH 터미널</button>
+          <% } %>
+        <% } %>
         <form method="POST" action="/assets/<%= asset.id %>/delete" style="display:inline" onsubmit="return confirmDelete('이 자산을 삭제하시겠습니까?')">
             <button type="submit" class="btn btn-danger">삭제</button>
         </form>

@@ -1,0 +1,99 @@
+<%- include('../partials/header', { title, currentPath, extraCss: undefined }) %>
+<link rel="stylesheet" href="/vendor/xterm/xterm.css">
+
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+    <h1>SSH 터미널 — <%= asset.management_number || asset.model_name || ('asset#' + asset.id) %></h1>
+    <a href="/assets/<%= asset.id %>" class="btn btn-secondary btn-sm">자산으로</a>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+    <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; padding:4px 0;">
+        <div class="form-group" style="flex:0 0 200px;">
+            <label>대상 IP</label>
+            <input type="text" id="tHost" class="form-control" value="<%= prefillIp %>" placeholder="10.x.x.x">
+        </div>
+        <div class="form-group" style="flex:0 0 90px;">
+            <label>포트</label>
+            <input type="number" id="tPort" class="form-control" value="<%= prefillPort %>" min="1" max="65535">
+        </div>
+        <% if (sshCreds.length > 1) { %>
+        <div class="form-group" style="flex:0 0 200px;">
+            <label>자격증명</label>
+            <select id="tCred" class="form-control">
+                <% sshCreds.forEach(function(c){ %>
+                <option value="<%= c.id %>"><%= c.username %> (<%= c.credential_type %>)</option>
+                <% }) %>
+            </select>
+        </div>
+        <% } else if (sshCreds.length === 1) { %>
+        <input type="hidden" id="tCred" value="<%= sshCreds[0].id %>">
+        <div class="form-group"><label>자격증명</label><p style="margin:0;"><%= sshCreds[0].username %> (<%= sshCreds[0].credential_type %>)</p></div>
+        <% } %>
+        <div class="form-group">
+            <button id="tConnect" class="btn btn-primary">접속</button>
+            <button id="tDisconnect" class="btn btn-danger" disabled>연결 종료</button>
+        </div>
+        <span id="tStatus" style="align-self:center; font-size:12px; color:#94a3b8;">대기</span>
+    </div>
+    <% if (sshCreds.length === 0) { %>
+    <p style="color:#ef4444; font-size:13px;">등록된 SSH 자격증명이 없습니다. 자산 편집에서 os/root 자격증명을 등록하세요.</p>
+    <% } %>
+</div>
+
+<div id="terminal" style="height:520px; background:#1e1e1e; border-radius:6px; padding:6px;"></div>
+
+<script src="/vendor/xterm/xterm.js"></script>
+<script src="/vendor/xterm/addon-fit.js"></script>
+<script>
+(function(){
+    var assetId = <%= asset.id %>;
+    var hasCred = <%= sshCreds.length > 0 ? 'true' : 'false' %>;
+    var term = new Terminal({ cursorBlink: true, fontSize: 13, theme: { background: '#1e1e1e' } });
+    var fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById('terminal'));
+    fit.fit();
+
+    var ws = null;
+    var statusEl = document.getElementById('tStatus');
+    var connectBtn = document.getElementById('tConnect');
+    var disconnectBtn = document.getElementById('tDisconnect');
+
+    function setStatus(txt, color) { statusEl.textContent = txt; statusEl.style.color = color || '#94a3b8'; }
+
+    function connect() {
+        if (!hasCred) { setStatus('자격증명 없음', '#ef4444'); return; }
+        var host = document.getElementById('tHost').value.trim();
+        var port = document.getElementById('tPort').value.trim();
+        var credEl = document.getElementById('tCred');
+        var credId = credEl ? credEl.value : '';
+        // 대상 IP/포트는 서버가 자산 기준으로 재확정(프리필은 참고). credId만 쿼리로.
+        var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        var qs = 'assetId=' + assetId + (credId ? '&credId=' + encodeURIComponent(credId) : '');
+        ws = new WebSocket(proto + '//' + location.host + '/ws/ssh-terminal?' + qs);
+        setStatus('접속 중...', '#3b82f6');
+        connectBtn.disabled = true;
+
+        ws.onopen = function(){ setStatus('연결됨', '#22c55e'); disconnectBtn.disabled = false;
+            ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows })); };
+        ws.onmessage = function(ev){
+            var m; try { m = JSON.parse(ev.data); } catch(e){ return; }
+            if (m.type === 'data') term.write(m.data);
+            else if (m.type === 'warn') { term.write('\r\n\x1b[33m' + m.message + '\x1b[0m\r\n'); }
+            else if (m.type === 'error') { term.write('\r\n\x1b[31m' + m.message + '\x1b[0m\r\n'); setStatus('오류', '#ef4444'); }
+            else if (m.type === 'exit') { term.write('\r\n[세션 종료 code=' + m.code + ']\r\n'); }
+        };
+        ws.onclose = function(){ setStatus('연결 종료', '#94a3b8'); connectBtn.disabled = false; disconnectBtn.disabled = true; };
+        ws.onerror = function(){ setStatus('연결 오류', '#ef4444'); };
+    }
+
+    term.onData(function(d){ if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: d })); });
+    term.onResize(function(sz){ if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: sz.cols, rows: sz.rows })); });
+    window.addEventListener('resize', function(){ fit.fit(); });
+
+    connectBtn.addEventListener('click', connect);
+    disconnectBtn.addEventListener('click', function(){ if (ws) ws.close(); });
+})();
+</script>
+
+<%- include('../partials/footer') %>

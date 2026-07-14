@@ -194,3 +194,18 @@ CREATE TABLE inventory_corrections (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX idx_corrections_item ON inventory_corrections(item_code);
+
+-- ============================================================
+-- T2: 웹 SSH 터미널 TOFU 호스트키 저장소 (독립 테이블)
+-- 기존 DB는 db/migrations/2026-07-14_2_t2_ssh_host_keys.sql
+-- ============================================================
+CREATE TABLE ssh_host_keys (
+    id SERIAL PRIMARY KEY,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 22,
+    key_type TEXT NOT NULL,          -- 예: ssh-ed25519, ssh-rsa
+    fingerprint TEXT NOT NULL,       -- base64 sha256 (호스트키 해시)
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (host, port)
+);

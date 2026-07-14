@@ -54,7 +54,8 @@ app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser(sessionSecret));
-app.use(session({
+// T2: 세션 미들웨어를 변수로 추출 — ws upgrade 핸들러에서 동일 세션 파싱·인증 재사용.
+const sessionMiddleware = session({
   store: new pgSession({
     pool: pool,
     tableName: 'session',
@@ -64,7 +65,8 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: { maxAge: 24 * 60 * 60 * 1000 }
-}));
+});
+app.use(sessionMiddleware);
 app.use(flash());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -215,9 +217,16 @@ process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err && err.stack ? err.stack : err);
 });
 
-// Start server
+// Start server — T2: http.createServer 경유(ws upgrade 부착 위해)
+const http = require('http');
+const server = http.createServer(app);
+
+// T2: 웹 SSH 터미널 ws — /ws/ssh-terminal 만 처리, 그 외 upgrade는 소켓 종료.
+const sshTerminal = require('./services/sshTerminal');
+sshTerminal.attach(server, sessionMiddleware);
+
 const PORT = process.env.APP_PORT || 3001;
-app.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`IT Asset Management v2 running on http://0.0.0.0:${PORT}`);
 });
 
