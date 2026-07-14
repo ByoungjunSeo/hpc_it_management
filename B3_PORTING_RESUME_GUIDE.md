@@ -1,6 +1,6 @@
 # B-3 이후 애플리케이션 이식 — 재개 가이드
 
-> 작성일: 2026-06-26 / 최종 현행화: 2026-07-14
+> 작성일: 2026-06-26 / 최종 현행화: 2026-07-14 (BL-2 완결·BL-4 분리 종결)
 > 작성 목적: 서버 종료 전 맥락 보존. 재개 시 이 문서 + git log부터 확인.
 
 > ★ **릴리스 현황(2026-07-14)**: **v2.1.0 종결 — 타 팀 배포 첫 정식본**
@@ -65,23 +65,47 @@ ALTER 대상 테이블 없음)·**U-2**(encrypt가 v2/scripts라 이미지·dist
   orgLabel 정합. lendings 테이블 확장(due_date·counterparty_vendor_id, 신규 설치 01_schema 자체
   포함). **격리 검증 47건 + 브라우저 인수 통과.**
 
-## ★ 다음 마디: T2 웹 SSH 터미널 (v2.2 스위트 중핵) — 확정 결정
+## ★ T2 웹 SSH 터미널 완결 (2026-07-14, 운영 반영 완료)
 
-원격 접속 스위트(v2.2)는 4트랙 분할(조사 /tmp/suite_survey_20260714.md): T1(전원제어 ✅ 위)
-→ **T2 웹 SSH 터미널(중핵, 다음)** → T3 BMC SOL → T4 백업 UI(분리). T2 착수 결정(그대로 준용):
+원격 접속 스위트(v2.2) 4트랙 중 **T1(전원제어) + T2(웹 SSH 터미널) 완료**. 운영 반영 + 실장비
+브라우저 인수 통과.
 
-- **접근**: 관리자 계정 한정.
-- **자격증명**: **서버 내부 복호화 직결**(ssh2에 직접 전달) — 브라우저에 비밀번호 미전송,
-  `revealPassword` 재사용 금지(BL-11이 막은 클라이언트 노출을 되살리지 않는다).
-- **호스트키**: TOFU(첫 접속 키 저장, 이후 변경 시 경고만).
-- **프론트/전송**: `ws` 라이브러리 1개 추가 + **xterm.js는 `public/` vendoring**(오프라인 대응,
-  CDN 불가). 같은 포트 3001에서 `http.createServer(app)` + ws 공유(프록시 없음).
-- **audit**: 접속 **시작·종료 + 대상만** 기록(전체 키로그 미채택 — 과잉).
-- **세션**: 동시 세션 제한 + 유휴 타임아웃.
-- **착수 시 확인 변수**: `ws` 추가 시 npm 빌드 접근 필요 여부(조사 단계에서 확정 — apt kakao
-  미러는 npm과 별개).
-- **T2 이후**: T3 BMC SOL(착수 시 `sol info` probe 조사부터 — 장비 지원 확인) / T4 백업 UI(원격
-  접속과 무관, 별도 트랙) / BL-2·BL-4 소형 UX 잔존.
+- **운영 반영일 2026-07-14** — 격리 검증 8항목 + 자격증명 우선순위 9케이스 + **실장비 브라우저 인수
+  8항목** 전부 통과. audit 3종(remote_ssh_open/close/fail) 실기록 확인, TOFU 재접속 무경고 확인.
+- **커밋 3건**: docs(guide 현행화) / feat(ssh: ws+xterm 터미널) / fix(ssh: 자격증명 우선순위).
+- **확정 구현 사양**:
+  - **관리자 한정**(session.userRole==='admin'). 자산 상세 + 랙 팝업 [SSH 터미널] 진입점.
+  - **자격증명**: 서버 내부 `credentialCrypto.decrypt` → ssh2 직결(브라우저 미전송). 자동 선택
+    **root → OS** 우선, **BMC/IPMI는 SSH 후보 항상 제외**(전원/SOL 영역), 기타(user/etc)는 수동 선택만.
+  - **TOFU**: `ssh_host_keys` 테이블(host+port 유니크). 불일치 시 경고만·진행.
+  - **전송**: :3001 공유(`http.createServer` + ws upgrade `/ws/ssh-terminal`), xterm.js `public/vendor/`
+    vendoring(3파일), 신규 npm 의존성 `ws` 하나.
+  - **env 3종**: `SSH_TERM_MAX_TOTAL`(5)·`SSH_TERM_MAX_PER_USER`(2)·`SSH_TERM_IDLE_MINUTES`(15).
+  - **audit**: remote_ssh_open/close/fail(대상·사용자만, 입출력 미기록).
+
+## ★ BL-2 완결 (2026-07-14) — 블레이드 다노드 일괄 등록
+
+- **진입점**: 부모(섀시=server/storage) 상세 [노드 일괄 등록] 버튼(관리자 한정). 라우트
+  `GET/POST /assets/:id/nodes/bulk`(둘 다 requireAdmin).
+- **동작**: 슬롯 범위 → 행 자동 생성(관리번호=부모+`-N{슬롯}` 편집 가능) → 검증(슬롯 필수·제출 내
+  슬롯/관리번호 중복·기존 슬롯 충돌·기존 관리번호 중복) → `Asset.bulkCreateNodes` **단일 트랜잭션
+  (전체 성공 또는 전체 롤백)** → 배치 audit(`asset_node_bulk`) → 부모로 리다이렉트.
+- **상속**: 위치·소유·상태만 프리필 후 제출 시 복사(이후 동기화 없음). IP·자격증명 제외(등록 후 개별).
+- **DDL(게이트)**: `(parent_asset_id, blade_slot)` 부분 유니크 인덱스 — 신규설치 `02_schema_assets.sql`
+  반영 + 기존 DB `db/migrations/2026-07-14_3_bl2_blade_slot_unique.sql`. **운영 적용은 사용자 승인 후**
+  (사전 점검 쿼리 동봉, 위반 0건 확인 후 CREATE).
+- **검증**: 격리(bl2test-db :15433) 통합 5케이스 PASS. EJS 컴파일·라우트 syntax OK.
+
+## ★ BL-4 분리 종결
+
+- 웹 SSH 콘솔 = T2로 충족. **BL-4b(마스터-디테일 레이아웃) = v2.2+ 연기** — BL-2의 조건부 폼
+  (섀시/노드 선택 분기)도 이 트랙에서 함께 처리. BL-4 자체는 이번 마디로 종결.
+
+## ★ 다음 마디: T3 BMC SOL
+
+- **착수 시 `sol info` probe 조사부터** — 대상 장비의 SOL(Serial-over-LAN) 지원·설정 확인.
+- 완료 시 랙 팝업·자산 상세에 BMC 콘솔 진입점 연결(T2 SSH 진입점과 동형).
+- **T4 백업 UI**(원격 접속과 무관, 별도 트랙)는 이후.
 
 ## 1. 지금까지 완료 (커밋 기준)
 
@@ -755,7 +779,9 @@ b7f_subnets_backup.sql / B7F_CUTOVER_REPORT.md
 | bl11 평문 덤프 폐기 | BL-11 마이그레이션 사전 pg_dump(평문 자격증명 포함) — 서버 v2/backups + 사무실 PC 양쪽 폐기 | ~7/27 |
 | 독립개발실3 이중 등재 | office(id 61)·server_room(id 67) 양존 — 같은 물리 공간인지 실물 확인. 병합 시 랙 4·자산 20건 재배정 | 사용자 확인 |
 | 선반 18건 실사 보정 | 기존 shelf_size=3 자산 18건을 실사에 맞춰 화면 개별 수정 | 실사 시 |
-| BL-2 / BL-4 (소형 UX) | BL-2 블레이드 다노드 일괄 사용등록, BL-4 자산현황 마스터-디테일 개편 — v2.1 백로그 잔존 | 후속 |
+| BL-2 블레이드 다노드 일괄 등록 | 부모 상세 [노드 일괄 등록], 단일 트랜잭션·상속 복사·부분 유니크 인덱스(게이트) | ✅ 완료 2026-07-14 |
+| BL-4 자산현황 개편 | 웹 콘솔=T2 충족 / BL-4b 마스터-디테일 레이아웃=v2.2+ 연기 | 분리 종결 |
+| npm audit — xlsx high | `xlsx *` Prototype Pollution + ReDoS (No fix available). **v2.2에서 대체(다른 라이브러리)/격리 검토** | v2.2 |
 | INVENTORY_CHECKLIST_TEMPLATE.html | 재고 점검 인쇄뷰가 대체 — 운영 정착 후 폐기 판단 | 정착 후 |
 
 > **해소됨(이력)**: OPS-1(2026-07-12 점검 창 처리)·2.0.2 패키징(→v2.1.0으로 통합)·공지문 문의
