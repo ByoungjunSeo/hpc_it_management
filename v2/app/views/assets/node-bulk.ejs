@@ -8,30 +8,28 @@
 <div class="card" style="margin-bottom:12px;">
     <div class="card-header"><h2>상속 값 (부모에서 복사 — 노드 공통)</h2></div>
     <div style="padding:4px 0; font-size:13px; color:#475569;">
-        서버실 <b><%= inherited.room_name || '-' %></b> · 랙 <b><%= inherited.rack_name || '-' %></b>
-        · U위치 <b><%= inherited.rack_unit_start || '-' %></b>
-        · 소유 <b><%= inherited.ownership === 'company' ? '자사' : (inherited.ownership === 'vendor' ? '업체' : inherited.ownership) %></b>
+        소유 <b><%= inherited.ownership === 'company' ? '자사' : (inherited.ownership === 'vendor' ? '업체' : inherited.ownership) %></b>
         · 상태 <b><%= inherited.status %></b>
-        <div style="color:#94a3b8; margin-top:4px;">※ 위치·소유·상태는 등록 시 각 노드에 복사됩니다(이후 개별 편집 가능). IP·자격증명은 등록 후 노드별로 추가하세요.</div>
+        <div style="color:#94a3b8; margin-top:4px;">※ 소유·상태는 등록 시 각 노드에 복사됩니다. <b>위치(서버실·랙·U)는 노드에 지정하지 않습니다</b> — 블레이드 노드는 부모 섀시 위치를 따릅니다(BUG-9). IP·자격증명은 등록 후 노드별로 추가하세요.</div>
     </div>
 </div>
 
 <form method="POST" action="/assets/<%= parent.id %>/nodes/bulk" id="nodeBulkForm">
     <input type="hidden" name="returnTo" value="/assets/<%= parent.id %>">
     <div class="card" style="margin-bottom:12px;">
-        <div class="card-header"><h2>슬롯 범위</h2></div>
+        <div class="card-header"><h2>노드 번호 범위</h2></div>
         <div style="display:flex; gap:10px; align-items:flex-end; padding:4px 0; flex-wrap:wrap;">
-            <div class="form-group" style="flex:0 0 90px;"><label>시작 슬롯</label><input type="number" id="slotStart" class="form-control" min="1" value="1"></div>
-            <div class="form-group" style="flex:0 0 90px;"><label>끝 슬롯</label><input type="number" id="slotEnd" class="form-control" min="1" value="4"></div>
+            <div class="form-group" style="flex:0 0 110px;"><label>시작 번호</label><input type="number" id="idxStart" class="form-control" min="1" value="<%= nextIndex %>"></div>
+            <div class="form-group" style="flex:0 0 110px;"><label>끝 번호</label><input type="number" id="idxEnd" class="form-control" min="1" value="<%= nextIndex + 3 %>"></div>
             <div class="form-group"><button type="button" class="btn btn-outline" id="genRows">행 생성</button></div>
-            <span style="align-self:center; font-size:12px; color:#94a3b8;">부모 관리번호 + <code>-N{슬롯}</code> 자동 제안 (편집 가능). 이미 쓴 슬롯: <%= usedSlots.join(', ') || '없음' %></span>
+            <span style="align-self:center; font-size:12px; color:#94a3b8;">부모 관리번호 + <code>-N{번호}</code> 자동 제안 (편집 가능). 이미 쓴 노드 번호: <%= usedIndexes.join(', ') || '없음' %></span>
         </div>
     </div>
 
     <div class="card">
         <div class="card-header"><h2>노드 목록</h2></div>
         <table class="data-table" id="nodeTable">
-            <thead><tr><th style="width:80px;">슬롯*</th><th>관리번호*</th><th>모델</th><th>제조사</th><th>시리얼</th><th style="width:50px;"></th></tr></thead>
+            <thead><tr><th style="width:90px;">노드 번호*</th><th>관리번호*</th><th>모델</th><th>제조사</th><th>시리얼</th><th style="width:50px;"></th></tr></thead>
             <tbody id="nodeRows"></tbody>
         </table>
         <div style="padding:10px 0; display:flex; gap:8px; align-items:center;">
@@ -45,14 +43,14 @@
 <script>
 (function(){
     var parentMgmt = <%- JSON.stringify(parent.management_number || ('asset' + parent.id)) %>;
-    var usedSlots = <%- JSON.stringify(usedSlots) %>;
+    var usedIndexes = <%- JSON.stringify(usedIndexes.map(String)) %>;
     var firstModel = '';
     var tbody = document.getElementById('nodeRows');
 
-    function rowHtml(slot){
-        var mgmt = parentMgmt + '-N' + slot;
+    function rowHtml(idx){
+        var mgmt = parentMgmt + '-N' + idx;
         return '<tr>' +
-            '<td><input type="number" name="node_slot[]" class="form-control nslot" value="' + slot + '" min="1" style="width:70px;"></td>' +
+            '<td><input type="number" name="node_index[]" class="form-control nidx" value="' + idx + '" min="1" style="width:80px;"></td>' +
             '<td><input type="text" name="node_mgmt[]" class="form-control nmgmt" value="' + mgmt + '"></td>' +
             '<td><input type="text" name="node_model[]" class="form-control nmodel" value="' + firstModel + '"></td>' +
             '<td><input type="text" name="node_manuf[]" class="form-control"></td>' +
@@ -60,45 +58,42 @@
             '<td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'tr\').remove()">X</button></td>' +
             '</tr>';
     }
-    function addRow(slot){ tbody.insertAdjacentHTML('beforeend', rowHtml(slot != null ? slot : '')); bindMgmtSync(); }
-    // slot 변경 시 관리번호 자동 갱신(사용자가 직접 수정 안 한 경우에 한해)
+    function addRow(idx){ tbody.insertAdjacentHTML('beforeend', rowHtml(idx != null ? idx : '')); bindMgmtSync(); }
+    // 노드 번호 변경 시 관리번호 자동 갱신(사용자가 직접 수정 안 한 경우에 한해)
     function bindMgmtSync(){
         tbody.querySelectorAll('tr').forEach(function(tr){
-            var slotIn = tr.querySelector('.nslot'), mgmtIn = tr.querySelector('.nmgmt');
-            if (slotIn && !slotIn._bound){ slotIn._bound = true;
-                slotIn.addEventListener('input', function(){ if (!mgmtIn._edited) mgmtIn.value = parentMgmt + '-N' + slotIn.value; });
+            var idxIn = tr.querySelector('.nidx'), mgmtIn = tr.querySelector('.nmgmt');
+            if (idxIn && !idxIn._bound){ idxIn._bound = true;
+                idxIn.addEventListener('input', function(){ if (!mgmtIn._edited) mgmtIn.value = parentMgmt + '-N' + idxIn.value; });
                 mgmtIn.addEventListener('input', function(){ mgmtIn._edited = true; });
             }
         });
     }
     document.getElementById('genRows').addEventListener('click', function(){
-        var s = parseInt(document.getElementById('slotStart').value) || 1;
-        var e = parseInt(document.getElementById('slotEnd').value) || s;
+        var s = parseInt(document.getElementById('idxStart').value) || 1;
+        var e = parseInt(document.getElementById('idxEnd').value) || s;
         tbody.innerHTML = '';
         for (var i = s; i <= e && i - s < 64; i++) addRow(i);
     });
     document.getElementById('addRow').addEventListener('click', function(){ addRow(''); });
-    document.getElementById('nodeTable').addEventListener('input', function(e){
-        if (e.target.classList.contains('nmodel')){ /* 첫 행 모델을 아래 빈 모델에 프리필 */ }
-    });
 
-    // 클라이언트 검증: 슬롯 중복·빈 필수
+    // 클라이언트 검증: 노드 번호 중복·빈 필수
     document.getElementById('nodeBulkForm').addEventListener('submit', function(ev){
-        var slots = [].map.call(tbody.querySelectorAll('.nslot'), function(x){ return x.value.trim(); });
+        var idxs = [].map.call(tbody.querySelectorAll('.nidx'), function(x){ return x.value.trim(); });
         var mgmts = [].map.call(tbody.querySelectorAll('.nmgmt'), function(x){ return x.value.trim(); });
         var msg = document.getElementById('formMsg'); msg.textContent = '';
-        if (slots.length === 0){ msg.textContent = '노드를 추가하세요.'; ev.preventDefault(); return; }
+        if (idxs.length === 0){ msg.textContent = '노드를 추가하세요.'; ev.preventDefault(); return; }
         var seen = {};
-        for (var i = 0; i < slots.length; i++){
-            if (!slots[i]){ msg.textContent = '슬롯은 필수입니다.'; ev.preventDefault(); return; }
+        for (var i = 0; i < idxs.length; i++){
+            if (!idxs[i]){ msg.textContent = '노드 번호는 필수입니다.'; ev.preventDefault(); return; }
             if (!mgmts[i]){ msg.textContent = '관리번호는 필수입니다.'; ev.preventDefault(); return; }
-            if (seen[slots[i]]){ msg.textContent = '슬롯 중복: ' + slots[i]; ev.preventDefault(); return; }
-            seen[slots[i]] = true;
-            if (usedSlots.indexOf(slots[i]) !== -1){ msg.textContent = '이미 사용 중인 슬롯: ' + slots[i]; ev.preventDefault(); return; }
+            if (seen[idxs[i]]){ msg.textContent = '노드 번호 중복: ' + idxs[i]; ev.preventDefault(); return; }
+            seen[idxs[i]] = true;
+            if (usedIndexes.indexOf(idxs[i]) !== -1){ msg.textContent = '이미 사용 중인 노드 번호: ' + idxs[i]; ev.preventDefault(); return; }
         }
     });
 
-    // 초기 1~4행
+    // 초기 행 생성
     document.getElementById('genRows').click();
 })();
 </script>

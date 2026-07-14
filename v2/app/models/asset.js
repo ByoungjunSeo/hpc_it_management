@@ -161,9 +161,9 @@ const Asset = {
     return rows;
   },
 
-  // BL-2: 블레이드 노드 일괄 생성 — 단일 트랜잭션(전체 성공 또는 전체 롤백).
-  // nodes: [{ management_number, blade_slot, model_name, manufacturer, serial_number }]
-  // inherited: { asset_type, ownership, status, room_id, rack_id, rack_unit_start, rack_unit_size }
+  // BL-2/BUG-10: 블레이드 노드 일괄 생성 — 단일 트랜잭션(전체 성공 또는 전체 롤백).
+  // nodes: [{ management_number, node_index, model_name, manufacturer, serial_number }]
+  // inherited: { asset_type, ownership, status } — 위치는 상속하지 않음(BUG-9: 노드는 독립 물리 위치 없음)
   async bulkCreateNodes(parentId, nodes, inherited) {
     const client = await pool.connect();
     try {
@@ -172,13 +172,11 @@ const Asset = {
       for (const n of nodes) {
         const { rows } = await client.query(
           `INSERT INTO assets (management_number, asset_type, ownership, model_name, manufacturer, serial_number,
-             room_id, rack_id, rack_unit_start, rack_unit_size, parent_asset_id, blade_slot, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+             parent_asset_id, node_index, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
           [n.management_number, inherited.asset_type, inherited.ownership || 'company',
            n.model_name || null, n.manufacturer || null, n.serial_number || null,
-           inherited.room_id || null, inherited.rack_id || null,
-           inherited.rack_unit_start || null, normalizeUnitSize(inherited.rack_unit_size),
-           parentId, n.blade_slot, inherited.status || 'active']);
+           parentId, n.node_index, inherited.status || 'active']);
         ids.push(rows[0].id);
       }
       await client.query('COMMIT');
@@ -256,41 +254,47 @@ const Asset = {
   },
 
   async create(data) {
+    // BUG-9: 자식 노드(parent_asset_id 있음)는 독립 물리 위치를 가질 수 없다 — 위치 필드 강제 제거.
+    const isChild = !!data.parent_asset_id;
     const { rows } = await pool.query(`
       INSERT INTO assets (asset_number, management_number, asset_type, ownership, vendor_id,
         model_name, manufacturer, serial_number, room_id, rack_id, rack_unit_start, rack_unit_size,
         parent_asset_id, blade_slot,
         ip_address, ssh_port, ssh_user, ssh_password, assigned_user, purpose, status,
-        purchase_date, warranty_end, notes)
+        purchase_date, warranty_end, notes, node_index)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-              $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+              $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING id`,
       [data.asset_number, data.management_number, data.asset_type, data.ownership || 'company',
        data.vendor_id || null, data.model_name, data.manufacturer, data.serial_number,
-       data.room_id || null, data.rack_id || null, data.rack_unit_start || null, normalizeUnitSize(data.rack_unit_size),
+       isChild ? null : (data.room_id || null), isChild ? null : (data.rack_id || null),
+       isChild ? null : (data.rack_unit_start || null), normalizeUnitSize(data.rack_unit_size),
        data.parent_asset_id || null, data.blade_slot || null,
        data.ip_address, data.ssh_port || 22, data.ssh_user || 'root', data.ssh_password,
        data.assigned_user, data.purpose, data.status || 'active',
-       data.purchase_date || null, data.warranty_end || null, data.notes]
+       data.purchase_date || null, data.warranty_end || null, data.notes, data.node_index || null]
     );
     return rows[0].id;
   },
 
   async update(id, data) {
+    // BUG-9: 자식 노드는 위치 필드를 쓸 수 없다 — parent_asset_id 있으면 위치 강제 NULL.
+    const isChild = !!data.parent_asset_id;
     return pool.query(`
       UPDATE assets SET asset_number=$1, management_number=$2, asset_type=$3, ownership=$4, vendor_id=$5,
         model_name=$6, manufacturer=$7, serial_number=$8, room_id=$9, rack_id=$10, rack_unit_start=$11, rack_unit_size=$12,
         parent_asset_id=$13, blade_slot=$14,
         ip_address=$15, ssh_port=$16, ssh_user=$17, ssh_password=$18, assigned_user=$19, purpose=$20, status=$21,
-        purchase_date=$22, warranty_end=$23, notes=$24, updated_at=CURRENT_TIMESTAMP
-      WHERE id=$25`,
+        purchase_date=$22, warranty_end=$23, notes=$24, node_index=$25, updated_at=CURRENT_TIMESTAMP
+      WHERE id=$26`,
       [data.asset_number, data.management_number, data.asset_type, data.ownership || 'company',
        data.vendor_id || null, data.model_name, data.manufacturer, data.serial_number,
-       data.room_id || null, data.rack_id || null, data.rack_unit_start || null, normalizeUnitSize(data.rack_unit_size),
+       isChild ? null : (data.room_id || null), isChild ? null : (data.rack_id || null),
+       isChild ? null : (data.rack_unit_start || null), normalizeUnitSize(data.rack_unit_size),
        data.parent_asset_id || null, data.blade_slot || null,
        data.ip_address, data.ssh_port || 22, data.ssh_user || 'root', data.ssh_password,
        data.assigned_user, data.purpose, data.status || 'active',
-       data.purchase_date || null, data.warranty_end || null, data.notes, id]
+       data.purchase_date || null, data.warranty_end || null, data.notes, data.node_index || null, id]
     );
   },
 

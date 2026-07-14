@@ -146,7 +146,7 @@ function getAssetClass(info) {
                         <% if (af.children && af.children.length > 0) { %>
                         <div class="chassis-nodes">
                             <% af.children.forEach(function(child, idx) { %>
-                            <span class="chassis-node-tag" onclick="event.stopPropagation(); showAssetPopup(<%= child.id %>)" data-asset-id="<%= child.id %>">N<%= idx + 1 %></span>
+                            <span class="chassis-node-tag" onclick="event.stopPropagation(); showAssetPopup(<%= child.id %>)" data-asset-id="<%= child.id %>">N<%= child.node_index != null ? child.node_index : (idx + 1) %></span>
                             <% }) %>
                         </div>
                         <% } %>
@@ -337,7 +337,7 @@ function getAssetClass(info) {
             <% if (childrenMap[a.id] && childrenMap[a.id].length > 0) { %>
             <% childrenMap[a.id].forEach(function(child, idx) { %>
             <div class="rack-asset-item" style="padding-left:28px; font-size:12px; color:#475569;" onclick="showAssetPopup(<%= child.id %>)">
-                N<%= idx + 1 %> (<%= child.management_number %>)
+                N<%= child.node_index != null ? child.node_index : (idx + 1) %> (<%= child.management_number %>)
                 <% if (['server','storage','switch','kvm','other'].includes(child.asset_type)) { %>
                 <span class="asset-power-badge" data-asset-id="<%= child.id %>"></span>
                 <% } %>

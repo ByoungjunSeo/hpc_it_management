@@ -49,7 +49,8 @@ CREATE TABLE assets (
     purchase_date DATE,
     warranty_end DATE,
     notes TEXT,
-    blade_slot TEXT,
+    blade_slot TEXT,               -- 랙 렌더용 반폭 위치(left/right) 또는 스위치 슬롯(SW1..)
+    node_index INTEGER,            -- BUG-10: 블레이드 노드 번호(부모 내 유일). 자산 식별용, blade_slot과 무관
     room_id INTEGER
         REFERENCES server_rooms(id) ON DELETE SET NULL ON UPDATE CASCADE,
     parent_asset_id INTEGER
@@ -63,9 +64,10 @@ CREATE INDEX idx_assets_rack ON assets(rack_id);
 CREATE INDEX idx_assets_type ON assets(asset_type);
 CREATE INDEX idx_assets_ownership ON assets(ownership);
 CREATE INDEX idx_assets_parent ON assets(parent_asset_id);
--- BL-2: 같은 부모(섀시) 아래 blade_slot 유일성 — 부모/슬롯 지정 노드에 한함(부분 유니크)
-CREATE UNIQUE INDEX idx_assets_parent_slot_unique ON assets(parent_asset_id, blade_slot)
-    WHERE parent_asset_id IS NOT NULL AND blade_slot IS NOT NULL;
+-- BUG-10: 같은 부모(섀시) 아래 node_index 유일성 — 부모/번호 지정 노드에 한함(부분 유니크).
+-- (구 idx_assets_parent_slot_unique(blade_slot 기반)를 대체 — blade_slot은 렌더용 의미로 원복)
+CREATE UNIQUE INDEX idx_assets_parent_node_unique ON assets(parent_asset_id, node_index)
+    WHERE parent_asset_id IS NOT NULL AND node_index IS NOT NULL;
 
 -- =========================
 -- Level 3: assets 참조 테이블

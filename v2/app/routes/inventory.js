@@ -328,6 +328,7 @@ router.post('/incoming', requireMaintenance, upload.array('photos', 10), async (
             purchase_date: req.body.purchase_date || null,
             warranty_end: req.body.warranty_end || null,
             parent_asset_id: chassisId,
+            node_index: i, // BUG-10: 노드 번호 부여(같은 부모 내 유일 — 부분 유니크 인덱스로 보장)
             notes: req.body.notes || null
           });
 
@@ -844,18 +845,10 @@ router.post('/', requireMaintenance, async (req, res) => {
                 await pool.query('UPDATE assets SET shelf_size = $1 WHERE id = $2', [shelfSize, asset.id]);
               }
 
-              // If this is a node, sync location to parent chassis
-              if (asset.parent_asset_id && (updateFields.room_id || updateFields.rack_id || updateFields.rack_unit_start)) {
-                const parentAsset = await Asset.findById(asset.parent_asset_id);
-                if (parentAsset) {
-                  const parentUpdate = { ...parentAsset };
-                  if (updateFields.room_id) parentUpdate.room_id = updateFields.room_id;
-                  if (updateFields.rack_id) parentUpdate.rack_id = updateFields.rack_id;
-                  if (updateFields.rack_unit_start) parentUpdate.rack_unit_start = updateFields.rack_unit_start;
-                  if (updateFields.rack_unit_size) parentUpdate.rack_unit_size = updateFields.rack_unit_size;
-                  await Asset.update(parentAsset.id, parentUpdate);
-                }
-              }
+              // BUG-9: 자식→부모 위치 동기화 블록 제거.
+              // 블레이드 노드는 물리적으로 섀시를 벗어날 수 없어 독립 위치가 성립하지 않으며,
+              // 자식 등록이 부모 섀시 위치를 덮어쓰는 버그의 원인이었다. 자식 위치는 Asset.update의
+              // 모델 가드가 강제 NULL 처리한다(위 line: Asset.update(asset.id, ...)).
             }
 
             // Sync IPs → asset_ips table

@@ -94,6 +94,17 @@
 
     <div class="card-header mt-2"><h2>위치 정보</h2></div>
 
+    <% if (asset && asset.parent_asset_id) { %>
+    <%# BUG-9: 블레이드 노드(자식)는 독립 물리 위치가 없다 — 위치 입력 숨김, 부모 참조 안내 %>
+    <div class="form-row"><div class="form-group" style="flex:1">
+        <div style="padding:10px 12px; background:#fef9c3; border:1px solid #fde047; border-radius:4px; font-size:13px; color:#713f12;">
+            이 자산은 <b>블레이드 노드</b>(부모 섀시에 속함)입니다. 물리 위치는 <b>부모 섀시</b>를 따르며 개별 위치(서버실·랙·U)를 지정할 수 없습니다. (BUG-9)
+        </div>
+    </div></div>
+    <% } %>
+    <%# 위치 입력 컨테이너: 자식이면 숨김(요소는 DOM에 유지 — JS null 참조 방지) %>
+    <div <% if (asset && asset.parent_asset_id) { %>style="display:none" aria-hidden="true"<% } %>>
+
     <%
       // Determine current location type from asset's room
       const curLocType = (function() {
@@ -217,6 +228,7 @@
             <div id="rackPreviewContainer" style="max-height:500px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:4px; background:#f8fafc;"></div>
         </div>
     </div>
+    </div><%# /위치 입력 컨테이너 %>
 
     <%
       const lr = (typeof linkedRack !== 'undefined' && linkedRack) ? linkedRack : null;
