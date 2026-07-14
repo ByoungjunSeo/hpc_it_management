@@ -13,6 +13,10 @@
           <% } else { %>
           <button class="btn btn-secondary" disabled title="등록된 SSH 자격증명 없음" style="opacity:.5;cursor:not-allowed;">SSH 터미널</button>
           <% } %>
+          <%# BL-2: 블레이드 노드 일괄 등록 — 관리자 한정, 서버/스토리지 자산에서만 %>
+          <% if (['server', 'storage'].includes(asset.asset_type)) { %>
+          <a href="/assets/<%= asset.id %>/nodes/bulk" class="btn btn-outline">노드 일괄 등록</a>
+          <% } %>
         <% } %>
         <form method="POST" action="/assets/<%= asset.id %>/delete" style="display:inline" onsubmit="return confirmDelete('이 자산을 삭제하시겠습니까?')">
             <button type="submit" class="btn btn-danger">삭제</button>

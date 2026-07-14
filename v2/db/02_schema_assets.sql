@@ -63,6 +63,9 @@ CREATE INDEX idx_assets_rack ON assets(rack_id);
 CREATE INDEX idx_assets_type ON assets(asset_type);
 CREATE INDEX idx_assets_ownership ON assets(ownership);
 CREATE INDEX idx_assets_parent ON assets(parent_asset_id);
+-- BL-2: 같은 부모(섀시) 아래 blade_slot 유일성 — 부모/슬롯 지정 노드에 한함(부분 유니크)
+CREATE UNIQUE INDEX idx_assets_parent_slot_unique ON assets(parent_asset_id, blade_slot)
+    WHERE parent_asset_id IS NOT NULL AND blade_slot IS NOT NULL;
 
 -- =========================
 -- Level 3: assets 참조 테이블

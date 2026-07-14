@@ -357,6 +357,96 @@ router.get('/:id/terminal', requireAdmin, async (req, res) => {
   }
 });
 
+// BL-2: 블레이드 노드 일괄 등록 — 부모(섀시) 판별 = server/storage 계열(관리자 한정)
+function isBladeParent(asset) {
+  return asset && ['server', 'storage'].includes(asset.asset_type);
+}
+
+// BL-2 폼 (관리자 한정)
+router.get('/:id/nodes/bulk', requireAdmin, async (req, res) => {
+  try {
+    const parent = await Asset.findById(req.params.id);
+    if (!parent) { req.flash('error', '자산을 찾을 수 없습니다.'); return res.redirect('/assets'); }
+    if (!isBladeParent(parent)) { req.flash('error', '블레이드 노드 일괄 등록은 서버/스토리지 자산에서만 가능합니다.'); return res.redirect('/assets/' + parent.id); }
+    const children = await Asset.findChildren(parent.id);
+    const usedSlots = children.map(c => c.blade_slot).filter(Boolean);
+    res.render('assets/node-bulk', {
+      title: '노드 일괄 등록 - ' + (parent.management_number || parent.model_name || parent.id),
+      currentPath: '/assets', extraCss: null, extraJs: null,
+      parent, usedSlots,
+      // 상속 요약(위치·소유·상태) — 제출 시 서버에서 부모 값 복사
+      inherited: {
+        room_name: parent.room_name, rack_name: parent.rack_name,
+        rack_unit_start: parent.rack_unit_start, rack_unit_size: parent.rack_unit_size,
+        ownership: parent.ownership, status: parent.status
+      }
+    });
+  } catch (err) {
+    req.flash('error', '노드 일괄 등록 폼 로드 실패: ' + err.message);
+    res.redirect('/assets/' + req.params.id);
+  }
+});
+
+// BL-2 제출 (관리자 한정) — 단일 트랜잭션(전체 성공 또는 전체 롤백)
+router.post('/:id/nodes/bulk', requireAdmin, async (req, res) => {
+  const backUrl = '/assets/' + req.params.id + '/nodes/bulk';
+  try {
+    const parent = await Asset.findById(req.params.id);
+    if (!parent || !isBladeParent(parent)) { req.flash('error', '유효한 부모 자산이 아닙니다.'); return res.redirect('/assets'); }
+
+    // 행 배열 파싱
+    const slots = [].concat(req.body['node_slot[]'] || req.body.node_slot || []);
+    const mgmts = [].concat(req.body['node_mgmt[]'] || req.body.node_mgmt || []);
+    const models = [].concat(req.body['node_model[]'] || req.body.node_model || []);
+    const manufs = [].concat(req.body['node_manuf[]'] || req.body.node_manuf || []);
+    const serials = [].concat(req.body['node_serial[]'] || req.body.node_serial || []);
+    const nodes = slots.map((s, i) => ({
+      blade_slot: String(s || '').trim(),
+      management_number: String(mgmts[i] || '').trim(),
+      model_name: (models[i] || '').trim() || null,
+      manufacturer: (manufs[i] || '').trim() || null,
+      serial_number: (serials[i] || '').trim() || null
+    })).filter(n => n.blade_slot || n.management_number); // 빈 행 제거
+
+    // 검증
+    if (nodes.length === 0) throw new Error('등록할 노드가 없습니다.');
+    for (const n of nodes) {
+      if (!n.blade_slot) throw new Error('슬롯은 필수입니다.');
+      if (!n.management_number) throw new Error('관리번호는 필수입니다(슬롯 ' + n.blade_slot + ').');
+    }
+    // 제출 내 슬롯 중복
+    const slotSet = new Set(); for (const n of nodes) { if (slotSet.has(n.blade_slot)) throw new Error('제출 내 슬롯 중복: ' + n.blade_slot); slotSet.add(n.blade_slot); }
+    // 제출 내 관리번호 중복
+    const mgmtSet = new Set(); for (const n of nodes) { if (mgmtSet.has(n.management_number)) throw new Error('제출 내 관리번호 중복: ' + n.management_number); mgmtSet.add(n.management_number); }
+    // 기존 슬롯 충돌(같은 부모)
+    const children = await Asset.findChildren(parent.id);
+    const usedSlots = new Set(children.map(c => c.blade_slot).filter(Boolean));
+    for (const n of nodes) if (usedSlots.has(n.blade_slot)) throw new Error('이미 사용 중인 슬롯: ' + n.blade_slot);
+    // 관리번호 기존 자산 중복
+    const { rows: dup } = await pool.query('SELECT management_number FROM assets WHERE management_number = ANY($1)', [nodes.map(n => n.management_number)]);
+    if (dup.length) throw new Error('이미 존재하는 관리번호: ' + dup.map(d => d.management_number).join(', '));
+
+    const inherited = {
+      asset_type: parent.asset_type, ownership: parent.ownership, status: parent.status,
+      room_id: parent.room_id, rack_id: parent.rack_id,
+      rack_unit_start: parent.rack_unit_start, rack_unit_size: parent.rack_unit_size
+    };
+    const ids = await Asset.bulkCreateNodes(parent.id, nodes, inherited);
+
+    // audit: 배치 1건(입고 다중노드 관례 준용) — 생성 id 목록 포함
+    await AuditLog.log(req, {
+      action: 'create', targetType: 'asset_node_bulk', targetId: parent.id,
+      targetLabel: '노드 일괄 등록: ' + (parent.management_number || parent.id) + ' (' + ids.length + '노드)',
+      details: { parent_id: parent.id, count: ids.length, created_ids: ids, slots: nodes.map(n => n.blade_slot) }
+    });
+    req.flash('success', ids.length + '개 노드를 등록했습니다.');
+    res.redirect('/assets/' + parent.id);
+  } catch (err) {
+    req.flash('error', '노드 일괄 등록 실패(전체 취소): ' + err.message);
+    res.redirect(backUrl);
+  }
+});
+
 // Asset detail
 router.get('/:id', async (req, res) => {
   try {
