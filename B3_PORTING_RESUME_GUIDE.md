@@ -1,6 +1,6 @@
 # B-3 이후 애플리케이션 이식 — 재개 가이드
 
-> 작성일: 2026-06-26 / 최종 현행화: 2026-07-15 (T3 BMC SOL 웹 콘솔 구현)
+> 작성일: 2026-06-26 / 최종 현행화: 2026-07-15 ([BMC 웹] + SUX 묶음 · T1 -E 전환)
 > 작성 목적: 서버 종료 전 맥락 보존. 재개 시 이 문서 + git log부터 확인.
 
 > ★ **BUG-9/10 종결 (2026-07-15, 운영 반영·실장비 인수 완료)**: BL-2 후속 조사 2건 + BUG-9 후속.
@@ -126,7 +126,14 @@ ALTER 대상 테이블 없음)·**U-2**(encrypt가 v2/scripts라 이미지·dist
 - 웹 SSH 콘솔 = T2로 충족. **BL-4b(마스터-디테일 레이아웃) = v2.2+ 연기** — BL-2의 조건부 폼
   (섀시/노드 선택 분기)도 이 트랙에서 함께 처리. BL-4 자체는 이번 마디로 종결.
 
-## ★ T3 BMC SOL 웹 콘솔 (구현 완료 2026-07-15, 운영 반영 대기)
+## ★ T3 BMC SOL 웹 콘솔 (구현·운영 반영 완료 2026-07-15 · 실장비 인수 보류)
+
+> **상태(2026-07-15)**: 구현·운영 반영 완료. **실장비 검증에서 BMC·브릿지는 이상 무**(MEGARAC SPX·
+> ASMB11-iKVM 웹 UI 도달 확인, SOL 브릿지 정상). 다만 **대상 실장비 2대 모두 장비 OS에 직렬 콘솔
+> (console=ttyS…)이 미설정**이라 SOL 화면이 비어 실장비 인수만 보류(실 tty에서도 동일 무반응 —
+> 코드 결함 아님). **직렬 콘솔이 설정된 장비 확보 후 인수**(→ SUX-7). 실전 교훈: 잔류 SOL 세션
+> ("SOL payload already active")이 후속 접속을 차단 → 이번 마디에서 자동 재시도·안내로 보강.
+
 
 - **구현**: 신규 `services/solTerminal.js`(T2 골격 복제 — 접속부만 ssh2 → `child_process.spawn(ipmitool
   … sol activate)`). ws 경로 `/ws/sol-terminal`. server.js는 **단일 upgrade 디스패처**로 리팩터
@@ -144,8 +151,29 @@ ALTER 대상 테이블 없음)·**U-2**(encrypt가 v2/scripts라 이미지·dist
   미지 ws 경로 거절 — 전부 PASS. 신규 npm 0·DDL 0.
 - **운영 반영**: 재시작 1회. 실 BMC 2대 브라우저 인수(접속·프롬프트 수신·키 입력·종료 후 `sol info`
   잔류 세션 없음·중복 거절·SSH 공존·audit 3종·비관리자 미노출). 상세: `/tmp/6cCG_report.md`.
-- **후속 제안**: T1 전원제어(racks.js)의 `-P`(argv 노출) → `-E`(env) 전환을 SOL과 동일하게 정리(별도 마디).
 - **T4 백업 UI**(원격 접속과 무관, 별도 트랙)는 이후.
+
+## ★ 소형 마디: [BMC 웹] 버튼 + SUX 묶음 (구현 완료 2026-07-15, 운영 반영 대기)
+
+- **[BMC 웹] 버튼(신규)**: bmc IP만 있으면 `https://<bmc_ip>` 새 탭(noopener) — 자산 상세·랙 팝업,
+  [SSH 터미널][BMC 콘솔] 옆. **전 사용자 노출**(IP는 팝업에 이미 보이는 정보, 자격증명 불요·자동로그인
+  없음). `/json`에 `bmcWebUrl` 추가. 비활성 툴팁 "등록된 BMC IP 없음", 안내 "계정은 접속정보 [복사] 이용".
+- **SUX-6 — T1 전원제어 `-P`→`-E` 전환(완료)**: `utils/ipmi.js` 공통 헬퍼(ipmiArgs/ipmiEnv/ipmiSpawn/
+  ipmiExecFile) 신설 → racks.js 전원제어(status/control)·solTerminal 양쪽이 동일하게 `-E`+`IPMI_PASSWORD`
+  env 사용(argv 비밀번호 제거). **실측 확정**: ipmitool 1.8.18은 `-E`+`IPMI_PASSWORD` env 설정 시 정상,
+  env 미설정 시에만 "Unable to read password from environment" → spawn env로 반드시 채워 전달(해결).
+  DRYRUN도 `-E` args(비밀번호 부재) 반환. (남은 `-P`: sshDiscovery `runIpmiCommand`는 discovery 트랙 —
+  후속.)
+- **SUX-1 — 입출고 이력 [삭제] 문구(완료)**: confirm을 "이 입출고 이력 1건만 삭제됩니다. 자산 자체는
+  삭제되지 않습니다(자산 삭제는 자산 관리에서)…"로 교체.
+- **SOL 다듬기(C, 완료)**: `tcgetattr: Inappropriate ioctl` 등 무해 잡음 라인 필터, "SOL payload already
+  active" 감지 시 **1회 자동 재시도**(선제 deactivate→activate)+친화 안내, 콘솔 페이지에 "OS 직렬 콘솔
+  설정 필요" 안내 추가.
+- **격리 검증(suxtest, mock ipmitool + HTTP/ws 실경로)**: bmcWebUrl 유무·noopener·비관리자 노출 /
+  전원제어 실행·DRYRUN 모두 argv 비밀번호 0·PWENV=yes / tcgetattr 필터·already-active 재시도(activate×2)+
+  안내·친화 에러 / 삭제 문구 렌더 / SSH·SOL 회귀·pages 200·new Function 파싱 — 전부 PASS. 신규 npm 0·DDL 0.
+- **운영 반영**: 재시작 1회. 인수: BMC 웹 새 탭·비활성 툴팁·조회전용 노출 / 전원제어 실동작 1회 /
+  SOL 경고 줄 미표시·already-active 안내(재현 시). 상세: `/tmp/6cCI_report.md`.
 
 ## 1. 지금까지 완료 (커밋 기준)
 
