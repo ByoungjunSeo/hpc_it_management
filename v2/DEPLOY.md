@@ -167,8 +167,15 @@ docker compose -f docker-compose.prod.yml up -d
 - **목록/다운로드/삭제**: 목록에서 파일별 다운로드·삭제. 다운로드는 관리자만·감사 기록.
 - **복원 가이드**: [복원 가이드]로 이 서버 실값(컨테이너명·파일 경로)이 채워진 복원 명령을 표시(웹에서 복원을
   **직접 실행하지 않음** — 아래 CLI로 수행).
-- **요건**: `docker exec`로 DB 컨테이너에 접근하므로 **앱 실행 계정이 docker 그룹**이어야 하고, `.env`에
+- **요건**: `docker exec`로 DB 컨테이너에 접근하므로 **앱이 호스트의 docker에 접근 가능**해야 하고, `.env`에
   **`DB_CONTAINER_NAME`**(단독 DB 컨테이너면 예: `it-assets-db`)를 지정해야 합니다(§3 표).
+
+> ⚠ **표준 compose 배포에서는 웹 [백업 생성]이 동작하지 않습니다.** compose의 앱은 컨테이너로 실행되며
+> docker 소켓/CLI가 없어(보안상 미마운트) 컨테이너 안에서 `docker exec`를 할 수 없습니다. **compose 배포는
+> 백업 생성을 아래 §5-2 CLI(`bash scripts/backup.sh`, 호스트에서 실행)로 수행**하세요. 웹 백업 생성은 앱을
+> **호스트에서 직접 실행하고 그 계정이 docker 그룹인 배포**(예: systemd 노드 + 단독 DB 컨테이너)에서 동작합니다.
+> (compose의 앱 컨테이너에서 웹 백업까지 지원하는 방식은 후속 개선 항목 — 릴리스 노트 Known limitation 참조.)
+> ※ 웹 백업은 `backups/db/`에, CLI(`backup.sh`)는 `backups/`에 저장하므로 서로 목록이 겹치지 않습니다.
 
 ### 5-2. CLI 백업/복원
 ```bash
