@@ -311,7 +311,7 @@
                         </form>
                         <% } %>
                         <a href="/inventory/<%= log.id %>/edit" class="btn btn-sm btn-outline">✎ 수정</a>
-                        <form method="POST" action="/inventory/<%= log.id %>/delete" style="display:inline" onsubmit="return confirm('삭제하시겠습니까?')">
+                        <form method="POST" action="/inventory/<%= log.id %>/delete" style="display:inline" onsubmit="return confirm('이 입출고 이력 1건만 삭제됩니다. 자산 자체는 삭제되지 않습니다(자산 삭제는 자산 관리에서). 삭제할까요?')">
                             <button type="submit" class="btn btn-sm btn-danger">✕ 삭제</button>
                         </form>
                     </td>
