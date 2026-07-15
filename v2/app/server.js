@@ -234,6 +234,33 @@ server.on('upgrade', (req, socket, head) => {
   socket.destroy();
 });
 
+// BUG-12: 기동 시 스키마 자체점검 — 오래된/불완전 스키마(예: 재설치 시 남은 pgdata 볼륨)로
+// 인한 런타임 "column ... does not exist" 혼란을 기동 단계의 명확한 진단으로 바꾼다.
+// DB 미도달은 무시(pool이 별도 처리), 컬럼이 '확실히' 없을 때만 안내(경고 — 기동은 유지).
+async function schemaSelfCheck() {
+  const REQUIRED = [
+    ['asset_credentials', 'password_enc'], // BL-11
+    ['assets', 'node_index'],              // BUG-10
+    ['lending_items', 'returned_quantity'] // BL-13
+  ];
+  try {
+    const { rows } = await pool.query(
+      `SELECT table_name || '.' || column_name AS c FROM information_schema.columns WHERE table_schema='public'`);
+    const have = new Set(rows.map(r => r.c));
+    const missing = REQUIRED.filter(([t, c]) => !have.has(t + '.' + c)).map(([t, c]) => t + '.' + c);
+    if (missing.length) {
+      console.error('[schema] ⚠ DB 스키마가 최신이 아닙니다 — 누락 컬럼: ' + missing.join(', '));
+      console.error('[schema]   신규 설치인데 이 경고가 보이면 pgdata 볼륨에 이전(오래된) 스키마가 남은 것입니다.');
+      console.error('[schema]   → 신규 설치: `docker compose -f docker-compose.prod.yml down -v` 후 재기동(데이터 삭제 주의).');
+      console.error('[schema]   → 업그레이드: DEPLOY.md §6 마이그레이션(db/migrations/*.sql)을 순서대로 적용.');
+    }
+  } catch (e) {
+    // DB 미도달/권한 등 — 자체점검은 진단용이므로 기동을 막지 않는다.
+    console.warn('[schema] 자체점검 건너뜀(DB 조회 실패): ' + (e.code || e.message));
+  }
+}
+schemaSelfCheck();
+
 const PORT = process.env.APP_PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`IT Asset Management v2 running on http://0.0.0.0:${PORT}`);

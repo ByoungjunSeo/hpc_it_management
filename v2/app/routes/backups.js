@@ -10,11 +10,12 @@ router.use(requireAdmin);
 // 목록 + 생성 폼 + (선택) 복원 가이드 섹션
 router.get('/', async (req, res) => {
   try {
+    const dir = backup.dirStatus();          // BUG-13: 디렉터리 사용 불가여도 페이지는 렌더(대시보드 전파 차단)
     const backups = backup.listBackups();
     const guide = req.query.guide ? backup.restoreContext(req.query.guide) : null;
     res.render('backups/index', {
       title: '백업 관리', currentPath: '/backups', extraCss: null, extraJs: null,
-      backups, keep: backup.KEEP, dbContainer: backup.DB_CONTAINER, guide
+      backups, keep: backup.KEEP, dbContainer: backup.DB_CONTAINER, guide, dir
     });
   } catch (err) {
     req.flash('error', '백업 목록 로드 실패: ' + err.message);

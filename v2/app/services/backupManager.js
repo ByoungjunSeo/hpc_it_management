@@ -20,6 +20,17 @@ const DUMP_RE = /^itassets_\d{8}_\d{6}\.dump$/;
 const UPLOADS_RE = /^itassets_\d{8}_\d{6}\.uploads\.tar\.gz$/;
 
 function ensureDir() { fs.mkdirSync(BACKUP_DIR, { recursive: true }); }
+// BUG-13: 백업 디렉터리 접근성(생성·쓰기 가능) 상태만 반환 — 실패해도 페이지가 죽지 않게.
+// compose 앱은 WORKDIR /app 기준이라 기본 경로가 /backups/db(루트)로 풀려 비루트 mkdir가 EACCES.
+function dirStatus() {
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+    fs.accessSync(BACKUP_DIR, fs.constants.W_OK);
+    return { ok: true, dir: BACKUP_DIR };
+  } catch (e) {
+    return { ok: false, dir: BACKUP_DIR, reason: e.code || e.message };
+  }
+}
 function scrub(s) { return String(s || '').replace(/\s+/g, ' ').trim().slice(0, 500); }
 function stamp() {
   const d = new Date(); const p = n => String(n).padStart(2, '0');
@@ -39,7 +50,7 @@ function resolveBackupFile(name) {
 }
 
 function listBackups() {
-  ensureDir();
+  if (!dirStatus().ok) return []; // BUG-13: 디렉터리 사용 불가 시 빈 목록(페이지는 안내 표시, 크래시 없음)
   const all = fs.readdirSync(BACKUP_DIR);
   const upSet = new Set(all.filter(f => UPLOADS_RE.test(f)).map(f => f.replace('.uploads.tar.gz', '')));
   return all.filter(f => DUMP_RE.test(f)).map(f => {
@@ -96,7 +107,8 @@ function rotate() {
 }
 
 async function createBackup(opts) {
-  ensureDir();
+  const st = dirStatus();
+  if (!st.ok) throw new Error('백업 디렉터리를 쓸 수 없습니다(' + st.reason + '): ' + st.dir + ' — compose 환경은 호스트에서 scripts/backup.sh 를 사용하세요(DEPLOY §5-1).');
   const ts = stamp();
   const dumpName = 'itassets_' + ts + '.dump';
   const dumpPath = path.join(BACKUP_DIR, dumpName);
@@ -138,5 +150,5 @@ function restoreContext(name) {
 
 module.exports = {
   BACKUP_DIR, DB_CONTAINER, KEEP, DUMP_RE, UPLOADS_RE,
-  ensureDir, listBackups, resolveBackupFile, createBackup, deleteBackup, restoreContext, rotate
+  ensureDir, dirStatus, listBackups, resolveBackupFile, createBackup, deleteBackup, restoreContext, rotate
 };
