@@ -33,6 +33,11 @@ tar 안에 앱/DB docker 이미지 2종(오프라인 설치용), 설치 문서(D
 `docker compose up -d` → 브라우저 접속(`http://<서버IP>:3001`, 최초 admin / INITIAL_ADMIN_PASSWORD).
 DB 스키마(node_index·ssh_host_keys 포함)는 첫 기동 시 자동 생성됩니다.
 
+> ⚠ **재설치/이전 버전 위 재설치 시 볼륨 청결 필수.** DB 스키마는 **빈 데이터 볼륨에서만** 자동 생성됩니다.
+> 같은 서버에서 이전 버전을 설치한 적이 있으면 `pgdata` 볼륨이 남아 **구 스키마가 유지**되어 "신규 설치"인데도
+> `column ... does not exist` 오류가 날 수 있습니다. 완전 새 설치는 `docker compose -f docker-compose.prod.yml
+> down -v`(⚠ 데이터 삭제)로 볼륨을 비운 뒤 `up -d` 하세요. 앱은 기동 시 스키마 최신 여부를 점검해 로그로 안내합니다.
+
 ## 4. ★ 보안 필수 조치 (.env)
 
 `.env.example` → `.env` 복사 후 **CHANGE_ME 값 변경**. v2.1.0과 동일(POSTGRES_PASSWORD·

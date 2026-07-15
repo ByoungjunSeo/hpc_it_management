@@ -420,3 +420,50 @@ blade_slot 기반)는 NULL을 WHERE에서 제외 → 아무것도 막지 못함.
 입고 4노드 → node_index 1~4 자동. BL-2 5·6 등록 → 저장·blade_slot NULL 유지. 같은
 node_index 재시도 → 앱 거절 + 전체 롤백, DB 유니크 인덱스 위반도 backstop 확인.
 신규설치/업그레이드(마이그레이션) 스키마 동등성 확인. blade_slot left/right 렌더 정상.
+
+---
+
+## BUG-12: 신규 설치에서 자산 상세 `column "password_enc" does not exist` (Windows compose 스모크)
+- 상태: **[조사 완료 — HEAD 스키마 결함 아님] 2026-07-16** | 방침: 근본원인 규명 + 방어적 기동 점검
+- 관련: db/02_schema_assets.sql(BL-11 컬럼), docker-compose.prod.yml(pgdata 볼륨), app/server.js(기동 점검)
+
+### 증상 (Windows compose 신규 설치 스모크)
+자산 상세 조회 `column "password_enc" does not exist`, 랙 팝업(/json) 연쇄 실패. 등록·목록·랙 뷰는 정상.
+
+### 조사 결과 — HEAD는 정상
+- **HEAD 신규 설치 스키마(01~06)는 완결**: `asset_credentials.password_enc`는 da88d0b(BL-11) 이후
+  02에 포함(v2.1.0·HEAD 모두). **compose init(`db/`→initdb.d) 정확 재현 결과 password_enc 생성됨**,
+  자산 상세 쿼리·[보기]도 정상(격리 실증). **모든 마이그레이션 산물의 fresh 스키마 포함을 전수 감사 → 누락 0.**
+- **근본원인(추정)**: postgres `initdb.d`는 **빈 데이터 디렉터리에서만** 실행. compose 프로젝트명이
+  `it-assets`로 고정이라 이전(구버전·2.0.x 등 pre-BL-11) 설치가 남긴 **`pgdata` 명명 볼륨이 재사용**되면
+  새 스키마가 적용되지 않아 구 스키마(password_enc 없음)가 유지됨 → "신규 설치"인데 이 오류. 또는 pre-BL-11 dist 사용.
+
+### 조치 (수정된 모습)
+- **기동 스키마 자체점검 신설**(server.js): 필수 컬럼(password_enc·node_index·returned_quantity) 존재를
+  기동 시 점검 → 누락 시 **명확한 진단 로그**("스키마 최신 아님 … 신규설치면 `down -v` 후 재기동 /
+  업그레이드면 마이그레이션 적용"). 런타임의 혼란스러운 "column does not exist"를 기동 진단으로 전환.
+- **문서**: DEPLOY 재설치 시 볼륨 청결(`down -v`) 안내. (신규 마이그레이션·스키마 컬럼 추가 불요 — 이미 완결.)
+- **검증 관례 보강**: 스키마 동등성은 "fresh vs 마이그레이션 전수 적용"의 **객체 전수 감사**로, 릴리스 스모크에
+  **자산 상세·[보기]·에러 배너**까지 포함(6cCL가 상세는 200 봤으나 스키마-누락 시나리오는 볼륨 이슈라 미발현).
+
+---
+
+## BUG-13: compose에서 백업 페이지 `EACCES mkdir '/backups/db'` (경로 루트 절대화)
+- 상태: **[수정 완료] 2026-07-16** | 방침: 우아한 실패 + 경로 진단
+- 관련: app/services/backupManager.js, app/routes/backups.js, app/views/backups/index.ejs
+
+### 증상
+백업 관리 접근 시 `EACCES: permission denied, mkdir '/backups/db'`. 목록 로드부터 실패 →
+라우트가 `/`로 리다이렉트하며 flash 에러 → **대시보드에 에러 배너 전파**.
+
+### 원인
+`BACKUP_DIR` 기본값 `path.join(__dirname,'..','..','backups','db')`가 컨테이너(WORKDIR `/app`,
+`__dirname=/app/services`)에서 **`/backups/db`(루트 절대경로)** 로 풀림 → 비루트(node) 사용자 mkdir 불가.
+compose에 `BACKUP_DIR`·backups 볼륨 정의 없음.
+
+### 조치 (수정된 모습)
+- `backupManager.dirStatus()` 신설 — 디렉터리 생성·쓰기 가능 여부만 반환(throw 없음). `listBackups`는
+  불가 시 **빈 목록** 반환, `createBackup`은 **명확한 안내 에러**("compose는 scripts/backup.sh 사용").
+- 라우트: 디렉터리 불가여도 **페이지를 렌더**(대시보드 리다이렉트·에러 전파 차단), 상단 안내 배너 표시.
+- compose 파일에 backups 볼륨 **미추가**(단순성): compose 앱은 `docker exec` 자체가 불가(SUX-8)라 웹 백업
+  생성이 어차피 안 되므로, 빈 볼륨보다 **우아한 안내 + CLI 유도**가 적절. compose 백업은 §5-1 CLI로.
