@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { execFile } = require('child_process');
+const ipmi = require('../utils/ipmi'); // SUX-6: ipmitool 공통 호출(-E env)
 const Rack = require('../models/rack');
 const Asset = require('../models/asset');
 const AuditLog = require('../models/auditLog');
@@ -32,54 +32,41 @@ router.get('/:id/slots', async (req, res) => {
 });
 
 // IPMI power status check for all assets in a rack
-function ipmiPowerStatus(ip, user, pass) {
-  return new Promise((resolve) => {
-    execFile('ipmitool', ['-I', 'lanplus', '-H', ip, '-U', user, '-P', pass, 'chassis', 'power', 'status'],
-      { timeout: 5000 },
-      (err, stdout) => {
-        if (err) {
-          resolve({ status: 'error', message: '연결 실패' });
-          return;
-        }
-        const out = stdout.trim().toLowerCase();
-        if (out.includes('power is on')) resolve({ status: 'on', message: '전원 켜짐' });
-        else if (out.includes('power is off')) resolve({ status: 'off', message: '전원 꺼짐' });
-        else resolve({ status: 'unknown', message: out });
-      }
-    );
-  });
+// SUX-6: 비밀번호는 -E(IPMI_PASSWORD env)로 전달 — 공통 헬퍼(utils/ipmi) 사용.
+async function ipmiPowerStatus(ip, user, pass) {
+  const { err, stdout } = await ipmi.ipmiExecFile(ip, user, pass, ['chassis', 'power', 'status'], { timeout: 5000 });
+  if (err) return { status: 'error', message: '연결 실패' };
+  const out = stdout.trim().toLowerCase();
+  if (out.includes('power is on')) return { status: 'on', message: '전원 켜짐' };
+  if (out.includes('power is off')) return { status: 'off', message: '전원 꺼짐' };
+  return { status: 'unknown', message: out };
 }
 
 // BUG-2(T1) 복원: BMC 전원제어. 화이트리스트 on/off/reset(랙 팝업 버튼과 일치, cycle 미노출).
-// 자격증명은 호출측에서 복호화한 평문을 넘김(power-status와 동일 경로).
+// 자격증명은 호출측에서 복호화한 평문을 넘김(power-status와 동일 경로). SUX-6: -E env 방식.
 // ★ IPMI_DRYRUN=1 이면 실 BMC를 조작하지 않고 구성된 인자 배열만 반환(검증 전용, 운영 미설정).
-function ipmiPowerControl(ip, user, pass, action) {
+async function ipmiPowerControl(ip, user, pass, action) {
   const validActions = ['on', 'off', 'reset'];
   if (!validActions.includes(action)) {
-    return Promise.resolve({ success: false, message: '허용되지 않은 전원 명령: ' + action });
+    return { success: false, message: '허용되지 않은 전원 명령: ' + action };
   }
-  const args = ['-I', 'lanplus', '-H', ip, '-U', user, '-P', pass, 'chassis', 'power', action];
+  const tail = ['chassis', 'power', action];
   if (process.env.IPMI_DRYRUN === '1') {
-    // 검증용: 실행하지 않고 구성만 반환(비밀번호는 마스킹해 노출 방지)
-    const masked = args.map((a, i) => (args[i - 1] === '-P' ? '***' : a));
-    return Promise.resolve({ success: true, message: 'DRYRUN', dryrun: true, args: masked });
+    // 검증용: 실행하지 않고 구성만 반환. -E 방식이라 argv에 비밀번호가 없음(env로만).
+    return { success: true, message: 'DRYRUN', dryrun: true, args: ipmi.ipmiArgs(ip, user, tail), pwEnv: !!pass };
   }
-  return new Promise((resolve) => {
-    execFile('ipmitool', args, { timeout: 10000 }, (err, stdout, stderr) => {
-      if (err) {
-        const detail = (stderr || err.message || '').toLowerCase();
-        // BMC 미응답(도달 불가) vs 인증 실패 구분
-        const reason = /timeout|unable to establish|no route|network/.test(detail)
-          ? 'BMC 미응답(도달 불가 — IP·네트워크·전원 확인)'
-          : /auth|password|privilege|username|invalid user/.test(detail)
-            ? '인증 실패(BMC 자격증명 확인)'
-            : '명령 실행 실패: ' + (stderr || err.message);
-        resolve({ success: false, message: reason });
-        return;
-      }
-      resolve({ success: true, message: (stdout.trim() || (action + ' 명령 전송 완료')) });
-    });
-  });
+  const { err, stdout, stderr } = await ipmi.ipmiExecFile(ip, user, pass, tail, { timeout: 10000 });
+  if (err) {
+    const detail = (stderr || err.message || '').toLowerCase();
+    // BMC 미응답(도달 불가) vs 인증 실패 구분
+    const reason = /timeout|unable to establish|no route|network/.test(detail)
+      ? 'BMC 미응답(도달 불가 — IP·네트워크·전원 확인)'
+      : /auth|password|privilege|username|invalid user/.test(detail)
+        ? '인증 실패(BMC 자격증명 확인)'
+        : '명령 실행 실패: ' + (stderr || err.message);
+    return { success: false, message: reason };
+  }
+  return { success: true, message: (stdout.trim() || (action + ' 명령 전송 완료')) };
 }
 
 // Switch slots API - get occupied switch slots for immersion rack

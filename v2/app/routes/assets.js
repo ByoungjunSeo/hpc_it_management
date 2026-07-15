@@ -312,7 +312,10 @@ router.get('/:id/json', async (req, res) => {
     const sshAvailable = credentials.some(c => !sshTerminal.SSH_EXCLUDED_TYPES.includes(c.credential_type) && c.has_password);
     // T3 BMC SOL: 진입점 활성 판정 — BMC IP 존재 AND BMC 자격증명(값 있음) 존재. 자격증명 상세 미노출.
     const solAvailable = assetIps.some(i => i.ip_type === 'bmc') && credentials.some(c => c.credential_type === 'bmc' && c.has_password);
-    res.json({ asset, modules, assetIps, credentials, parent, children, sshAvailable, solAvailable });
+    // BMC 웹 UI: BMC IP만 있으면 활성(자격증명 불요 — 웹 로그인은 사용자 직접). IP는 이미 팝업에 노출된 정보.
+    const bmcIpRow = assetIps.find(i => i.ip_type === 'bmc');
+    const bmcWebUrl = bmcIpRow ? ('https://' + bmcIpRow.ip_address) : null;
+    res.json({ asset, modules, assetIps, credentials, parent, children, sshAvailable, solAvailable, bmcWebUrl });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

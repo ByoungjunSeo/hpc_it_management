@@ -748,10 +748,14 @@ function renderPopup(assetId, data) {
             ? '<a href="/assets/' + assetId + '/sol" class="btn btn-secondary">BMC 콘솔</a>'
             : '<button class="btn btn-secondary" disabled title="등록된 BMC IP/자격증명 없음" style="opacity:.5;cursor:not-allowed;">BMC 콘솔</button>';
     }
+    // BMC 웹 UI — 전 사용자 노출(IP만, 팝업에 이미 보이는 정보). 계정은 접속정보 [복사] 이용.
+    var webBtn = data.bmcWebUrl
+        ? '<a href="' + data.bmcWebUrl + '" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" title="BMC 웹 UI를 새 탭으로 엽니다. 계정은 접속정보의 [복사]를 이용하세요.">BMC 웹</a>'
+        : '<button class="btn btn-secondary" disabled title="등록된 BMC IP 없음" style="opacity:.5;cursor:not-allowed;">BMC 웹</button>';
     html += '<div class="btn-group mt-2">' +
         '<a href="/assets/' + assetId + '" class="btn btn-primary">상세 보기</a>' +
         '<a href="/assets/' + assetId + '/edit" class="btn btn-outline">수정</a>' +
-        sshBtn + solBtn +
+        sshBtn + solBtn + webBtn +
         '</div>';
     document.getElementById('popupContent').innerHTML = html;
 }
