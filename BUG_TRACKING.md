@@ -372,9 +372,11 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
 ---
 
 ## BUG-9: 자식 노드 사용등록이 부모 섀시 위치를 덮어씀
-- 상태: [수정 완료] 2026-07-15 (운영 반영 대기) | 방침: (나) 이식하며 수정 — 동기화 로직 전면 제거
-- 관련: app/routes/inventory.js(사용등록 POST), app/models/asset.js(update/create),
-  app/views/assets/form.ejs(자식 위치 입력 숨김)
+- 상태: **[종결] 2026-07-15 (운영 반영·실장비 인수 완료)** | 방침: (나) 이식하며 수정 — 동기화 로직 전면 제거
+- 후속: 사용등록·수정 폼이 노드에 임의 위치 입력을 허용해 EUL 이력이 부모와 어긋나던 구멍 →
+  폼 잠금(unit 프리필 포함) + 서버 검증(부모 위치 불일치 거절, 이중 방어). 커밋 `fix(bug9)`.
+- 관련: app/routes/inventory.js(사용등록·수정 POST), app/models/asset.js(update/create),
+  app/views/assets/form.ejs·views/inventory/form.ejs(자식 위치 숨김/잠금)
 
 ### 증상 (조사 6cCB 확정)
 입출고 **사용등록** 핸들러(inventory.js 구 847-858)의 "자식→부모 위치 동기화" 블록이
@@ -397,7 +399,7 @@ B-6c에서 inventory/form.ejs만 고쳐 동종 패턴이 다른 화면에 잔존
 ---
 
 ## BUG-10: 다노드 입고 노드의 blade_slot 미저장 + blade_slot 의미 충돌
-- 상태: [수정 완료] 2026-07-15 (운영 반영 대기) | 방침: (나) 이식하며 수정 — node_index 분리
+- 상태: **[종결] 2026-07-15 (운영 반영 완료 — node_index 마이그레이션 적용, 운영 DB 확인)** | 방침: (나) 이식하며 수정 — node_index 분리
 - 관련: app/routes/inventory.js(다노드 입고), app/routes/assets.js(BL-2), app/models/asset.js,
   app/views/assets/node-bulk.ejs, db/02_schema_assets.sql, db/migrations/2026-07-15_1_*.sql
 
