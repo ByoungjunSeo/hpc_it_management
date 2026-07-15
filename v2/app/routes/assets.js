@@ -310,7 +310,9 @@ router.get('/:id/json', async (req, res) => {
     // T2 랙 팝업: SSH 진입점 활성 판정용 불리언(자격증명 상세는 싣지 않음).
     //   자산 상세 [SSH 터미널] 버튼과 동일 기준(sshTerminal 상수 재사용) — BMC/IPMI 제외 + 값 있음.
     const sshAvailable = credentials.some(c => !sshTerminal.SSH_EXCLUDED_TYPES.includes(c.credential_type) && c.has_password);
-    res.json({ asset, modules, assetIps, credentials, parent, children, sshAvailable });
+    // T3 BMC SOL: 진입점 활성 판정 — BMC IP 존재 AND BMC 자격증명(값 있음) 존재. 자격증명 상세 미노출.
+    const solAvailable = assetIps.some(i => i.ip_type === 'bmc') && credentials.some(c => c.credential_type === 'bmc' && c.has_password);
+    res.json({ asset, modules, assetIps, credentials, parent, children, sshAvailable, solAvailable });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -353,6 +355,29 @@ router.get('/:id/terminal', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     req.flash('error', 'SSH 터미널 로드 실패: ' + err.message);
+    res.redirect('/assets/' + req.params.id);
+  }
+});
+
+// T3: 웹 BMC SOL 콘솔 (관리자 한정) — BMC IP + BMC 자격증명 있어야 접속.
+router.get('/:id/sol', requireAdmin, async (req, res) => {
+  try {
+    const asset = await Asset.findById(req.params.id);
+    if (!asset) { req.flash('error', '자산을 찾을 수 없습니다.'); return res.redirect('/assets'); }
+    const ips = await AssetIp.findByAsset(asset.id);
+    const creds = await AssetCredential.findByAssetMasked(asset.id); // 값 없음(id/type/has_password)
+    const bmcIp = ips.find(i => i.ip_type === 'bmc');
+    const bmcCred = creds.find(c => c.credential_type === 'bmc' && c.has_password);
+    res.render('assets/sol', {
+      title: 'BMC SOL 콘솔 - ' + (asset.management_number || asset.model_name || asset.id),
+      currentPath: '/assets', extraCss: null, extraJs: null,
+      asset,
+      bmcHost: bmcIp ? bmcIp.ip_address : '',
+      bmcUser: bmcCred ? bmcCred.username : '',
+      solAvailable: !!(bmcIp && bmcCred)
+    });
+  } catch (err) {
+    req.flash('error', 'BMC SOL 콘솔 로드 실패: ' + err.message);
     res.redirect('/assets/' + req.params.id);
   }
 });

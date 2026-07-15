@@ -13,6 +13,14 @@
           <% } else { %>
           <button class="btn btn-secondary" disabled title="등록된 SSH 자격증명 없음" style="opacity:.5;cursor:not-allowed;">SSH 터미널</button>
           <% } %>
+          <%# T3: BMC SOL 콘솔 — 관리자 한정, BMC IP + BMC 자격증명 있어야 활성 %>
+          <% const solOk = (typeof assetIps !== 'undefined') && assetIps.some(i => i.ip_type === 'bmc')
+                && (typeof assetCredentials !== 'undefined') && assetCredentials.some(c => c.credential_type === 'bmc' && c.has_password); %>
+          <% if (solOk) { %>
+          <a href="/assets/<%= asset.id %>/sol" class="btn btn-secondary">BMC 콘솔</a>
+          <% } else { %>
+          <button class="btn btn-secondary" disabled title="등록된 BMC IP/자격증명 없음" style="opacity:.5;cursor:not-allowed;">BMC 콘솔</button>
+          <% } %>
           <%# BL-2: 블레이드 노드 일괄 등록 — 관리자 한정, 서버/스토리지 자산에서만 %>
           <% if (['server', 'storage'].includes(asset.asset_type)) { %>
           <a href="/assets/<%= asset.id %>/nodes/bulk" class="btn btn-outline">노드 일괄 등록</a>

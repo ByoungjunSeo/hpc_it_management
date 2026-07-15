@@ -1,0 +1,82 @@
+<%- include('../partials/header', { title, currentPath, extraCss: undefined }) %>
+<link rel="stylesheet" href="/vendor/xterm/xterm.css">
+
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+    <h1>BMC SOL 콘솔 — <%= asset.management_number || asset.model_name || ('asset#' + asset.id) %></h1>
+    <a href="/assets/<%= asset.id %>" class="btn btn-secondary btn-sm">자산으로</a>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+    <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; padding:4px 0;">
+        <div class="form-group" style="flex:0 0 200px;">
+            <label>BMC IP</label>
+            <input type="text" class="form-control" value="<%= bmcHost %>" readonly style="background:#f1f5f9;">
+        </div>
+        <div class="form-group" style="flex:0 0 160px;">
+            <label>BMC 계정</label>
+            <input type="text" class="form-control" value="<%= bmcUser %>" readonly style="background:#f1f5f9;">
+        </div>
+        <div class="form-group">
+            <button id="tConnect" class="btn btn-primary">접속</button>
+            <button id="tDisconnect" class="btn btn-danger" disabled>연결 종료</button>
+        </div>
+        <span id="tStatus" style="align-self:center; font-size:12px; color:#94a3b8;">대기</span>
+    </div>
+    <% if (!solAvailable) { %>
+    <p style="color:#ef4444; font-size:13px;">등록된 BMC IP/자격증명이 없습니다. 자산 편집에서 BMC IP(ip_type=bmc)와 BMC 자격증명을 등록하세요.</p>
+    <% } else { %>
+    <p style="color:#64748b; font-size:12px; margin:4px 0 0;">직렬 콘솔(SOL)입니다. 종료는 <b>[연결 종료]</b>를 사용하세요(로컬 <code>~.</code> 이스케이프는 동작하지 않습니다). 연결 종료 시 서버가 <code>sol deactivate</code>로 세션을 정리합니다.</p>
+    <% } %>
+</div>
+
+<div id="terminal" style="height:520px; background:#1e1e1e; border-radius:6px; padding:6px;"></div>
+
+<script src="/vendor/xterm/xterm.js"></script>
+<script src="/vendor/xterm/addon-fit.js"></script>
+<script>
+(function(){
+    var assetId = <%= asset.id %>;
+    var hasBmc = <%= solAvailable ? 'true' : 'false' %>;
+    var term = new Terminal({ cursorBlink: true, fontSize: 13, theme: { background: '#1e1e1e' } });
+    var fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById('terminal'));
+    fit.fit();
+
+    var ws = null;
+    var statusEl = document.getElementById('tStatus');
+    var connectBtn = document.getElementById('tConnect');
+    var disconnectBtn = document.getElementById('tDisconnect');
+
+    function setStatus(txt, color) { statusEl.textContent = txt; statusEl.style.color = color || '#94a3b8'; }
+
+    function connect() {
+        if (!hasBmc) { setStatus('BMC 미등록', '#ef4444'); return; }
+        // 대상 BMC는 서버가 자산 기준으로 확정(폼 값은 표시용). assetId만 전달.
+        var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(proto + '//' + location.host + '/ws/sol-terminal?assetId=' + assetId);
+        setStatus('접속 중...', '#3b82f6');
+        connectBtn.disabled = true;
+
+        ws.onopen = function(){ setStatus('연결됨', '#22c55e'); disconnectBtn.disabled = false; };
+        ws.onmessage = function(ev){
+            var m; try { m = JSON.parse(ev.data); } catch(e){ return; }
+            if (m.type === 'data') term.write(m.data);
+            else if (m.type === 'warn') { term.write('\r\n\x1b[33m' + m.message + '\x1b[0m\r\n'); }
+            else if (m.type === 'error') { term.write('\r\n\x1b[31m' + m.message + '\x1b[0m\r\n'); setStatus('오류', '#ef4444'); }
+            else if (m.type === 'exit') { term.write('\r\n[세션 종료 code=' + m.code + ']\r\n'); }
+        };
+        ws.onclose = function(){ setStatus('연결 종료', '#94a3b8'); connectBtn.disabled = false; disconnectBtn.disabled = true; };
+        ws.onerror = function(){ setStatus('연결 오류', '#ef4444'); };
+    }
+
+    // 직렬 콘솔 — resize 개념 없음(서버가 무시). 입력만 전송.
+    term.onData(function(d){ if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'data', data: d })); });
+    window.addEventListener('resize', function(){ fit.fit(); });
+
+    connectBtn.addEventListener('click', connect);
+    disconnectBtn.addEventListener('click', function(){ if (ws) ws.close(); });
+})();
+</script>
+
+<%- include('../partials/footer') %>

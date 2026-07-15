@@ -159,26 +159,31 @@ async function handleConnection(ws, ctx) {
   pw = null; // 참조 해제(ssh2가 내부 복사본 보유)
 }
 
-// server.on('upgrade') 부착: 경로·세션·관리자 검증 후 handleConnection.
-function attach(server, sessionMiddleware) {
-  const wss = new WebSocket.Server({ noServer: true });
-  server.on('upgrade', (req, socket, head) => {
-    const parsed = url.parse(req.url, true);
-    if (parsed.pathname !== WS_PATH) { socket.destroy(); return; }
-    // 세션 파싱(HTTP 미들웨어 재적용) → 관리자만
-    sessionMiddleware(req, {}, () => {
-      const sess = req.session;
-      if (!sess || !sess.userId || sess.userRole !== 'admin') { socket.destroy(); return; } // 인증 실패는 조용히 거절
-      const assetId = parseInt(parsed.query.assetId, 10);
-      const credId = parsed.query.credId ? parseInt(parsed.query.credId, 10) : null;
-      if (!assetId) { socket.destroy(); return; }
-      const remoteIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        handleConnection(ws, { userId: sess.userId, username: sess.username, userRole: sess.userRole, remoteIp, assetId, credId })
-          .catch(err => { try { send(ws, { type: 'error', message: '내부 오류: ' + err.message }); ws.close(); } catch (_) {} });
-      });
+// T3: 단일 upgrade 디스패처(server.js)가 경로별로 handleUpgrade를 호출한다.
+// (SSH·SOL이 각자 server.on('upgrade')를 걸면 상대 경로 소켓을 destroy하는 충돌이 생기므로 분리.)
+let _wss = null;
+let _sessionMiddleware = null;
+function init(sessionMiddleware) {
+  _wss = new WebSocket.Server({ noServer: true });
+  _sessionMiddleware = sessionMiddleware;
+}
+
+// 경로 검증은 호출측(server.js)에서 완료. 세션·관리자 검증 후 handleConnection.
+function handleUpgrade(req, socket, head) {
+  if (!_wss) { socket.destroy(); return; }
+  const parsed = url.parse(req.url, true);
+  _sessionMiddleware(req, {}, () => {
+    const sess = req.session;
+    if (!sess || !sess.userId || sess.userRole !== 'admin') { socket.destroy(); return; } // 인증 실패는 조용히 거절
+    const assetId = parseInt(parsed.query.assetId, 10);
+    const credId = parsed.query.credId ? parseInt(parsed.query.credId, 10) : null;
+    if (!assetId) { socket.destroy(); return; }
+    const remoteIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    _wss.handleUpgrade(req, socket, head, (ws) => {
+      handleConnection(ws, { userId: sess.userId, username: sess.username, userRole: sess.userRole, remoteIp, assetId, credId })
+        .catch(err => { try { send(ws, { type: 'error', message: '내부 오류: ' + err.message }); ws.close(); } catch (_) {} });
     });
   });
 }
 
-module.exports = { attach, resolveTarget, resolveCredential, WS_PATH, SSH_EXCLUDED_TYPES, SSH_AUTO_PRIORITY };
+module.exports = { init, handleUpgrade, resolveTarget, resolveCredential, WS_PATH, SSH_EXCLUDED_TYPES, SSH_AUTO_PRIORITY };

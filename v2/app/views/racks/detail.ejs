@@ -738,17 +738,20 @@ function renderPopup(assetId, data) {
         }
     }
 
-    // T2: 관리자에게만 [SSH 터미널] 노출. 자격증명 없으면 비활성+툴팁(자산 상세와 동일 문구).
-    var sshBtn = '';
+    // T2/T3: 관리자에게만 [SSH 터미널]·[BMC 콘솔] 노출. 자격증명 없으면 비활성+툴팁(자산 상세와 동일 문구).
+    var sshBtn = '', solBtn = '';
     if (POPUP_IS_ADMIN) {
         sshBtn = data.sshAvailable
             ? '<a href="/assets/' + assetId + '/terminal" class="btn btn-secondary">SSH 터미널</a>'
             : '<button class="btn btn-secondary" disabled title="등록된 SSH 자격증명 없음" style="opacity:.5;cursor:not-allowed;">SSH 터미널</button>';
+        solBtn = data.solAvailable
+            ? '<a href="/assets/' + assetId + '/sol" class="btn btn-secondary">BMC 콘솔</a>'
+            : '<button class="btn btn-secondary" disabled title="등록된 BMC IP/자격증명 없음" style="opacity:.5;cursor:not-allowed;">BMC 콘솔</button>';
     }
     html += '<div class="btn-group mt-2">' +
         '<a href="/assets/' + assetId + '" class="btn btn-primary">상세 보기</a>' +
         '<a href="/assets/' + assetId + '/edit" class="btn btn-outline">수정</a>' +
-        sshBtn +
+        sshBtn + solBtn +
         '</div>';
     document.getElementById('popupContent').innerHTML = html;
 }

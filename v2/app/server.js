@@ -221,9 +221,18 @@ process.on('uncaughtException', (err) => {
 const http = require('http');
 const server = http.createServer(app);
 
-// T2: 웹 SSH 터미널 ws — /ws/ssh-terminal 만 처리, 그 외 upgrade는 소켓 종료.
+// T2/T3: 웹 콘솔 ws — 단일 upgrade 디스패처가 경로별로 분기(SSH·SOL 공존, 그 외 소켓 종료).
 const sshTerminal = require('./services/sshTerminal');
-sshTerminal.attach(server, sessionMiddleware);
+const solTerminal = require('./services/solTerminal');
+sshTerminal.init(sessionMiddleware);
+solTerminal.init(sessionMiddleware);
+server.on('upgrade', (req, socket, head) => {
+  let pathname;
+  try { pathname = require('url').parse(req.url).pathname; } catch (_) { socket.destroy(); return; }
+  if (pathname === sshTerminal.WS_PATH) return sshTerminal.handleUpgrade(req, socket, head);
+  if (pathname === solTerminal.WS_PATH) return solTerminal.handleUpgrade(req, socket, head);
+  socket.destroy();
+});
 
 const PORT = process.env.APP_PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
