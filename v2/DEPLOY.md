@@ -119,6 +119,8 @@ docker compose -f docker-compose.prod.yml up -d
 | SOL_TERM_MAX_TOTAL | | 웹 BMC SOL 콘솔 전체 동시 세션 상한(기본 3) |
 | SOL_TERM_MAX_PER_USER | | 웹 BMC SOL 콘솔 사용자당 동시 세션 상한(기본 1) |
 | SOL_TERM_IDLE_MINUTES | | 웹 BMC SOL 콘솔 유휴(무입력) 타임아웃 분(기본 15) |
+| DB_CONTAINER_NAME | 백업 사용 시 | 웹 백업 관리·backup.sh/restore.sh가 `docker exec`할 **DB 컨테이너명**. 기본값 `it-assets-db-1`(compose 표준). **compose 표준명과 다르면 반드시 지정**(예 단독 DB 컨테이너 `it-assets-db`) |
+| BACKUP_KEEP_COUNT | | 웹 백업 보존 개수(기본 14). 생성 시 초과분을 오래된 순 자동 삭제 |
 | OLLAMA_HOST / PORT / MODEL | | AI 스펙조회(선택). 미기동이어도 앱 정상 |
 
 > **서브넷 등록은 IP 관리 화면의 [＋ 서브넷 등록]이 표준입니다** (CIDR /16~/30, 등록 시 IP 풀 자동 생성).
@@ -158,16 +160,35 @@ docker compose -f docker-compose.prod.yml up -d
 
 ## 5. 백업 / 복원
 
+### 5-1. 웹 백업 관리 (관리자 · 권장)
+관리자 메뉴 **[백업 관리]**(`/backups`)에서:
+- **생성**: [백업 생성](사진 포함 옵션) → `db/itassets_YYYYMMDD_HHMMSS.dump`(pg_dump `-Fc`) 생성. `BACKUP_KEEP_COUNT`
+  개(기본 14) 초과분 자동 정리.
+- **목록/다운로드/삭제**: 목록에서 파일별 다운로드·삭제. 다운로드는 관리자만·감사 기록.
+- **복원 가이드**: [복원 가이드]로 이 서버 실값(컨테이너명·파일 경로)이 채워진 복원 명령을 표시(웹에서 복원을
+  **직접 실행하지 않음** — 아래 CLI로 수행).
+- **요건**: `docker exec`로 DB 컨테이너에 접근하므로 **앱 실행 계정이 docker 그룹**이어야 하고, `.env`에
+  **`DB_CONTAINER_NAME`**(단독 DB 컨테이너면 예: `it-assets-db`)를 지정해야 합니다(§3 표).
+
+### 5-2. CLI 백업/복원
 ```bash
 # 백업 (db dump + uploads tar, backups/에 타임스탬프 + 14개 회전)
 bash scripts/backup.sh
 
-# 복원 (복원 전 자동 안전백업 + 확인 프롬프트)
+# 복원 (복원 전 자동 안전백업 + 확인 프롬프트) — ⚠ 전체 덮어쓰기·전 사용자 로그아웃, 서비스 정지 후 권장
+sudo systemctl stop it-assets-v2   # (컨테이너 배포면: docker compose ... stop app)
 bash scripts/restore.sh backups/db_YYYYMMDD_HHMMSS.dump --with-uploads
+sudo systemctl start it-assets-v2
 ```
+> 스크립트/웹 모두 `.env`의 **`DB_CONTAINER_NAME`**(없으면 compose 기본 `it-assets-db-1`)를 컨테이너명으로 사용합니다.
 
 정기 백업은 cron 예: `0 20 * * * cd <설치 디렉토리> && bash scripts/backup.sh >> backups/backup.log 2>&1`
 (`<설치 디렉토리>` = 배포 tar를 전개한 경로. 예: `/opt/it-assets-dist-2.1.0`)
+
+> ⚠ **자격증명 암호화 키(BL-11) 주의**: 백업 덤프에는 장비 자격증명이 **암호문**으로만 들어 있고 **암호화 키
+> (`.env`의 `CREDENTIAL_ENCRYPTION_KEY`)는 포함되지 않습니다.** **다른 서버로 복원**하면 그 서버의 키가 달라
+> 자격증명을 복호화할 수 없습니다 → **백업 파일과 `CREDENTIAL_ENCRYPTION_KEY`를 (서로 다른 안전한 장소에)
+> 함께 보관**하고, 복원 대상 서버에 **동일한 키**를 먼저 준비하세요. (백업 파일 자체도 민감 — 접근 통제 필수.)
 
 ---
 
