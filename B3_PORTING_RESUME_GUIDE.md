@@ -1,6 +1,6 @@
 # B-3 이후 애플리케이션 이식 — 재개 가이드
 
-> 작성일: 2026-06-26 / 최종 현행화: 2026-07-15 (BUG-9/10 종결 · T3 조사 착수)
+> 작성일: 2026-06-26 / 최종 현행화: 2026-07-15 (T3 BMC SOL 웹 콘솔 구현)
 > 작성 목적: 서버 종료 전 맥락 보존. 재개 시 이 문서 + git log부터 확인.
 
 > ★ **BUG-9/10 종결 (2026-07-15, 운영 반영·실장비 인수 완료)**: BL-2 후속 조사 2건 + BUG-9 후속.
@@ -126,15 +126,25 @@ ALTER 대상 테이블 없음)·**U-2**(encrypt가 v2/scripts라 이미지·dist
 - 웹 SSH 콘솔 = T2로 충족. **BL-4b(마스터-디테일 레이아웃) = v2.2+ 연기** — BL-2의 조건부 폼
   (섀시/노드 선택 분기)도 이 트랙에서 함께 처리. BL-4 자체는 이번 마디로 종결.
 
-## ★ 다음 마디: T3 BMC SOL (사전 조사 완료 2026-07-15)
+## ★ T3 BMC SOL 웹 콘솔 (구현 완료 2026-07-15, 운영 반영 대기)
 
-- **사전 조사 리포트 `/tmp/6cCE_report.md`** — ipmitool 1.8.18 설치 확인, T1 전원제어 ipmitool
-  경로(racks.js execFile lanplus)·BMC IP/자격증명 해석·복호화 경로 재사용성, T2 ws 브릿지
-  (sshTerminal.js) 재사용 구조, **node-pty 불요 결론(child_process.spawn 파이프면 충분)**, SOL 특수
-  처리(sol deactivate·1세션 제한·resize 무시), `sol info` probe 명령·해석, 설계 게이트 질문 정리.
-- **착수 시**: 사용자가 게이트에서 실 BMC 1~2대에 `sol info` probe 실행 → SOL/payload enabled 확인 후
-  구현. 게이트 질문(동시 세션·유휴 타임아웃·deactivate 정책·진입점·audit 명명·pty)은 리포트 §게이트.
-- 완료 시 랙 팝업·자산 상세에 BMC SOL 콘솔 진입점 연결(T2 SSH 진입점과 동형, sshAvailable식 판정 재사용).
+- **구현**: 신규 `services/solTerminal.js`(T2 골격 복제 — 접속부만 ssh2 → `child_process.spawn(ipmitool
+  … sol activate)`). ws 경로 `/ws/sol-terminal`. server.js는 **단일 upgrade 디스패처**로 리팩터
+  (sshTerminal `attach`→`init`+`handleUpgrade`, SOL도 동형 — 두 서비스가 각자 upgrade 리스너를 걸면
+  상대 경로 소켓을 destroy하는 충돌 제거). 라우트 `GET /assets/:id/sol`(관리자), 뷰 `assets/sol.ejs`
+  (xterm vendoring 재사용, port/cred 선택 없음·deactivate 안내), `/json`에 `solAvailable` 추가,
+  자산 상세·랙 팝업에 [BMC 콘솔] 버튼(sshAvailable식 판정).
+- **확정 사양**: 관리자 한정 / BMC IP(bmc)+자격증명(bmc, AES-256-GCM 서버 내부 복호화) / 비밀번호는
+  `-E`(IPMI_PASSWORD env)로만(argv·로그·audit 미노출) / 접속 전·종료 시 `sol deactivate` 보장 /
+  **per-host 동시 1세션** / 전체 3·사용자당 1·유휴 15분(env `SOL_TERM_*`) / 프레이밍 T2 재사용(resize 무시)
+  / audit `remote_sol_open|close|fail`(host·user·자산 id만, 입출력 미기록).
+- **격리 검증(t3test, mock ipmitool + HTTP/ws 실경로)**: solAvailable 4케이스·배너/에코 왕복·
+  deactivate 순서(선제→activate→종료)·비밀번호 argv/로그/audit 0노출·per-host 거절·전체/사용자당 제한·
+  유휴 타임아웃·비관리자/비로그인 거절·no-cred 에러·fail audit·**SSH 터미널 회귀(공유 디스패처)**·
+  미지 ws 경로 거절 — 전부 PASS. 신규 npm 0·DDL 0.
+- **운영 반영**: 재시작 1회. 실 BMC 2대 브라우저 인수(접속·프롬프트 수신·키 입력·종료 후 `sol info`
+  잔류 세션 없음·중복 거절·SSH 공존·audit 3종·비관리자 미노출). 상세: `/tmp/6cCG_report.md`.
+- **후속 제안**: T1 전원제어(racks.js)의 `-P`(argv 노출) → `-E`(env) 전환을 SOL과 동일하게 정리(별도 마디).
 - **T4 백업 UI**(원격 접속과 무관, 별도 트랙)는 이후.
 
 ## 1. 지금까지 완료 (커밋 기준)
@@ -805,8 +815,8 @@ b7f_subnets_backup.sql / B7F_CUTOVER_REPORT.md
 | 항목 | 내용 | 시점/조건 |
 |------|------|-----------|
 | **발송 + 재패키징** | v2.1.0 dist·공지 보관 완료(서버 v2/backups + 사무실 PC `C:\it-assets-releases\2.1.0\`). **발송 시점 자유** — 다만 T1·BL-13이 태그 이후이므로 실제 발송 시 **HEAD 기준 재패키징 판단(v2.1.1 또는 v2.2)**. 전달 매체(파일서버/USB) 사용자 결정 | 필요 시 |
-| 백업 테이블 2개 DROP | `audit_logs_bl8_backup`(1429행)·`audit_logs_bl11_redact_backup`(44행) 삭제 결정 | 7/19~20 이후 |
 | bl11 평문 덤프 폐기 | BL-11 마이그레이션 사전 pg_dump(평문 자격증명 포함) — 서버 v2/backups + 사무실 PC 양쪽 폐기 | ~7/27 |
+| BMC 기본/노출 자격증명 교체 (SUX-5) | 실장비에 admin/admin 등 기본 자격증명 확인(231.62 admin/admin, 230.108 포함) — 교체 필요. SOL/전원제어 보안 직결 | 사용자 조치 |
 | 독립개발실3 이중 등재 | office(id 61)·server_room(id 67) 양존 — 같은 물리 공간인지 실물 확인. 병합 시 랙 4·자산 20건 재배정 | 사용자 확인 |
 | 선반 18건 실사 보정 | 기존 shelf_size=3 자산 18건을 실사에 맞춰 화면 개별 수정 | 실사 시 |
 | BL-2 블레이드 다노드 일괄 등록 | 부모 상세 [노드 일괄 등록], 단일 트랜잭션·상속 복사·부분 유니크 인덱스(게이트) | ✅ 완료 2026-07-14 |

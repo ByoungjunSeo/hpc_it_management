@@ -116,6 +116,9 @@ docker compose -f docker-compose.prod.yml up -d
 | SSH_TERM_MAX_TOTAL | | 웹 SSH 터미널 전체 동시 세션 상한(기본 5) |
 | SSH_TERM_MAX_PER_USER | | 웹 SSH 터미널 사용자당 동시 세션 상한(기본 2) |
 | SSH_TERM_IDLE_MINUTES | | 웹 SSH 터미널 유휴(무입력) 타임아웃 분(기본 15) |
+| SOL_TERM_MAX_TOTAL | | 웹 BMC SOL 콘솔 전체 동시 세션 상한(기본 3) |
+| SOL_TERM_MAX_PER_USER | | 웹 BMC SOL 콘솔 사용자당 동시 세션 상한(기본 1) |
+| SOL_TERM_IDLE_MINUTES | | 웹 BMC SOL 콘솔 유휴(무입력) 타임아웃 분(기본 15) |
 | OLLAMA_HOST / PORT / MODEL | | AI 스펙조회(선택). 미기동이어도 앱 정상 |
 
 > **서브넷 등록은 IP 관리 화면의 [＋ 서브넷 등록]이 표준입니다** (CIDR /16~/30, 등록 시 IP 풀 자동 생성).
@@ -132,6 +135,16 @@ docker compose -f docker-compose.prod.yml up -d
 >   경로에 `Upgrade`/`Connection` 헤더 전달 설정이 필요합니다(예: nginx `proxy_set_header
 >   Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`). 직노출(프록시 없음)이면 불요.
 > - 동시 세션·유휴 타임아웃은 위 표의 `SSH_TERM_*` env로 조정합니다.
+
+> **웹 BMC SOL 콘솔(관리자 한정)**: 자산 상세·랙 팝업의 [BMC 콘솔] 버튼 → 브라우저 직렬 콘솔(SOL).
+> - **요건**: 자산에 **BMC IP**(ip_type=bmc)와 **BMC 자격증명**(credential_type=bmc)이 등록돼 있어야
+>   버튼이 활성화됩니다. 호스트 → BMC로 **623/UDP(IPMI lanplus)** 아웃바운드 도달 가능해야 하며,
+>   대상 BMC에서 **SOL/payload가 enabled** 여야 합니다(장비 BMC 설정). `ipmitool`은 앱 이미지에 포함.
+> - 접속 비밀번호는 서버 내부에서만 사용(ipmitool `-E`/`IPMI_PASSWORD` env — argv·로그·audit 미노출),
+>   브라우저로 전송되지 않습니다. 접속 전·종료 시 `sol deactivate`로 잔류 세션을 정리합니다.
+> - **동일 BMC는 동시 1세션**(직렬 콘솔 특성). reverse proxy 사용 시 `/ws/sol-terminal` 경로도
+>   WebSocket `Upgrade` 통과 설정이 필요합니다(SSH 터미널과 동일).
+> - 동시 세션·유휴 타임아웃은 위 표의 `SOL_TERM_*` env로 조정합니다.
 
 ## 4. SSH 수집(스캔) 기능 활성화
 
