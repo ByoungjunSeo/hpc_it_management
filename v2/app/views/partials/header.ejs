@@ -47,10 +47,9 @@
             <%# B-T2: GPU모니터링 제거로 단일 항목이 된 모니터링 드롭다운은 평탄화 %>
             <li><a href="/audit-log" class="<%= currentPath.startsWith('/audit-log') ? 'active' : '' %>">이력관리</a></li>
             <% if (typeof currentUser !== 'undefined' && currentUser && currentUser.role === 'admin') { %>
-            <%# v2.1 복원 대상 (백업 UI — v1 이식 아닌 scripts/backup.sh 호출형 재설계.
-                복원 시: <li><a href="/backup">백업</a></li> + currentPath /backup active 클래스) %>
-            <%# B-T2: 백업 제거로 단일 항목이 된 관리 드롭다운은 평탄화 %>
             <li><a href="/admin/users" class="<%= currentPath.startsWith('/admin') ? 'active' : '' %>">계정관리</a></li>
+            <%# T4: 백업 관리(scripts/backup.sh 호출형 재설계 — 생성/목록/다운로드/삭제 + 복원 가이드) %>
+            <li><a href="/backups" class="<%= currentPath.startsWith('/backups') ? 'active' : '' %>">백업 관리</a></li>
             <% } %>
         </ul>
         <div class="nav-search">

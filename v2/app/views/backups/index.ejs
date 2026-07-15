@@ -1,0 +1,94 @@
+<%- include('../partials/header', { title, currentPath, extraCss: undefined }) %>
+
+<%
+  function fmtSize(b) {
+    if (b == null) return '-';
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    return (b / 1024 / 1024).toFixed(1) + ' MB';
+  }
+  function fmtDate(d) {
+    var t = new Date(d); var p = function (n) { return String(n).padStart(2, '0'); };
+    return t.getFullYear() + '-' + p(t.getMonth() + 1) + '-' + p(t.getDate()) + ' ' + p(t.getHours()) + ':' + p(t.getMinutes()) + ':' + p(t.getSeconds());
+  }
+%>
+
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+    <h1>백업 관리</h1>
+    <span style="font-size:12px; color:#94a3b8;">DB 컨테이너: <code><%= dbContainer %></code> · 보존 <%= keep %>개(초과 시 자동 정리)</span>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+    <div class="card-header"><h2>새 백업 생성</h2></div>
+    <form method="POST" action="/backups/create" style="display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding:6px 0;" onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='생성 중...';">
+        <button type="submit" class="btn btn-primary">백업 생성</button>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#475569;">
+            <input type="checkbox" name="with_uploads" value="on"> 사진(uploads) 포함
+        </label>
+        <span style="font-size:12px; color:#94a3b8;">PostgreSQL 덤프(pg_dump -Fc) 생성 후 목록에 추가됩니다.</span>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom:12px;">
+    <div class="card-header"><h2>백업 목록 (<%= backups.length %>)</h2></div>
+    <% if (backups.length === 0) { %>
+    <p style="color:#94a3b8; font-size:13px; padding:6px 0;">아직 백업이 없습니다. 위에서 [백업 생성]을 눌러 첫 백업을 만드세요.</p>
+    <% } else { %>
+    <table class="data-table">
+        <thead><tr><th>파일명</th><th style="width:100px;">크기</th><th style="width:170px;">생성일시</th><th style="width:90px;">사진</th><th style="width:260px;">작업</th></tr></thead>
+        <tbody>
+        <% backups.forEach(function(b){ %>
+            <tr>
+                <td><code style="font-size:12px;"><%= b.name %></code></td>
+                <td><%= fmtSize(b.size) %></td>
+                <td><%= fmtDate(b.mtime) %></td>
+                <td><% if (b.hasUploads) { %><span class="badge badge-info">포함</span><% } else { %><span style="color:#cbd5e1;">-</span><% } %></td>
+                <td style="white-space:nowrap;">
+                    <a href="/backups/download/<%= encodeURIComponent(b.name) %>" class="btn btn-sm btn-secondary">다운로드</a>
+                    <% if (b.hasUploads) { %>
+                    <a href="/backups/download/<%= encodeURIComponent(b.uploadsName) %>" class="btn btn-sm btn-outline">사진</a>
+                    <% } %>
+                    <a href="/backups?guide=<%= encodeURIComponent(b.name) %>#restore-guide" class="btn btn-sm btn-outline">복원 가이드</a>
+                    <form method="POST" action="/backups/delete" style="display:inline" onsubmit="return confirm('이 백업 파일을 삭제합니다: <%= b.name %>. 되돌릴 수 없습니다. 삭제할까요?')">
+                        <input type="hidden" name="name" value="<%= b.name %>">
+                        <button type="submit" class="btn btn-sm btn-danger">삭제</button>
+                    </form>
+                </td>
+            </tr>
+        <% }) %>
+        </tbody>
+    </table>
+    <% } %>
+</div>
+
+<div class="card" id="restore-guide">
+    <div class="card-header"><h2>복원 가이드</h2></div>
+    <div style="padding:6px 0;">
+        <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:10px 14px; margin-bottom:10px; font-size:13px; color:#991b1b;">
+            <b>⚠ 복원은 전체 덮어쓰기입니다.</b> 현재 데이터가 백업 시점으로 교체되며, <b>세션이 초기화되어 전 사용자가 로그아웃</b>됩니다.
+            운영 중 실행하지 말고 <b>서비스 정지 후</b> 수행하세요(복원 스크립트가 복원 전 안전백업을 먼저 만듭니다).
+        </div>
+        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:#92400e;">
+            <b>⚠ 암호화 키(BL-11) 주의.</b> 백업에는 자격증명 <b>암호문</b>만 있고 <b>암호화 키(.env <code>CREDENTIAL_ENCRYPTION_KEY</code>)는 포함되지 않습니다.</b>
+            다른 서버로 복원하면 그 서버의 키가 달라 <b>자격증명 복호화가 불가</b>합니다. 복원 대상 서버에 <b>동일한 키</b>가 있어야 합니다.
+        </div>
+        <% if (!guide || !guide.dumpName) { %>
+        <p style="color:#94a3b8; font-size:13px;">목록에서 백업의 <b>[복원 가이드]</b>를 누르면 이 서버 실값이 채워진 복원 명령이 표시됩니다.</p>
+        <% } else { %>
+        <p style="font-size:13px; color:#475569;">대상 백업: <code><%= guide.dumpName %></code> → 컨테이너 <code><%= guide.container %></code> · DB <code><%= guide.db %></code></p>
+        <p style="font-size:12px; color:#64748b; margin-top:8px;">1) 서비스 정지 → 2) 복원 스크립트 실행(복원 전 안전백업 자동) → 3) 서비스 재시작</p>
+        <pre style="background:#0f172a; color:#e2e8f0; padding:12px 14px; border-radius:6px; overflow-x:auto; font-size:12px; line-height:1.6;"># 1) 앱 정지
+sudo systemctl stop it-assets-v2
+
+# 2) 복원(복원 전 자동 안전백업 + 확인 프롬프트). DB_CONTAINER_NAME는 .env에서 읽습니다.
+cd <%= '/mlcommons_cm/hpc_it_management/v2' %>
+bash scripts/restore.sh <%= guide.dumpPath %><%= guide.uploadsName ? ' --with-uploads' : '' %>
+
+# 3) 앱 재시작
+sudo systemctl start it-assets-v2</pre>
+        <p style="font-size:12px; color:#94a3b8;">※ 컨테이너명이 스크립트 기본값과 다르면 <code>.env</code>의 <code>DB_CONTAINER_NAME</code>(<%= guide.container %>)을 스크립트가 읽습니다. 웹에서 복원을 직접 실행하지 않습니다(위 명령을 서버에서 직접 실행).</p>
+        <% } %>
+    </div>
+</div>
+
+<%- include('../partials/footer') %>

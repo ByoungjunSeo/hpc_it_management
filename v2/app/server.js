@@ -117,7 +117,7 @@ app.use('/vendor-intake', require('./routes/vendorIntake'));
 // app.use('/power-panel', require('./routes/powerPanel'));
 // app.use('/network-layout', require('./routes/networkLayout'));
 app.use('/audit-log', require('./routes/auditLog'));
-// app.use('/backup', require('./routes/backup'));
+app.use('/backups', require('./routes/backups')); // T4: 백업 관리(관리자 한정)
 // app.use('/gpu-monitoring', require('./routes/gpuMonitoring'));
 // app.use('/chat', require('./routes/chat'));
 

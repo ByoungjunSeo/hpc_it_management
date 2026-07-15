@@ -10,7 +10,8 @@ cd "$HERE"
 [ -f .env ] && set -a && . ./.env && set +a
 
 PROJECT="${COMPOSE_PROJECT:-it-assets}"
-DB_CONTAINER="${DB_CONTAINER:-${PROJECT}-db-1}"
+# T4: 웹 백업 UI와 동일 env(DB_CONTAINER_NAME) 우선. 기존 DB_CONTAINER/compose 기본값과 호환.
+DB_CONTAINER="${DB_CONTAINER_NAME:-${DB_CONTAINER:-${PROJECT}-db-1}}"
 APP_CONTAINER="${APP_CONTAINER:-${PROJECT}-app-1}"
 
 DUMP="${1:-}"
