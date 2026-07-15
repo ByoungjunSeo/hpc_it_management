@@ -1195,6 +1195,36 @@ function hideNodeSelector() {
     if (area) area.style.display = 'none';
 }
 
+// BUG-9 후속: 홀(hole) 위치 → "U시작-U끝" 문자열
+function holesToUnitStr(start, size) {
+    if (!start) return '';
+    var uStart = Math.floor((start - 1) / 3) + 1;
+    var endHole = start + ((size || 3) - 1);
+    var uEnd = Math.floor((endHole - 1) / 3) + 1;
+    return 'U' + uStart + '-U' + uEnd;
+}
+// BUG-9 후속: 위치 입력 잠금/해제 + 안내 (자식 노드는 섀시 위치로 고정)
+var _invLocationLocked = false;
+function setInvLocationLock(locked, noticeText) {
+    _invLocationLocked = locked;
+    ['invRoomSelect','invRoomManualInput','invRackSelect','invRackManualInput','invSwitchSlotSelect'].forEach(function(id){
+        var el = document.getElementById(id); if (el) el.disabled = locked;
+    });
+    var unit = document.querySelector('#invUnitGroup input[name="unit"]');
+    if (unit) { unit.readOnly = locked; unit.style.background = locked ? '#f1f5f9' : ''; }
+    var old = document.getElementById('invNodeLocNotice'); if (old) old.remove();
+    if (locked && noticeText) {
+        var card = document.getElementById('locationEquipment');
+        if (card) {
+            var d = document.createElement('div');
+            d.id = 'invNodeLocNotice';
+            d.style.cssText = 'background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:8px 14px;margin-bottom:10px;font-size:13px;color:#713f12;';
+            d.textContent = noticeText;
+            card.insertBefore(d, card.querySelector('.form-row'));
+        }
+    }
+}
+
 function onAssetSelect(assetId) {
     if (!assetId) return;
     _invCurrentAssetId = assetId;
@@ -1305,6 +1335,16 @@ function onAssetSelect(assetId) {
                     _pendingBladeSlot = a.blade_slot;
                 }
                 onInvRackChange();
+            }
+
+            // BUG-9 후속: 노드는 부모 섀시 위치로 고정(unit 프리필 + 위치 잠금). 부모 없으면 잠금 해제.
+            var invUnitInput = document.querySelector('#invUnitGroup input[name="unit"]');
+            if (data.parent) {
+                if (invUnitInput) invUnitInput.value = holesToUnitStr(locSource.rack_unit_start, locSource.rack_unit_size);
+                setInvLocationLock(true, '블레이드 노드는 섀시(부모) 위치를 따릅니다 — 위치는 변경할 수 없습니다.'
+                    + (locSource.rack_unit_start ? '' : ' (섀시 위치 미등록 — 위치 없이 등록됩니다)'));
+            } else {
+                setInvLocationLock(false);
             }
 
             // IPs — clear existing rows and add from asset
@@ -1629,6 +1669,7 @@ function uhToSlot(u, h) { return (u - 1) * 3 + h; }
 
 // Slot-level click: place equipment starting at this slot
 function onInvSlotClick(slot) {
+    if (_invLocationLocked) return; // BUG-9 후속: 노드는 위치 잠금 — 랙 클릭 배치 차단
     var baseUSize = getInvBaseUSize();
     var hasShelf = isInvShelfChecked();
     var shelfSlots = hasShelf ? getInvShelfSlots() : 0; // BL-1: 홀 단위
@@ -1830,6 +1871,43 @@ function selectInvAvailableIp(ip) {
             onInvRackChange();
         }
     }
+})();
+
+// BUG-9 후속: 수정 화면에서 대상이 자식 노드면 위치를 부모 섀시로 프리필 + 잠금
+(function() {
+    var nodeParent = <%- JSON.stringify(typeof nodeParent !== 'undefined' && nodeParent ? nodeParent : null) %>;
+    if (!nodeParent) return;
+    // Room
+    var roomSel = document.getElementById('invRoomSelect');
+    if (roomSel && nodeParent.room_name) {
+        var rMatched = false;
+        for (var i = 0; i < roomSel.options.length; i++) {
+            if (roomSel.options[i].value === nodeParent.room_name) { roomSel.selectedIndex = i; rMatched = true; break; }
+        }
+        if (!rMatched) {
+            for (var i = 0; i < roomSel.options.length; i++) { if (roomSel.options[i].value === '__manual__') { roomSel.selectedIndex = i; break; } }
+            var rm = document.getElementById('invRoomManualInput'); if (rm) rm.value = nodeParent.room_name;
+        }
+        onInvRoomChange();
+    }
+    // Rack
+    var rackSel = document.getElementById('invRackSelect');
+    if (rackSel && nodeParent.rack_name) {
+        var kMatched = false;
+        for (var i = 0; i < rackSel.options.length; i++) {
+            if (rackSel.options[i].value === nodeParent.rack_name && rackSel.options[i].style.display !== 'none') { rackSel.selectedIndex = i; kMatched = true; break; }
+        }
+        if (!kMatched) {
+            for (var i = 0; i < rackSel.options.length; i++) { if (rackSel.options[i].value === '__manual__') { rackSel.selectedIndex = i; break; } }
+            var km = document.getElementById('invRackManualInput'); if (km) km.value = nodeParent.rack_name;
+        }
+        onInvRackChange();
+    }
+    // Unit
+    var unit = document.querySelector('#invUnitGroup input[name="unit"]');
+    if (unit) unit.value = holesToUnitStr(nodeParent.rack_unit_start, nodeParent.rack_unit_size);
+    setInvLocationLock(true, '블레이드 노드는 섀시(부모) 위치를 따릅니다 — 위치는 변경할 수 없습니다.'
+        + (nodeParent.rack_unit_start ? '' : ' (섀시 위치 미등록 — 위치 없이 기록됩니다)'));
 })();
 </script>
 

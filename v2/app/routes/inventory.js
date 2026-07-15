@@ -31,6 +31,53 @@ const notImplemented = (req, res) => {
   res.status(501).json({ error: '미구현 - B-4d-6c 후속 조각' });
 };
 
+// BUG-9 후속: 사용등록/수정 제출 위치(room/rack/unit 문자열)를 {room_id, rack_id, start(홀), size(홀)}로 해석.
+// 핸들러의 기존 해석 로직과 동일 규칙(문자열 포맷 무관한 정규화 비교용).
+async function resolveSubmittedLocation(body) {
+  const roomName = (body.room || '').trim();
+  const rackName = (body.rack || '').trim();
+  const unitStr = (body.unit || '').trim();
+  let room_id = null, rack_id = null, start = null, size = null;
+  if (roomName) {
+    const room = (await ServerRoom.findAll()).find(r => r.name === roomName);
+    if (room) room_id = room.id;
+  }
+  if (rackName) {
+    const allRacks = await Rack.findAll();
+    const rack = allRacks.find(r => r.name === rackName && (!room_id || r.room_id === room_id))
+              || allRacks.find(r => r.name === rackName);
+    if (rack) { rack_id = rack.id; if (!room_id) room_id = rack.room_id; }
+  }
+  const sw = (body.switch_slot || '').trim();
+  if (!(sw && /^SW\d+$/i.test(sw)) && unitStr) {
+    const sm = unitStr.match(/U(\d+)(?:H(\d))?/i);
+    if (sm) {
+      start = (parseInt(sm[1]) - 1) * 3 + (parseInt(sm[2]) || 1);
+      const em = unitStr.match(/U\d+(?:H\d)?[^U]*U(\d+)(?:H(\d))?/i);
+      if (em) size = (parseInt(em[1]) - 1) * 3 + (parseInt(em[2]) || 3) - start + 1;
+    }
+  }
+  return { room_id, rack_id, start, size };
+}
+
+// BUG-9 후속: 자식 노드(parent_asset_id 있음)의 사용등록/수정 위치는 부모 섀시 위치와 일치해야 한다.
+// 반환: 불일치 시 에러 메시지(string), 일치/해당없음 시 null. (클라이언트 잠금 우회 대비 서버 이중 방어)
+async function nodeLocationConflict(asset, body) {
+  if (!asset || !asset.parent_asset_id) return null; // 자식 아님 → 검사 없음
+  const parent = await Asset.findById(asset.parent_asset_id);
+  if (!parent) return null;
+  const sub = await resolveSubmittedLocation(body);
+  const norm = v => (v === undefined || v === null || v === '' ? null : v);
+  const roomMismatch = norm(sub.room_id) !== norm(parent.room_id);
+  const rackMismatch = norm(sub.rack_id) !== norm(parent.rack_id);
+  const startMismatch = norm(sub.start) !== norm(parent.rack_unit_start);
+  if (roomMismatch || rackMismatch || startMismatch) {
+    return '블레이드 노드는 섀시(부모: ' + (parent.management_number || ('#' + parent.id))
+      + ') 위치를 따라야 합니다. 노드에 임의 위치를 지정/변경할 수 없습니다.';
+  }
+  return null;
+}
+
 // EP#1: Inventory list (EUL 읽기 — 6a flatten이 status/개별컬럼 가상필드 제공)
 router.get('/', async (req, res, next) => {
   try {
@@ -689,9 +736,18 @@ router.post('/', requireMaintenance, async (req, res) => {
     } else {
       // Equipment usage registration
       req.body.status = '사용중';
+      const mgmt = req.body.management_number;
+      // BUG-9 후속: 자식 노드는 섀시 위치를 따라야 한다 — 자동반납/EUL 기록 전에 위치 검증(우회 방어).
+      if (mgmt) {
+        const targetAsset = await Asset.findByManagementNumber(mgmt);
+        const conflict = await nodeLocationConflict(targetAsset, req.body);
+        if (conflict) {
+          req.flash('error', conflict);
+          return res.redirect(req.body.returnTo || '/inventory/new');
+        }
+      }
       // Auto-return existing active usage for the same management_number
       // ★ 설계 §5: returnActiveByManagement는 6a에서 returned 이벤트 append INSERT
-      const mgmt = req.body.management_number;
       if (mgmt) {
         const today = new Date().toISOString().split('T')[0];
         await EquipmentUsageLog.returnActiveByManagement(mgmt, today);
@@ -1009,11 +1065,18 @@ router.get('/:id/edit', async (req, res, next) => {
     // Find linked asset to get blade_slot for switch slot pre-selection
     let linkedAssetBladeSlot = '';
     let linkedAssetId = null;
+    let nodeParent = null; // BUG-9 후속: 자식 노드면 부모 위치로 잠금/프리필
     if (log.management_number) {
       const linkedAsset = await Asset.findByManagementNumber(log.management_number);
       if (linkedAsset) {
         linkedAssetBladeSlot = linkedAsset.blade_slot || '';
         linkedAssetId = linkedAsset.id;
+        if (linkedAsset.parent_asset_id) {
+          const p = await Asset.findById(linkedAsset.parent_asset_id);
+          if (p) nodeParent = { room_name: p.room_name || '', rack_name: p.rack_name || '',
+                                rack_unit_start: p.rack_unit_start || null, rack_unit_size: p.rack_unit_size || null,
+                                management_number: p.management_number || '' };
+        }
       }
     }
 
@@ -1034,6 +1097,7 @@ router.get('/:id/edit', async (req, res, next) => {
       appConfig,
       linkedAssetBladeSlot,
       linkedAssetId,
+      nodeParent,
       returnTo: req.query.returnTo || req.get('Referer') || ''
     });
   } catch (err) {
@@ -1044,6 +1108,19 @@ router.get('/:id/edit', async (req, res, next) => {
 // EP#13: Update — 설계 §5: 내용정정이므로 6a EUL.update = UPDATE (append 아님)
 router.post('/:id', requireMaintenance, async (req, res) => {
   try {
+    // BUG-9 후속: 수정 시에도 자식 노드 위치는 섀시(부모)와 일치해야 한다(우회 방어).
+    {
+      const editLog = await EquipmentUsageLog.findById(req.params.id);
+      const mgmt = req.body.management_number || (editLog && editLog.management_number);
+      if (mgmt) {
+        const targetAsset = await Asset.findByManagementNumber(mgmt);
+        const conflict = await nodeLocationConflict(targetAsset, req.body);
+        if (conflict) {
+          req.flash('error', conflict);
+          return res.redirect(req.body.returnTo || ('/inventory/' + req.params.id + '/edit'));
+        }
+      }
+    }
     // Map dynamic IP fields to DB columns (6b) — xxx_json은 6a buildSnapshots가 JSONB화
     const ipCols = mapIpsToCols(req.body);
     Object.assign(req.body, ipCols);
