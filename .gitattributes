@@ -1,0 +1,6 @@
+# CRLF 재발 방지 — 컨테이너/유닉스에서 실행되는 스크립트·스키마는 항상 LF.
+# (Windows clone 시 셸 스크립트가 CRLF가 되면 `exec ... no such file or directory` 등 발생)
+*.sh text eol=lf
+*.sql text eol=lf
+Dockerfile text eol=lf
+docker-entrypoint.sh text eol=lf

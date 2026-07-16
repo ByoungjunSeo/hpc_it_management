@@ -8,8 +8,10 @@ HPC/AIDC 장비실의 서버·모듈·IP·입출고를 웹에서 통합 관리�
 이번 전달 버전은 **2.2.0**이며, v2.1.0 대비 **원격 접근 스위트**(전원제어·웹 SSH·BMC SOL 콘솔·백업 관리)와
 블레이드 노드 일괄 등록·대여 장부를 추가하고 위치 데이터 정합 버그를 바로잡았습니다. 전달물은 아래 1파일입니다.
 
-- `it-assets-dist-2.2.0.tar.gz`
-- sha256: `<빌드 후 기입>` — 수령 후 `sha256sum`으로 반드시 대조하세요.
+- `it-assets-dist-2.2.0.tar.gz` (전달 번들)
+- 앱 이미지 tar `it-assets-2.2.0.tar` (번들 내부, `docker load` 대상)
+  - sha256: `ED15DB06DE4694CC6BD7B72AB514FB43EE24CB35FE53CF2D0EF0333AB925CF19`
+  - 적재 전 `sha256sum it-assets-2.2.0.tar` 로 **반드시 대조**하세요(이미지 `it-assets:2.2.0`).
 
 tar 안에 앱/DB docker 이미지 2종(오프라인 설치용), 설치 문서(DEPLOY.md), compose 파일,
 환경변수 템플릿(.env.example), 스키마 SQL(+마이그레이션), 백업/복원 스크립트가 모두 들어 있어

@@ -29,7 +29,7 @@
 > 사내/공개 미러로 교체(main·updates만, security는 스킵)합니다. 미지정 시 기본값은 원본
 > deb.debian.org(회귀 0).
 > ```
-> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.1.0 .
+> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.2.0 .
 > ```
 > 실검증 이력: 2.0.1 이미지는 사무 PC(윈도우)에서 사무망의 deb.debian.org 도메인 차단으로
 > kakao 미러(http, security 제외)를 경유해 빌드·전달했고, 서버 격리 스택에서 정품 검증(amd64,
@@ -254,8 +254,11 @@ docker compose -f docker-compose.prod.yml up -d
 | 증상 | 원인 / 조치 |
 |------|------------|
 | `ERR_SSL_PROTOCOL_ERROR` | 브라우저가 주소를 https로 자동 승격 — 주소를 지우고 `http://` 부터 명시 입력(자동완성 주의, 시크릿 창 활용) |
-| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.1.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
-| 앱 컨테이너가 바로 종료 | ① DB 이미지 누락(오프라인) — `docker images`에 `postgres:16-alpine` 있는지 + `... ps`로 db healthy 확인 ② `.env`에 INITIAL_ADMIN_PASSWORD/SESSION_SECRET/POSTGRES_PASSWORD 누락 — `docker compose logs app` 확인 |
+| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.2.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
+| 앱 컨테이너가 바로 종료 | **먼저 `docker compose -f docker-compose.prod.yml logs app` 로 원인 확인** — ① DB 이미지 누락(오프라인): `docker images`에 `postgres:16-alpine` 있는지 + db healthy 확인 ② 아래 (a)~(c) 메시지별 대응 |
+| (a) `exec … : no such file or directory` (엔트리포인트) | **셸 스크립트 CRLF**(Windows에서 clone/편집). `.sh`·`docker-entrypoint.sh`는 LF여야 함 — `.gitattributes`(eol=lf)로 재발 방지, 이미 CRLF면 `sed -i 's/\r$//' scripts/*.sh docker-entrypoint.sh` 후 재빌드 |
+| (b) `[session-secret] 오류 …` (기동 로그) | `.env` 필수값 미설정 — **SESSION_SECRET·CREDENTIAL_ENCRYPTION_KEY를 32자 이상 무작위**로(`openssl rand -hex 32`). POSTGRES_PASSWORD·INITIAL_ADMIN_PASSWORD도 CHANGE_ME 교체 |
+| (c) `column "password_enc" does not exist` 류(런타임) | **잔류 `pgdata` 볼륨에 구 스키마**가 남음(스키마는 빈 볼륨에만 생성). 신규 설치면 `docker compose -f docker-compose.prod.yml down -v`(⚠ 데이터 삭제) 후 `up -d`. 업그레이드면 §6 마이그레이션 적용. 앱 기동 로그의 `[schema]` 안내 참고 |
 | 로그인 안 됨 | INITIAL_ADMIN_PASSWORD는 **최초 기동에만** 적용. 변경은 컨테이너 내 `node scripts/init-admin.js --reset` |
 | **재시작 후 데이터 사라짐** | `down -v` 사용 여부 확인 — **`-v` 가 named volume(DB·사진)을 삭제**함. 재시작·재생성은 §7(stop/start 또는 `-v` 없는 down→up)로. 복구는 백업본에서만 |
 | 스키마 없음(테이블 0) | pgdata 볼륨이 이미 초기화됨 — 스키마는 빈 볼륨에만 생성. **완전 초기화 목적일 때만** `down -v`(⚠ 전 데이터 삭제, §7 경고 참조) |

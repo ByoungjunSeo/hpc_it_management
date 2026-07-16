@@ -467,3 +467,23 @@ compose에 `BACKUP_DIR`·backups 볼륨 정의 없음.
 - 라우트: 디렉터리 불가여도 **페이지를 렌더**(대시보드 리다이렉트·에러 전파 차단), 상단 안내 배너 표시.
 - compose 파일에 backups 볼륨 **미추가**(단순성): compose 앱은 `docker exec` 자체가 불가(SUX-8)라 웹 백업
   생성이 어차피 안 되므로, 빈 볼륨보다 **우아한 안내 + CLI 유도**가 적절. compose 백업은 §5-1 CLI로.
+
+---
+
+## BUG-14: 부품 상세 "사용 현황" 탭 전 부품 공백 (표시/배선 버그)
+- 상태: **[수정 완료] 2026-07-16 (운영 반영 대기)** | 방침: 라우트 배선(2줄)
+- 관련: app/routes/moduleInventory.js(GET /api/usage/:code), app/models/moduleInventory.js(getUsageByCode)
+
+### 증상 (운영)
+부품 상세 팝업 집계는 "사용: N"(예 net-400-A 8)인데 "사용 현황" 탭은 전 부품 "이 부품을 사용 중인 장비가 없습니다".
+
+### 원인 (조사 6cCO)
+`GET /api/usage/:code`가 미완성 스텁으로 `usage:[]` 하드코딩 반환(B-4d-5a f3a1a0c 유보분). 실구현
+`ModuleInventory.getUsageByCode()`(B-4d-7b 구현·모델 존재)를 **호출하지 않음** = 배선 누락. **데이터 유실 아님** —
+집계 "사용:N"과 동일 매칭(computing_modules.specification=item_code 또는 module_type+model)이며 상세 행 실존
+(net-400-A: 6행/합8, 전 in_use>0 부품 상세 존재 실측). "이력" 탭(findByItemCode)은 정상.
+
+### 수정 (완료)
+스텁을 `const usage = await ModuleInventory.getUsageByCode(code); res.json({ spec, usage });`로 교체. 뷰·함수 이미
+완비라 즉시 정상 표시. **데이터 보정 불요.** 격리 HTTP 검증: usage 2행 반환(EUL 있는 자산=위치·사용자, 없는 자산=
+뷰 '-' 폴백), usage count 합 = 집계 in_use 정합, 이력·목록 회귀 200.
