@@ -91,13 +91,13 @@ router.get('/', async (req, res) => {
 });
 
 // EP#2: API: get usage details for a component code
-// [B-4d-6 유보] getUsageByCode — EUL status='사용중' 직접조회 필요 (v2 이벤트소싱 매핑 예정)
+// BUG-14: 스텁(usage:[]) → 실구현 getUsageByCode 배선(computing_modules 직접 매칭 + EUL 위치 보강).
 router.get('/api/usage/:code', async (req, res) => {
   try {
     const code = req.params.code;
     const spec = await ModuleInventory.findByCode(code);
-    // getUsageByCode는 EUL 의존으로 유보됨 — 빈 배열 반환
-    res.json({ spec, usage: [], _notice: 'EUL 사용현황은 B-4d-6에서 이벤트소싱 매핑 예정' });
+    const usage = await ModuleInventory.getUsageByCode(code);
+    res.json({ spec, usage });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
