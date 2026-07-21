@@ -283,7 +283,28 @@ router.post('/modules/:id/transfer', requireMaintenance, async (req, res) => {
       owner: mod.owner,
       owner_vendor_id: mod.owner_vendor_id
     };
-    await ComputingModule.update(req.params.id, updated);
+    // BUG-16: 대상에 동일 모듈(type+model+specification+slot_info+owner) 행이 이미 있으면 수량 합산 병합,
+    // 없으면 기존대로 asset_id만 변경. slot_info가 다르면 물리 슬롯이 다를 수 있어 병합하지 않음(보수적).
+    const { rows: dupRows } = await pool.query(`
+      SELECT id FROM computing_modules
+      WHERE asset_id = $1 AND module_type = $2 AND COALESCE(model,'') = COALESCE($3,'')
+        AND COALESCE(specification,'') = COALESCE($4,'') AND COALESCE(slot_info,'') = COALESCE($5,'')
+        AND COALESCE(owner,'company') = COALESCE($6,'company') AND id <> $7
+      ORDER BY id LIMIT 1
+    `, [to_asset_id, mod.module_type, mod.model, mod.specification, mod.slot_info, mod.owner, req.params.id]);
+    if (dupRows[0]) {
+      // 병합: 대상(기존) 행에 수량 합산(slot_info·notes는 대상 값 유지), 이동 원본 행 삭제. 단일 트랜잭션.
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('UPDATE computing_modules SET count = count + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+          [parseInt(mod.count) || 1, dupRows[0].id]);
+        await client.query('DELETE FROM computing_modules WHERE id = $1', [req.params.id]);
+        await client.query('COMMIT');
+      } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; } finally { client.release(); }
+    } else {
+      await ComputingModule.update(req.params.id, updated);
+    }
 
     // §5 스텁: EUL 동기 제거, recalculateInUse만
     if (mod.asset_id) await syncModulesToUsageLog(mod.asset_id);

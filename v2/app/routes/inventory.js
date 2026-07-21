@@ -1260,29 +1260,45 @@ router.post('/:id', requireMaintenance, async (req, res) => {
 
 // EP#14: Return 반납 — 설계 §5: 6a markReturned가 returned 이벤트 append INSERT (UPDATE 아님)
 router.post('/:id/return', requireMaintenance, async (req, res) => {
+  // BUG-15: 섀시(부모) 반납 시 자식 노드까지 한 트랜잭션으로 연쇄 반납, 완료 후 재고 재집계.
+  const client = await pool.connect();
   try {
     const returnDate = req.body.return_date || new Date().toISOString().split('T')[0];
-    // Get usage log to find management_number
     const log = await EquipmentUsageLog.findById(req.params.id);
-    await EquipmentUsageLog.markReturned(req.params.id, returnDate);
+    const asset = (log && log.management_number) ? await Asset.findByManagementNumber(log.management_number) : null;
+    // 매칭 자산이 섀시(부모)면 자식 노드까지 대상에 포함. 노드 단독 반납이면 children=[].
+    const children = (asset && !asset.parent_asset_id) ? await Asset.findChildren(asset.id) : [];
 
-    // Update linked asset: status → inactive, clear rack placement
-    if (log && log.management_number) {
-      const asset = await Asset.findByManagementNumber(log.management_number);
-      if (asset) {
-        await Asset.markReturned(asset.id);
-        await AuditLog.log(req, {
-          action: 'update', targetType: 'asset', targetId: asset.id,
-          targetLabel: log.management_number,
-          details: { reason: '반납처리', previousStatus: asset.status, previousRackId: asset.rack_id }
-        });
+    await client.query('BEGIN');
+    // 클릭한 EUL은 원본 id 기준 returned append
+    await EquipmentUsageLog.markReturned(req.params.id, returnDate, client);
+    if (asset) {
+      await Asset.markReturned(asset.id, client);
+      // 자식 노드: 상태 반납 + 각 노드 최신 in_use → returned append (노드 '사용중' 해제)
+      for (const ch of children) {
+        await Asset.markReturned(ch.id, client);
+        await EquipmentUsageLog.returnActiveByManagement(ch.management_number, returnDate, client);
       }
     }
+    await client.query('COMMIT');
 
+    // 재고 재집계 — 반납(returned)된 자산의 컴퓨팅 모듈이 in_use에서 빠지도록(active만 집계). 커밋 후 실행.
+    await ModuleInventory.recalculateInUse();
+
+    if (asset) {
+      await AuditLog.log(req, {
+        action: 'update', targetType: 'asset', targetId: asset.id, targetLabel: log.management_number,
+        details: { reason: '반납처리', previousStatus: asset.status, previousRackId: asset.rack_id,
+                   cascadedNodes: children.map(c => c.management_number) }
+      });
+    }
     await AuditLog.log(req, { action: 'update', targetType: 'equipment_usage', targetId: req.params.id, targetLabel: '반납처리' });
-    req.flash('success', '반납 처리가 완료되었습니다.');
+    req.flash('success', '반납 처리가 완료되었습니다.' + (children.length ? ' (노드 ' + children.length + '개 연쇄 반납)' : ''));
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
     req.flash('error', '반납 실패: ' + err.message);
+  } finally {
+    client.release();
   }
   res.redirect(req.body.returnTo || req.get('Referer') || '/inventory');
 });

@@ -309,8 +309,10 @@ const Asset = {
     return pool.query('DELETE FROM assets WHERE id = $1', [id]);
   },
 
-  async markReturned(id) {
-    return pool.query(
+  // BUG-15: 선택적 client(트랜잭션) 지원 — 섀시 반납 시 자식 노드까지 한 트랜잭션으로 처리.
+  async markReturned(id, client) {
+    const q = client || pool;
+    return q.query(
       `UPDATE assets SET status='returned', room_id=NULL, rack_id=NULL, rack_unit_start=NULL, updated_at=CURRENT_TIMESTAMP WHERE id=$1`,
       [id]
     );
