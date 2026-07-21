@@ -7,8 +7,10 @@ function fixTimestamps(row) {
 }
 
 const ModuleInventoryLog = {
-  async create(data) {
-    const { rows } = await pool.query(`
+  // BUG-15-c: 선택적 client(트랜잭션) 지원 — 반납 트랜잭션 안에서 모듈 이력을 함께 기록.
+  async create(data, client) {
+    const q = client || pool;
+    const { rows } = await q.query(`
       INSERT INTO module_inventory_logs
         (item_code, event_type, quantity_change,
          before_total, after_total, before_spare, after_spare,

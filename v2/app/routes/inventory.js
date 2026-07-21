@@ -1259,8 +1259,37 @@ router.post('/:id', requireMaintenance, async (req, res) => {
 });
 
 // EP#14: Return 반납 — 설계 §5: 6a markReturned가 returned 이벤트 append INSERT (UPDATE 아님)
+// BUG-15-c: 반납되는 자산의 컴퓨팅 모듈마다 module_inventory_logs에 removed 이력을 남긴다(트랜잭션 client 사용).
+// item_code = specification(있으면) 또는 module_inventory 매칭(module_type+model). 재고는 BUG-15 recalc가 처리하므로
+// 여기서는 이력만 추가(수량 이중 차감 없음). 소급 보정('반납 소급 보정')과 구분 위해 notes를 자동 문구로.
+async function logReturnedModules(client, asset, returnDate, req) {
+  const { rows: mods } = await client.query(`
+    SELECT cm.count,
+           CASE WHEN COALESCE(cm.specification,'') <> '' THEN cm.specification
+                ELSE (SELECT mi.item_code FROM module_inventory mi
+                       WHERE mi.module_type = cm.module_type AND mi.model = cm.model LIMIT 1)
+           END AS item_code
+    FROM computing_modules cm WHERE cm.asset_id = $1
+  `, [asset.id]);
+  const label = asset.management_number || asset.model_name || String(asset.id);
+  for (const m of mods) {
+    if (!m.item_code) continue; // 재고 품목 매칭 없음 → 이력 스킵
+    await ModuleInventoryLog.create({
+      item_code: m.item_code,
+      event_type: 'removed',
+      quantity_change: parseInt(m.count) || 1,
+      asset_id: asset.id,
+      asset_label: label,
+      user_id: req.session ? req.session.userId : null,
+      username: req.session ? (req.session.displayName || req.session.username) : null,
+      notes: '반납 (자동 기록) — ' + label + ' ' + returnDate
+    }, client);
+  }
+}
+
 router.post('/:id/return', requireMaintenance, async (req, res) => {
   // BUG-15: 섀시(부모) 반납 시 자식 노드까지 한 트랜잭션으로 연쇄 반납, 완료 후 재고 재집계.
+  // BUG-15-c: 각 반납 대상 자산의 컴퓨팅 모듈 removed 이력을 같은 트랜잭션에 기록.
   const client = await pool.connect();
   try {
     const returnDate = req.body.return_date || new Date().toISOString().split('T')[0];
@@ -1273,11 +1302,13 @@ router.post('/:id/return', requireMaintenance, async (req, res) => {
     // 클릭한 EUL은 원본 id 기준 returned append
     await EquipmentUsageLog.markReturned(req.params.id, returnDate, client);
     if (asset) {
-      await Asset.markReturned(asset.id, client);
-      // 자식 노드: 상태 반납 + 각 노드 최신 in_use → returned append (노드 '사용중' 해제)
-      for (const ch of children) {
-        await Asset.markReturned(ch.id, client);
-        await EquipmentUsageLog.returnActiveByManagement(ch.management_number, returnDate, client);
+      // 반납 대상 = 매칭 자산 + 자식 노드. 각 자산: status 반납 + (자식은 EUL append) + 모듈 removed 이력.
+      const targets = [asset, ...children];
+      for (let i = 0; i < targets.length; i++) {
+        const t = targets[i];
+        await Asset.markReturned(t.id, client);
+        if (i > 0) await EquipmentUsageLog.returnActiveByManagement(t.management_number, returnDate, client);
+        await logReturnedModules(client, t, returnDate, req);
       }
     }
     await client.query('COMMIT');
