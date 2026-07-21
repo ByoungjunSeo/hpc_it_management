@@ -487,3 +487,42 @@ compose에 `BACKUP_DIR`·backups 볼륨 정의 없음.
 스텁을 `const usage = await ModuleInventory.getUsageByCode(code); res.json({ spec, usage });`로 교체. 뷰·함수 이미
 완비라 즉시 정상 표시. **데이터 보정 불요.** 격리 HTTP 검증: usage 2행 반환(EUL 있는 자산=위치·사용자, 없는 자산=
 뷰 '-' 폴백), usage count 합 = 집계 in_use 정합, 이력·목록 회귀 200.
+
+---
+
+## BUG-15: 블레이드 노드/섀시 반납 시 컴퓨팅 모듈 재고 미차감·노드 '사용중' 잔존
+- 상태: **[수정 완료] 2026-07-22 (운영 반영 대기)** | 방침: 반납 자식 연쇄 + 재집계
+- 관련: app/routes/inventory.js(반납 라우트), app/models/asset.js·equipmentUsageLog.js(markReturned client 지원)
+
+### 증상 (운영)
+섀시(글루시스-008, 2노드) 반납 시 노드 안 컴퓨팅 모듈이 재고에서 차감 안 됨 + 반납 후 노드 '사용중' 잔존.
+
+### 원인 (조사 6cCQ)
+반납 라우트가 EUL 매칭 단일 자산만 `markReturned`, **자식 노드 미연쇄 + recalculateInUse 미호출**. 모듈은
+노드(자식)에 있고 재집계는 `status='active'`만 집계 → 섀시만 반납하면 노드 active 잔존 → 모듈 계속 집계·노드 사용중.
+
+### 수정 (완료)
+반납 라우트: 매칭 자산이 섀시(부모)면 자식 노드까지 **한 트랜잭션으로 연쇄 반납**(각 노드 status='returned' +
+최신 in_use→returned EUL append), 커밋 후 **recalculateInUse()** 호출로 재고 정합. 노드 단독 반납도 동일 적용.
+markReturned/returnActiveByManagement에 선택적 client 인자 추가(트랜잭션). 격리 검증: 섀시 반납→3자산 returned·
+in_use 8→0·노드 EUL returned / 노드 단독 반납 정상.
+
+---
+
+## BUG-16: 부품 [이동] 시 수량 병합 누락(중복 행)
+- 상태: **[수정 완료] 2026-07-22 (운영 반영 대기)** | 방침: 이동 UPSERT 병합 + 표시 GROUP BY + 데이터 보정
+- 관련: app/routes/moduleInventory.js(이동), app/models/moduleInventory.js(getUsageByCode)
+
+### 증상 (운영)
+H100(GPU-94G-A)을 02·03에서 08로 이동 후, 08(원래 2개)이 같은 위치인데 3개 행(1/2/1)으로 분리 표시. 총량은 정확.
+
+### 원인 (조사 6cCQ)
+이동이 행 asset_id만 변경(`ComputingModule.update`), 대상의 동일 모듈과 병합 안 함 → 행 분리. getUsageByCode도
+행 단위라 갈라진 대로 표시.
+
+### 수정 (완료)
+- 이동: 대상에 동일(type+model+specification+slot_info+owner) 행이 있으면 **수량 합산 UPDATE + 이동 원본 삭제**
+  (단일 트랜잭션), slot_info 다르면 병합 안 함(보수적). slot_info·notes는 대상 값 유지.
+- 표시: getUsageByCode를 자산+슬롯(slot_info)+모듈로 GROUP BY·SUM(count) (이중 방어).
+- 기존 중복 2그룹 보정 SQL(/tmp/bug16_data_fix.sql, 게이트): TPC-SV-4U-08 gpu 3행→count4, 이슬림코리아-002 disk 2행→count2.
+- 격리 검증: 병합(1행 합산)·비병합(slot 다름 2행 유지)·총량 불변·표시 3행→1행·보정 리허설(총량 불변·잔여 중복 0) PASS.
