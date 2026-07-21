@@ -493,6 +493,8 @@ compose에 `BACKUP_DIR`·backups 볼륨 정의 없음.
 ## BUG-15: 블레이드 노드/섀시 반납 시 컴퓨팅 모듈 재고 미차감·노드 '사용중' 잔존
 - 상태: **[수정 완료] 2026-07-22 (운영 반영 대기)** | 방침: 반납 자식 연쇄 + 재집계
 - 관련: app/routes/inventory.js(반납 라우트), app/models/asset.js·equipmentUsageLog.js(markReturned client 지원)
+- ★ 분담: **재고(in_use recalc)는 BUG-15에서, 모듈 이력(removed 기록)은 BUG-15-c에서.** 소급 보정(구 발생분)은
+  BUG-15-b(글루시스-008 18행 removed INSERT, 게이트 SQL).
 
 ### 증상 (운영)
 섀시(글루시스-008, 2노드) 반납 시 노드 안 컴퓨팅 모듈이 재고에서 차감 안 됨 + 반납 후 노드 '사용중' 잔존.
@@ -526,3 +528,21 @@ H100(GPU-94G-A)을 02·03에서 08로 이동 후, 08(원래 2개)이 같은 위�
 - 표시: getUsageByCode를 자산+슬롯(slot_info)+모듈로 GROUP BY·SUM(count) (이중 방어).
 - 기존 중복 2그룹 보정 SQL(/tmp/bug16_data_fix.sql, 게이트): TPC-SV-4U-08 gpu 3행→count4, 이슬림코리아-002 disk 2행→count2.
 - 격리 검증: 병합(1행 합산)·비병합(slot 다름 2행 유지)·총량 불변·표시 3행→1행·보정 리허설(총량 불변·잔여 중복 0) PASS.
+
+---
+
+## BUG-15-c: 반납 시 컴퓨팅 모듈 이력(removed) 자동 기록
+- 상태: **[수정 완료] 2026-07-22 (운영 반영 대기)** | 방침: 반납 트랜잭션에 모듈 removed 이력 추가
+- 관련: app/routes/inventory.js(반납 라우트 logReturnedModules), app/models/moduleInventoryLog.js(create client 지원)
+
+### 증상
+BUG-15로 반납 시 재고(in_use)는 recalc되나 module_inventory_logs에 이벤트 미기록(조사 6cCT) → 반납된 노드 모듈이
+이력 화면에 흔적 없음. (구 발생분 글루시스-008은 BUG-15-b 소급 SQL로 보정.)
+
+### 수정 (완료)
+반납 트랜잭션 안에서 각 반납 대상 자산(섀시 연쇄·노드 단독 모두)의 컴퓨팅 모듈마다 **removed 이력** 기록:
+event_type='removed', quantity_change=count(양수, 이동·소급 관례 준용), asset=반납 노드, 작업자=반납 처리자,
+notes='반납 (자동 기록) — <관리번호> <반납일>'(소급 '반납 소급 보정'과 구분), 일시=처리 시각. **재고는 BUG-15
+recalc가 처리 → 이력만 추가(이중 차감 없음).** item_code=specification 또는 module_inventory(type+model) 매칭,
+매칭 없으면 스킵. 모듈 0개 자산은 이력 없이 정상. 격리 검증: 섀시 반납(노드별·모듈별 removed 건수=모듈 수·
+quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_use 정확히 1회 차감, computing_modules 수량 불변) PASS.
