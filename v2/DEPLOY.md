@@ -121,7 +121,6 @@ docker compose -f docker-compose.prod.yml up -d
 | SOL_TERM_IDLE_MINUTES | | 웹 BMC SOL 콘솔 유휴(무입력) 타임아웃 분(기본 15) |
 | DB_CONTAINER_NAME | 백업 사용 시 | 웹 백업 관리·backup.sh/restore.sh가 `docker exec`할 **DB 컨테이너명**. 기본값 `it-assets-db-1`(compose 표준). **compose 표준명과 다르면 반드시 지정**(예 단독 DB 컨테이너 `it-assets-db`) |
 | BACKUP_KEEP_COUNT | | 웹 백업 보존 개수(기본 14). 생성 시 초과분을 오래된 순 자동 삭제 |
-| OLLAMA_HOST / PORT / MODEL | | AI 스펙조회(선택). 미기동이어도 앱 정상 |
 
 > **서브넷 등록은 IP 관리 화면의 [＋ 서브넷 등록]이 표준입니다** (CIDR /16~/30, 등록 시 IP 풀 자동 생성).
 > `SUBNETS_JSON`은 최초 기동 시 대역을 미리 시드하고 싶을 때만 쓰는 선택(레거시) 항목이며,
@@ -154,7 +153,7 @@ docker compose -f docker-compose.prod.yml up -d
 2. `/discovery`에서 자산별 스캔 → 하드웨어 자동 수집.
 3. **네트워크 요건**: 앱 컨테이너 → 대상 장비로 **22/TCP(SSH)**, PSU 감지 시 **623/UDP(IPMI)** 아웃바운드 허용.
    기본 bridge 네트워크로 충분(NAT 아웃바운드). 방화벽에서 컨테이너 호스트의 위 포트 아웃바운드만 열면 됩니다.
-4. ipmitool은 이미지에 포함(PSU IPMI 감지). Ollama/DuckDuckGo는 선택 — 없으면 AI 스펙조회만 빈 결과.
+4. ipmitool은 이미지에 포함(PSU IPMI 감지).
 
 ---
 

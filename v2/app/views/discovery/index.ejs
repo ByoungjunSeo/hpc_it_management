@@ -1153,11 +1153,9 @@ function showUnmatchedModulesModal(unmatchedModules, assetId, assetCode) {
         html += '<input type="radio" name="unmatched-action-' + idx + '" value="register" onchange="onUnmatchedActionChange(' + idx + ')">';
         html += '<span>새로 등록:</span>';
         html += '<input type="text" id="unmatched-code-' + idx + '" class="form-control" style="font-size:12px; padding:2px 6px; width:140px;" placeholder="로딩중..." disabled>';
-        html += '<button type="button" id="ai-spec-btn-' + idx + '" class="btn btn-sm btn-outline" style="font-size:11px; padding:2px 10px; white-space:nowrap;" onclick="aiSpecLookup(' + idx + ')" disabled>';
-        html += '\uD83D\uDD0D AI 스펙 조회</button>';
         html += '</label>';
 
-        // AI spec extra fields (hidden until register is selected)
+        // 수동 입력 필드(제조사·용량·사양·라벨) — 등록 선택 시 표시 (BUG-17: AI 자동채움 제거)
         html += '<div id="unmatched-spec-wrap-' + idx + '" style="margin-left:28px; margin-bottom:6px; display:none;">';
         html += '<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:12px;">';
         html += '<div><label style="color:var(--text-secondary);">제조사:</label>';
@@ -1169,7 +1167,6 @@ function showUnmatchedModulesModal(unmatchedModules, assetId, assetCode) {
         html += '<div><label style="color:var(--text-secondary);">라벨:</label>';
         html += '<input type="text" id="unmatched-label-' + idx + '" class="form-control" style="font-size:12px; padding:2px 6px; width:100%;" placeholder="관리용 라벨"></div>';
         html += '</div>';
-        html += '<div id="ai-spec-status-' + idx + '" style="margin-top:4px; font-size:11px;"></div>';
         html += '</div>';
 
         // Option 3: Skip (default)
@@ -1240,12 +1237,10 @@ function onUnmatchedActionChange(idx) {
     var linkSelect = document.getElementById('unmatched-link-' + idx);
     var linkWrap = document.getElementById('unmatched-link-wrap-' + idx);
     var specWrap = document.getElementById('unmatched-spec-wrap-' + idx);
-    var aiBtn = document.getElementById('ai-spec-btn-' + idx);
     if (codeInput) codeInput.disabled = (selectedValue !== 'register');
     if (linkSelect) linkSelect.disabled = (selectedValue !== 'link');
     if (linkWrap) linkWrap.style.display = (selectedValue === 'link') ? '' : 'none';
     if (specWrap) specWrap.style.display = (selectedValue === 'register') ? '' : 'none';
-    if (aiBtn) aiBtn.disabled = (selectedValue !== 'register');
 }
 
 function closeUnmatchedModal() {
@@ -1255,87 +1250,6 @@ function closeUnmatchedModal() {
     window._unmatchedAssetId = null;
 }
 
-function aiSpecLookup(idx) {
-    var items = window._unmatchedItems;
-    if (!items || !items[idx]) return;
-
-    var m = items[idx];
-    var btn = document.getElementById('ai-spec-btn-' + idx);
-    var statusDiv = document.getElementById('ai-spec-status-' + idx);
-
-    // Set loading state
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<span style="display:inline-block; width:12px; height:12px; border:2px solid var(--text-secondary); border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite;"></span> 조회중...';
-    }
-    if (statusDiv) statusDiv.innerHTML = '<span style="color:var(--text-secondary);">AI 스펙을 조회하고 있습니다...</span>';
-
-    // Add spin animation if not present
-    if (!document.getElementById('ai-spin-style')) {
-        var style = document.createElement('style');
-        style.id = 'ai-spin-style';
-        style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
-        document.head.appendChild(style);
-    }
-
-    fetch('/discovery/ai-spec-lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            module_type: m.module_type,
-            model: m.model,
-            manufacturer: m.manufacturer,
-            capacity: m.capacity
-        })
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(result) {
-        // Restore button
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '\uD83D\uDD0D AI 스펙 조회';
-        }
-
-        if (result.error && !result.manufacturer) {
-            if (statusDiv) statusDiv.innerHTML = '<span style="color:#e53e3e;">\u274C ' + escapeHtml(result.error) + '</span>';
-            return;
-        }
-
-        // Fill fields
-        var mfgInput = document.getElementById('unmatched-manufacturer-' + idx);
-        var capInput = document.getElementById('unmatched-capacity-' + idx);
-        var specInput = document.getElementById('unmatched-specification-' + idx);
-        var labelInput = document.getElementById('unmatched-label-' + idx);
-
-        if (mfgInput && result.manufacturer) mfgInput.value = result.manufacturer;
-        if (capInput && result.capacity) capInput.value = result.capacity;
-        if (specInput && result.specification) specInput.value = result.specification;
-        if (labelInput && result.label) labelInput.value = result.label;
-
-        // Show confidence badge
-        var confidence = typeof result.confidence === 'number' ? result.confidence : 0;
-        var sourceLabel = result.source === 'ai+web' ? 'AI+웹' : 'AI';
-        var badgeColor, badgeText;
-        if (confidence >= 0.8) {
-            badgeColor = '#38a169'; badgeText = '높음';
-        } else if (confidence >= 0.5) {
-            badgeColor = '#d69e2e'; badgeText = '보통';
-        } else {
-            badgeColor = '#e53e3e'; badgeText = '낮음';
-        }
-        if (statusDiv) {
-            statusDiv.innerHTML = '<span style="color:' + badgeColor + '; font-weight:600;">\u2705 신뢰도: ' + badgeText + '</span>' +
-                ' <span style="color:var(--text-secondary);">(' + sourceLabel + ', ' + (confidence * 100).toFixed(0) + '%)</span>';
-        }
-    })
-    .catch(function(err) {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '\uD83D\uDD0D AI 스펙 조회';
-        }
-        if (statusDiv) statusDiv.innerHTML = '<span style="color:#e53e3e;">\u274C 조회 실패: ' + escapeHtml(err.message) + '</span>';
-    });
-}
 
 function submitUnmatchedModules() {
     var items = window._unmatchedItems;

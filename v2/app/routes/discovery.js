@@ -15,7 +15,6 @@ const AuditLog = require('../models/auditLog');
 const { pool } = require('../config/database');
 const { fixRowDates } = require('../utils/dateFix');
 const { connectAndDiscover, discoverRange } = require('../services/sshDiscovery');
-const { lookupSpec } = require('../services/specLookup');
 
 // ── Helper: generate vendor item_code like {업체명}-{유형한글}-{NNN} ──
 const TYPE_LABELS = {
@@ -52,8 +51,8 @@ async function generateVendorItemCode(vendorName, moduleType) {
 
 // B-4d-7 discovery 14EP 이식 완료:
 //  7b 읽기 6EP(#1,2,5,6,9,11) / 7c 쓰기 3EP(#4 apply-asset §5+BUG-6, #7 register, #8 link)
-//  / 7d 능동·legacy 5EP(#3 scan-asset, #10 ai-spec-lookup, #12 scan, #13 scan-range, #14 apply).
-// [능동] EP는 SSH(ssh2)/Ollama/DuckDuckGo 접촉 — 실스캔 검증은 7e(사용자 입회).
+//  / 7d 능동·legacy 5EP(#3 scan-asset, #10 [제거: BUG-17], #12 scan, #13 scan-range, #14 apply).
+// [능동] EP는 SSH(ssh2) 접촉 — 실스캔 검증은 7e(사용자 입회). (AI 스펙 조회는 BUG-17로 제거)
 
 // ── Helper: compare registered modules vs discovered modules (v1 L52–137, 순수함수) ──
 function normalizeModel(model) {
@@ -962,17 +961,7 @@ router.get('/transfer-logs/:assetId', async (req, res) => {
   }
 });
 
-// EP#10: AI Spec Lookup — [능동] Ollama(로컬)/DuckDuckGo. 실패 시 degrade (v1 L960–969 충실이식)
-router.post('/ai-spec-lookup', async (req, res) => {
-  try {
-    const { module_type, model, manufacturer, capacity } = req.body;
-    if (!model) return res.status(400).json({ error: '모델명이 필요합니다.' });
-    const result = await lookupSpec({ module_type, model, manufacturer, capacity });
-    res.json(result);
-  } catch (err) {
-    res.status(500).json({ error: 'AI 스펙 조회 실패: ' + err.message, confidence: 0 });
-  }
-});
+// BUG-17: AI 스펙 조회(Ollama) 기능 제거 — 미매칭 화면은 매칭/수동등록/건너뛰기로 동작.
 
 // ══════════════════════════════════════════════════════════════
 //  LEGACY ROUTES (kept for backward compatibility — UI 사용 중)
