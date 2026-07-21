@@ -402,15 +402,17 @@ const EquipmentUsageLog = {
   },
 
   // ★ Append: 원본(id) 조회 → 동일 mgmt로 'returned' 이벤트 INSERT (UPDATE 아님)
-  async markReturned(id, returnDate) {
-    const { rows: orig } = await pool.query(
+  // BUG-15: 선택적 client(트랜잭션) 지원.
+  async markReturned(id, returnDate, client) {
+    const q = client || pool;
+    const { rows: orig } = await q.query(
       'SELECT * FROM equipment_usage_logs WHERE id = $1', [id]
     );
     if (!orig[0]) return;
     const o = orig[0];
     const date = returnDate || new Date().toISOString().split('T')[0];
 
-    await pool.query(`
+    await q.query(`
       INSERT INTO equipment_usage_logs
         (event_type, event_date, asset_id, management_number, asset_number, model_name,
          user_name, test_name, test_detail, room, rack, unit,
@@ -435,8 +437,10 @@ const EquipmentUsageLog = {
   },
 
   // ★ Append: mgmt별 최신 in_use 이벤트 찾아 → 'returned' 이벤트 INSERT
-  async returnActiveByManagement(mgmt, returnDate) {
-    const { rows } = await pool.query(`
+  // BUG-15: 선택적 client(트랜잭션) 지원.
+  async returnActiveByManagement(mgmt, returnDate, client) {
+    const q = client || pool;
+    const { rows } = await q.query(`
       SELECT * FROM equipment_usage_logs
       WHERE management_number = $1 AND event_type = 'in_use'
       ORDER BY id DESC LIMIT 1
@@ -445,7 +449,7 @@ const EquipmentUsageLog = {
     const o = rows[0];
     const date = returnDate || new Date().toISOString().split('T')[0];
 
-    await pool.query(`
+    await q.query(`
       INSERT INTO equipment_usage_logs
         (event_type, event_date, asset_id, management_number, asset_number, model_name,
          user_name, test_name, test_detail, room, rack, unit,

@@ -106,13 +106,15 @@ const ModuleInventory = {
       params.push(mi.module_type, mi.model);
     }
 
+    // BUG-16 표시 보강: 같은 자산+슬롯(slot_info)+모듈을 묶어 수량 합산(중복 행 표시 이중 방어).
     const { rows } = await pool.query(`
-      SELECT cm.id, cm.count, cm.module_type, cm.asset_id,
-             a.management_number, a.model_name
+      SELECT MIN(cm.id) AS id, SUM(cm.count) AS count, cm.module_type, cm.asset_id,
+             a.management_number, a.model_name, cm.slot_info
       FROM computing_modules cm
       JOIN assets a ON cm.asset_id = a.id
       WHERE a.status = 'active'
         AND (${conditions})
+      GROUP BY cm.asset_id, a.management_number, a.model_name, cm.module_type, cm.slot_info
       ORDER BY a.management_number
     `, params);
 
@@ -131,7 +133,7 @@ const ModuleInventory = {
         status: '사용중',
         location: log ? [log.room, log.rack, log.unit].filter(Boolean).join('/') : '',
         slot: row.module_type ? row.module_type.toUpperCase() : '',
-        count: row.count || 1
+        count: parseInt(row.count) || 1
       });
     }
     return result;
