@@ -29,7 +29,7 @@
 > 사내/공개 미러로 교체(main·updates만, security는 스킵)합니다. 미지정 시 기본값은 원본
 > deb.debian.org(회귀 0).
 > ```
-> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.2.0 .
+> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.2.1 .
 > ```
 > 실검증 이력: 2.0.1 이미지는 사무 PC(윈도우)에서 사무망의 deb.debian.org 도메인 차단으로
 > kakao 미러(http, security 제외)를 경유해 빌드·전달했고, 서버 격리 스택에서 정품 검증(amd64,
@@ -253,7 +253,7 @@ docker compose -f docker-compose.prod.yml up -d
 | 증상 | 원인 / 조치 |
 |------|------------|
 | `ERR_SSL_PROTOCOL_ERROR` | 브라우저가 주소를 https로 자동 승격 — 주소를 지우고 `http://` 부터 명시 입력(자동완성 주의, 시크릿 창 활용) |
-| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.2.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
+| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.2.1`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
 | 앱 컨테이너가 바로 종료 | **먼저 `docker compose -f docker-compose.prod.yml logs app` 로 원인 확인** — ① DB 이미지 누락(오프라인): `docker images`에 `postgres:16-alpine` 있는지 + db healthy 확인 ② 아래 (a)~(c) 메시지별 대응 |
 | (a) `exec … : no such file or directory` (엔트리포인트) | **셸 스크립트 CRLF**(Windows에서 clone/편집). `.sh`·`docker-entrypoint.sh`는 LF여야 함 — `.gitattributes`(eol=lf)로 재발 방지, 이미 CRLF면 `sed -i 's/\r$//' scripts/*.sh docker-entrypoint.sh` 후 재빌드 |
 | (b) `[session-secret] 오류 …` (기동 로그) | `.env` 필수값 미설정 — **SESSION_SECRET·CREDENTIAL_ENCRYPTION_KEY를 32자 이상 무작위**로(`openssl rand -hex 32`). POSTGRES_PASSWORD·INITIAL_ADMIN_PASSWORD도 CHANGE_ME 교체 |

@@ -1,6 +1,6 @@
 {
   "name": "hpc-it-management-v2",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "HPC/AIDC IT Asset Management System (v2 - PostgreSQL)",
   "main": "server.js",
   "scripts": {
