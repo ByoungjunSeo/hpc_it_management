@@ -20,18 +20,21 @@ const Photo = {
     return rows;
   },
 
-  async findByAssetWithUsageLogs(assetId, managementNumber) {
-    if (!managementNumber) {
-      return this.findByEntity('asset', assetId);
-    }
+  // BUG-18: 입출고 사진 조인을 재사용 가능한 management_number → 안정 식별자 asset_id 로 변경.
+  //   기존엔 관리번호로 equipment_usage_logs 를 조인해, 관리번호를 재사용(재입고/타 자산)하면
+  //   과거·다른 자산의 입출고 사진이 현재 자산 상세로 딸려 나오던 누수(글루시스-009 사례).
+  //   equipment_usage_logs.asset_id FK 로 스코프하면 이 자산의 이력 사진만 노출됨.
+  //   (v1 이관 로그는 asset_id NULL 이지만 사진 첨부는 v2 기능이라 손실 없음.)
+  //   managementNumber 인자는 하위호환 위해 시그니처만 유지(미사용).
+  async findByAssetWithUsageLogs(assetId, managementNumber) { // eslint-disable-line no-unused-vars
     const { rows } = await pool.query(`
       SELECT p.* FROM photos p
       WHERE (p.entity_type = 'asset' AND p.entity_id = $1)
          OR (p.entity_type = 'equipment_usage' AND p.entity_id IN (
-              SELECT id FROM equipment_usage_logs WHERE management_number = $2
+              SELECT id FROM equipment_usage_logs WHERE asset_id = $1
             ))
       ORDER BY p.uploaded_at DESC
-    `, [assetId, managementNumber]);
+    `, [assetId]);
     rows.forEach(fixDates);
     return rows;
   },

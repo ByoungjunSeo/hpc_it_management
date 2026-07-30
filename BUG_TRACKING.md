@@ -561,3 +561,29 @@ notes='반납 (자동 기록) — <관리번호> <반납일>'(소급 '반납 소
 recalc가 처리 → 이력만 추가(이중 차감 없음).** item_code=specification 또는 module_inventory(type+model) 매칭,
 매칭 없으면 스킵. 모듈 0개 자산은 이력 없이 정상. 격리 검증: 섀시 반납(노드별·모듈별 removed 건수=모듈 수·
 quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_use 정확히 1회 차감, computing_modules 수량 불변) PASS.
+
+---
+
+## BUG-18: 자산 상세에 타 자산/과거 사이클의 입출고 사진 노출(관리번호 재사용 누수)
+- 상태: **[수정 완료] 2026-07-31 (운영 반영 대기)** | 방침: 입출고 사진 조인을 management_number → asset_id 로 변경
+- 관련: app/models/photo.js (`findByAssetWithUsageLogs`), 호출: app/routes/assets.js:528,924
+
+### 증상
+방금 입고한 글루시스 스위치(관리번호 글루시스-009) 상세에 **2026-04-28 사진**이 함께 노출. 그 사진은 현재 자산에
+직접 붙인 것이 아니라, **같은 관리번호로 기록된 과거 입출고 이력에 붙어 있던 사진**이 딸려 나온 것.
+
+### 원인
+`findByAssetWithUsageLogs`가 입출고(equipment_usage) 사진을 **재사용 가능한 `management_number`로 조인**:
+`... equipment_usage_logs WHERE management_number = $2`. `equipment_usage_logs`는 append-only 이력이고
+관리번호는 "검색 편의용 비정규화 스냅샷"이라, **재입고(같은 asset_id 재활성) 또는 번호 재사용(다른 자산)** 시 과거·
+타 자산의 입출고 사진이 현재 자산으로 새어 나옴. (재입고 흐름은 inventory.js에서 기존 자산 `reactivate`로 asset_id 유지.)
+
+### 수정 (완료)
+입출고 사진 조인을 **안정 식별자 `asset_id` FK 기준**으로 변경:
+`... equipment_usage_logs WHERE asset_id = $1`. 이 자산의 이력 사진만 노출되고, 타 자산/재사용 번호의 과거 사진은
+차단. v1 이관 로그(asset_id NULL)는 사진 첨부가 v2 기능이라 **유실 없음**. 함수 시그니처(assetId, managementNumber)는
+하위호환 위해 유지(managementNumber 미사용). 격리 검증(재사용 번호 시나리오, 실제 모델 함수 경로): 자산 A 상세에서
+4/28 누수 사진 차단(3건→2건, 자기 사진 유지)·원 소유자 B에서는 4/28 사진 정상 귀속(유실 아님) PASS.
+
+### 관련
+- 관리번호 재사용이 근본 토양 — 업체 관리번호 `업체명-자산유형-번호` 형식 전환(별건)으로 유형 간 혼동 감소 예정.
