@@ -664,7 +664,7 @@ quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_us
 ### 암호화 보관 전환 (AES-256, gpg -c) — 2건
 `v1_snapshot_b7f.sqlite.gpg` · `b7f_v2_full_20260711_2151.sql.gpg`.
 원본은 md5 대조 검증 후 shred.
-- **복호화 암호 보관 위치**: (TODO — 위치만 기재, 암호 자체 기재 금지)
+- **복호화 암호 보관 위치**: 운영 서버 `~/.it-assets-backup-pass` (mlcommons 홈, 0600, 저장소 외부). ★ 별도 백업 없음 — 유실 시 복구 불가
 
 ### 존치
 `db/itassets_20260715_234616.dump` — BL-11 암호화(7/13) 이후 덤프로 `password` 전 행 NULL,
