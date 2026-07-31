@@ -321,6 +321,7 @@ router.post('/incoming', requireMaintenance, upload.array('photos', 10), async (
 
         await EquipmentUsageLog.create({
           usage_date: req.body.incoming_date || today,
+          asset_id: existingAsset.id, // BUG-22
           management_number: baseMgmt,
           asset_number: assetNumber || existingAsset.asset_number,
           model_name: req.body.model_name || existingAsset.model_name || null,
@@ -351,6 +352,7 @@ router.post('/incoming', requireMaintenance, upload.array('photos', 10), async (
 
         await EquipmentUsageLog.create({
           usage_date: req.body.incoming_date || today,
+          asset_id: chassisId, // BUG-22: 섀시 로그는 섀시 id
           management_number: baseMgmt,
           asset_number: assetNumber,
           model_name: req.body.model_name || null,
@@ -363,7 +365,7 @@ router.post('/incoming', requireMaintenance, upload.array('photos', 10), async (
         for (let i = 1; i <= nodeCount; i++) {
           const nodeMgmt = baseMgmt + '-N' + i;
 
-          await Asset.create({
+          const nodeId = await Asset.create({
             management_number: nodeMgmt,
             asset_type: assetType,
             ownership: req.body.ownership || 'company',
@@ -381,6 +383,7 @@ router.post('/incoming', requireMaintenance, upload.array('photos', 10), async (
 
           await EquipmentUsageLog.create({
             usage_date: req.body.incoming_date || today,
+            asset_id: nodeId, // BUG-22: 각 노드 로그는 자기 노드 id(섀시 id 아님)
             management_number: nodeMgmt,
             model_name: req.body.model_name || null,
             ownership: req.body.ownership || 'company',
@@ -410,6 +413,7 @@ router.post('/incoming', requireMaintenance, upload.array('photos', 10), async (
 
         await EquipmentUsageLog.create({
           usage_date: req.body.incoming_date || today,
+          asset_id: assetId, // BUG-22
           management_number: baseMgmt,
           asset_number: assetNumber,
           model_name: req.body.model_name || null,
@@ -761,6 +765,11 @@ router.post('/', requireMaintenance, async (req, res) => {
       // Map dynamic credential rows to JSON + legacy columns
       const credCols = mapCredsToCols(req.body);
       Object.assign(req.body, credCols);
+      // BUG-22: 사용등록 EUL에 asset_id 기입 — 관리번호로 선조회, 없으면 NULL로 진행(기존 흐름 유지)
+      if (mgmt) {
+        const _regAsset = await Asset.findByManagementNumber(mgmt);
+        if (_regAsset) req.body.asset_id = _regAsset.id;
+      }
       const id = await EquipmentUsageLog.create(req.body);
 
       // Sync asset from usage registration (location, IPs, credentials, user, purpose)

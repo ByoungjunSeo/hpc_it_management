@@ -583,7 +583,11 @@ quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_us
   (로그 asset_id 채워짐)에서는 오귀속 사진이 **계속 노출**됐음. → BUG-19 데이터 정정으로 실제 해소.
 
 ### 후속
-- 코드(asset_id 조인)는 **BUG-22(입고 asset_id 기입) 백필 이후 재설계** 대상. 현재는 부작용 상태로 유지.
+- 코드(asset_id 조인)는 **BUG-22(입고 asset_id 기입) 이후 재설계** 대상. 현재는 부작용 상태로 유지.
+- **[2026-07-31 추기] BUG-22 완료로 asset_id 조인 부작용 완화**: 이후 입고/사용등록 EUL은 asset_id가 채워져,
+  입출고 로그 상세에 붙인 사진이 자산 상세에 정상 표시됨(격리 검증 PASS). 기존 NULL 로그는 백필 안 함(BUG-22 방침).
+  단 **조인 자체(asset_id 기준)의 재설계 요부는 별도 판단으로 남김** — asset_id NULL 로그에 붙는 사진 표시 정책을
+  어떻게 할지(무시 vs 관리번호 보조)는 미결.
 
 ---
 
@@ -621,7 +625,25 @@ quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_us
 - 상태: **[재작성 안 함 — 해석 경계로 처리]** | BUG-19와 동일 뿌리(EUL 재번호). equipment_usage 감사 216건 중 26건 대상 없음+179건 시각 모순. **과거 감사의 target_id는 신뢰 불가**로 간주(재작성 시 위험 > 이득). 사용자 화면 무관.
 
 ## BUG-22: EUL create 경로에서 asset_id 미기입 (입고 40.6% NULL)
-- 상태: **[미수정] 코드 과제** | `inventory.js` 322(재입고)·352(섀시)·382(노드)·411(단일)·764(사용등록) — asset.id 가용한데 create에 미전달. asset_id NULL이 BUG-18 조인 부작용·정합 저해. 기존 NULL 백필은 관리번호 유일매칭 1/219뿐(대부분 부품 로그)이라 forward 기입이 실효.
+- 상태: **[수정 완료] 2026-07-31 (격리 HTTP 검증 PASS, 운영 반영 대기)** | 관련: app/routes/inventory.js 322/352/382/411/764
+
+### 수정
+`EquipmentUsageLog.create` 호출부 5곳에 `asset_id` 전달(모델은 이미 `data.asset_id` 수용, 모델 무수정):
+- 322 재입고=`existingAsset.id` · 352 섀시=`chassisId` · 382 노드=**`nodeId`(노드 create 반환 캡처, 섀시 id 아님)** ·
+  411 단일=`assetId` · 764 사용등록=관리번호 선조회(`Asset.findByManagementNumber`), **없으면 NULL로 진행**(기존 흐름 유지).
+- 부품 경로(281 부품입고·688 부품사용)는 asset 개념 없어 대상 아님(회귀 없음 확인).
+
+### 격리 검증 (HTTP 실경로, PASS)
+격리 스택(:15435 postgres + :13011 앱, __TEST__ 시딩·정리)에서 실제 POST:
+- 단일입고→asset_id=자산id · 섀시→섀시id · **노드 N1/N2→각 노드 자기 id(섀시 아님)** · 재입고→재활성 자산id ·
+  사용등록→대상 자산id · **부품입고→NULL 유지(회귀 없음)**.
+- **BUG-18 정합**: asset_id 채워진 입출고 로그에 사진 업로드(`/api/photos/equipment_usage/:id`) → `findByAssetWithUsageLogs`가
+  자산 상세에 표시 확인(입고 사진은 `entity_type='asset'`이라 원래 무관하나, **입출고 로그 상세 사진(form.ejs:597 경로)** 은 이 수정으로 표시됨).
+- 회귀: /inventory·/module-inventory·/assets 200, 반납 연쇄(BUG-15) 섀시+노드 전부 returned 정상.
+
+### 백필 방침
+- **기존 NULL 219건은 백필하지 않음.** 근거: 관리번호 유일매칭 **1건뿐**, 218건은 매칭 불가(**대부분 부품(item_code) 로그로
+  정상적으로 asset 없음**). 소급 백필은 이득<위험 → forward 기입만 채택.
 
 ## BUG-23: audit_logs.details 가 EUL 변경 경로에 미전달
 - 상태: **[미수정]** | AuditLog.log은 details 지원하고 일부 경로는 사용하나, EUL update/delete/create 감사엔 before/after 미전달 → EUL 변경 복원 근거 없음(append-only 미강제와 겹침).
