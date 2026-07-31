@@ -564,26 +564,64 @@ quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_us
 
 ---
 
-## BUG-18: 자산 상세에 타 자산/과거 사이클의 입출고 사진 노출(관리번호 재사용 누수)
-- 상태: **[수정 완료] 2026-07-31 (운영 반영 대기)** | 방침: 입출고 사진 조인을 management_number → asset_id 로 변경
+## BUG-18: 자산 상세에 엉뚱한 사진 노출 — ★ 원인 오진 정정본 (실제=마이그레이션 참조 파괴)
+- 상태: **[원 진단 오진 / 실제 원인은 BUG-19] 2026-07-31** | 코드 완화는 유지하되 근본 아님
 - 관련: app/models/photo.js (`findByAssetWithUsageLogs`), 호출: app/routes/assets.js:528,924
 
 ### 증상
-방금 입고한 글루시스 스위치(관리번호 글루시스-009) 상세에 **2026-04-28 사진**이 함께 노출. 그 사진은 현재 자산에
-직접 붙인 것이 아니라, **같은 관리번호로 기록된 과거 입출고 이력에 붙어 있던 사진**이 딸려 나온 것.
+글루시스-009(신규 입고 스위치) 상세에 **2026-04-28 사진**(내용=유니와이드 액침서버)이 함께 노출.
 
-### 원인
-`findByAssetWithUsageLogs`가 입출고(equipment_usage) 사진을 **재사용 가능한 `management_number`로 조인**:
-`... equipment_usage_logs WHERE management_number = $2`. `equipment_usage_logs`는 append-only 이력이고
-관리번호는 "검색 편의용 비정규화 스냅샷"이라, **재입고(같은 asset_id 재활성) 또는 번호 재사용(다른 자산)** 시 과거·
-타 자산의 입출고 사진이 현재 자산으로 새어 나옴. (재입고 흐름은 inventory.js에서 기존 자산 `reactivate`로 asset_id 유지.)
+### ★ 원 진단은 오진이었음 (정정)
+- **오진**: "관리번호가 재사용되는데 equipment_usage 사진을 재사용 가능한 `management_number`로 조인해 과거/타 자산
+  사진이 딸려 나온 누수"로 판단하고, 조인을 `asset_id` 기준으로 바꿈.
+- **오진 근거의 허구성**: 당시 "격리 검증 PASS"는 **실재하지 않는 시나리오(자산 A/B가 같은 번호를 쓰고 같은 번호 로그가
+  둘)를 직접 시딩**해 통과시킨 것. 운영 실데이터에서 글루시스-009의 equipment_usage 로그는 1건뿐이고, 문제 사진은
+  그 로그(asset_id NULL)에 붙어 있어 "관리번호 조인 누수"로는 설명되지 않았음.
+- **실제 원인 = BUG-19** (7/11 B-7f 컷오버에서 EUL 재번호 후 `photos.entity_id` remap 누락 → 사진이 엉뚱한 로그를 가리킴).
+- **현행 asset_id 조인의 부작용**: `asset_id`가 NULL인 equipment_usage 로그(입고 40.6%)에 붙은 **정당한 사진까지 가림**.
+  글루시스-009 오귀속 4장은 이 부작용으로 "우연히" 숨겨졌을 뿐 근본 해결이 아니었고, 코코링크-001/TPC-SV-2U-34
+  (로그 asset_id 채워짐)에서는 오귀속 사진이 **계속 노출**됐음. → BUG-19 데이터 정정으로 실제 해소.
 
-### 수정 (완료)
-입출고 사진 조인을 **안정 식별자 `asset_id` FK 기준**으로 변경:
-`... equipment_usage_logs WHERE asset_id = $1`. 이 자산의 이력 사진만 노출되고, 타 자산/재사용 번호의 과거 사진은
-차단. v1 이관 로그(asset_id NULL)는 사진 첨부가 v2 기능이라 **유실 없음**. 함수 시그니처(assetId, managementNumber)는
-하위호환 위해 유지(managementNumber 미사용). 격리 검증(재사용 번호 시나리오, 실제 모델 함수 경로): 자산 A 상세에서
-4/28 누수 사진 차단(3건→2건, 자기 사진 유지)·원 소유자 B에서는 4/28 사진 정상 귀속(유실 아님) PASS.
+### 후속
+- 코드(asset_id 조인)는 **BUG-22(입고 asset_id 기입) 백필 이후 재설계** 대상. 현재는 부작용 상태로 유지.
 
-### 관련
-- 관리번호 재사용이 근본 토양 — 업체 관리번호 `업체명-자산유형-번호` 형식 전환(별건)으로 유형 간 혼동 감소 예정.
+---
+
+## BUG-19: [★근본] B-7f 컷오버 마이그레이션이 EUL 재번호 후 photos.entity_id를 remap 안 함
+- 상태: **[데이터 정정 완료] 2026-07-31 (오귀속 10장 재연결, 커밋/운영 무관 — 데이터 조치)** | 정정: photos.entity_id 재지정
+- 관련: v2/scripts/b7-remigrate/migrate-eul.js(EUL 재번호), migrate-data.js(photos id/entity_id 원본 복사), verify.js(eul-사진 미검사)
+
+### 원인 (확정)
+7/11 B-7f 컷오버(git ab73578, 백업 b7f_v2_full_20260711_2151.sql):
+- `migrate-eul.js`가 equipment_usage_logs를 **id 미보존(DEFAULT 재번호) + 1 usage→N 이벤트로 재구성**.
+- `migrate-data.js`는 **모든 테이블 id 보존**(재번호는 EUL 하나뿐)이나 photos를 **entity_id 원본 그대로 복사(remap 없음)**.
+- `photos.entity_id`에 FK 없음 + verify.js는 **asset-사진만** 무결성 검사(eul-사진 미검사) → 파괴가 미탐지.
+- 결과: 마이그 이전 업로드된 입출고 사진의 `entity_id`가 **재번호된 새 로그(엉뚱한 자산)** 를 가리킴.
+
+### 오귀속 전수 (정정 전) — v1(app/data/it_assets.db) 대조로 원주인 확정
+| photos | 잘못 붙었던 곳 | v1 원본 로그 | 원주인(자산) | asset_id |
+|---|---|---|---|---|
+| 1–4 | eul 1072 (코코링크-001) | v1 1072 유니와이드-004(사용중,4/27) | 유니와이드-004 | 1183 |
+| 5–8 | eul 1073 (글루시스-009) | v1 1073 유니와이드-005(반납,4/27) | 유니와이드-005 | 1184 |
+| 47–48 | eul 921 (TPC-SV-2U-34) | v1 921 글루시스-006(반납,4/14) | 글루시스-006 | 1156 |
+
+### 정정 (완료, 트랜잭션)
+- 백업 `backup/photos_pre_bug18fix_20260731.sql`(photos 전체 57행, 평문 → 폐기목록).
+- A안(자산 재연결): `UPDATE photos SET entity_type='asset', entity_id=<asset>` — 영향행 4/4/2 정확 일치 시에만 COMMIT.
+  (B안=특정 event 로그 재연결은 글루시스-006/4-14가 4개 이벤트로 유일화 불가 + migrate가 원본 id 미보존이라 배제.)
+- 검증: 코코링크-001 5→1·TPC-SV-2U-34 2→0·글루시스-009 자기2장만 / 유니와이드-004=4·-005=4·글루시스-006=2 표시.
+  파일 10개 디스크 존재(unlink 없음).
+
+---
+
+## BUG-20: photos.entity_id 에 FK 제약 부재 (dangling 방치)
+- 상태: **[미수정] 재발 방지 과제** | photos(entity_type,entity_id)가 대상 테이블을 참조하나 FK 없음 → 마이그/삭제 시 참조 파괴 미탐지. BUG-19의 방조 원인.
+
+## BUG-21: audit_logs.target_id(equipment_usage) stale ~205건
+- 상태: **[재작성 안 함 — 해석 경계로 처리]** | BUG-19와 동일 뿌리(EUL 재번호). equipment_usage 감사 216건 중 26건 대상 없음+179건 시각 모순. **과거 감사의 target_id는 신뢰 불가**로 간주(재작성 시 위험 > 이득). 사용자 화면 무관.
+
+## BUG-22: EUL create 경로에서 asset_id 미기입 (입고 40.6% NULL)
+- 상태: **[미수정] 코드 과제** | `inventory.js` 322(재입고)·352(섀시)·382(노드)·411(단일)·764(사용등록) — asset.id 가용한데 create에 미전달. asset_id NULL이 BUG-18 조인 부작용·정합 저해. 기존 NULL 백필은 관리번호 유일매칭 1/219뿐(대부분 부품 로그)이라 forward 기입이 실효.
+
+## BUG-23: audit_logs.details 가 EUL 변경 경로에 미전달
+- 상태: **[미수정]** | AuditLog.log은 details 지원하고 일부 경로는 사용하나, EUL update/delete/create 감사엔 before/after 미전달 → EUL 변경 복원 근거 없음(append-only 미강제와 겹침).
