@@ -647,3 +647,33 @@ quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_us
 
 ## BUG-23: audit_logs.details 가 EUL 변경 경로에 미전달
 - 상태: **[미수정]** | AuditLog.log은 details 지원하고 일부 경로는 사용하나, EUL update/delete/create 감사엔 before/after 미전달 → EUL 변경 복원 근거 없음(append-only 미강제와 겹침).
+
+---
+
+## OPS-2: 평문 백업 덤프 폐기 및 암호화 보관 전환
+- 상태: **[완료] 2026-07-31** | 관련: BL-11(자격증명 암호화, 2026-07-13), BUG-19(매핑 복원 근거)
+- 배경: BUG-19 조사 중 `v2/backups/`에 BL-11 암호화 **이전** 덤프가 다수 잔존함을 확인.
+  암호화 이전 덤프는 `asset_credentials.password`가 평문.
+
+### 폐기 (shred -u -z -n 3) — 7건
+`bl11_redact_pre_20260713.dump`(평문 자격증명) · `ops1_pre_20260712.dump`(암호화 이전 전체 DB) ·
+`photos_pre_bug18fix_20260731.sql` · `b7f_subnets_backup.sql` ·
+`pre_b6e_subnets_20260710_125731.dump` · `bl8_audit_logs_pre_20260712.dump` ·
+`v1_snapshot_b7f.sqlite`(+shm/wal)
+
+### 암호화 보관 전환 (AES-256, gpg -c) — 2건
+`v1_snapshot_b7f.sqlite.gpg` · `b7f_v2_full_20260711_2151.sql.gpg`.
+원본은 md5 대조 검증 후 shred.
+- **복호화 암호 보관 위치**: (TODO — 위치만 기재, 암호 자체 기재 금지)
+
+### 존치
+`db/itassets_20260715_234616.dump` — BL-11 암호화(7/13) 이후 덤프로 `password` 전 행 NULL,
+값은 `password_enc`에 `v1:nonce:ct:tag` 암호문 확인.
+
+### 복원 근거
+BUG-19 매핑은 v1 라이브 DB(`app/data/it_assets.db`) + 위 암호화 스냅샷.
+→ **v1은 폐기 금지** (EUL 원본 매핑의 유일 근거).
+
+### 기타
+- `.gitignore`에 `backup/`·`v2/backups/` 등록 확인, git 이력 유입 없음(`git log --all` 빈 출력).
+- 기한 2026-07-27 대비 4일 지연 마감.
