@@ -650,6 +650,55 @@ quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_us
 
 ---
 
+## BUG-24: 부품 입고 사진 entity_id=0 dangling (유실)
+- 상태: **[코드 수정 완료 / 기존 4장 정정 게이트] 2026-08-01 (격리 HTTP 검증 PASS, 운영 반영 대기)** | 관련: app/routes/inventory.js:449, [[BUG-20]] 동일 뿌리(photos.entity_id FK 부재)
+
+### 증상·원인
+부품 입고 중 사진 첨부 시 `inventory.js`가 설치 computing_module을 찾아 없으면 `Photo.bulkCreate('module', 0, ...)`로
+**entity_id=0 하드코딩**. 방금 만든 module_inventory 행 id가 가용한데 미사용. 조회는 `GET /api/photos/module/<module_inventory.id>`
+기준이라 **id 0인 부품이 없어 어느 화면에도 안 뜸 = 유실**. (잘못된 주석 "item_code as entity_id" — entity_id는 INTEGER라 코드 못 담음.)
+- **발생 시점**: 오늘(2026-07-31 06:14) 최초 — 부품 입고 중 사진 첨부(미설치 코드)가 처음 일어난 시점. 과거 모듈 사진(id 32~34)은 모달 업로드라 정상 id.
+- **영향 4장(전부 오늘)**: 58/59/60(글루시스-GPU-001 입고 06:14) · 61(글루시스-케이블-004 입고 08:06).
+
+### 수정 (완료)
+`inventory.js:449` isModule 분기를 **module_inventory 행 id 귀속으로 통일**: `ModuleInventory.findByCode(itemCode)` → `Photo.bulkCreate('module', invItem.id, ...)`.
+- **판단**: 조회·기존 모듈 사진 모달 업로드가 모두 `module_inventory.id` 키라 통일이 일관적(충돌 없음). 구 "설치본→자산 사진" 분기는
+  모달에 안 뜨는 비일관 동작이라 제거(설치 부품 사진도 이제 부품 모달에 표시). entity_id=0 폴백 소멸.
+- **격리 HTTP 검증 PASS**: 신규 memory 입고·**cable 입고**·기존 코드 재입고 모두 photos.entity_id=module_inventory.id(0 아님) ·
+  모듈 사진 모달 조회에 표시 · 기존 모달 업로드 200 · /module-inventory 200 · module entity_id=0 신규 0건.
+
+### 기존 4장 정정 (★ 게이트 — 별도 승인, 미실행)
+정정 전 현재 값(되돌리기 근거):
+| photo id | entity_type | entity_id | 대상 코드(정정 목표) | uploaded_at |
+|---|---|---|---|---|
+| 58 | module | **0** | 글루시스-GPU-001 (inv id **419**) | 2026-07-31 06:14 |
+| 59 | module | **0** | 글루시스-GPU-001 (419) | 2026-07-31 06:14 |
+| 60 | module | **0** | 글루시스-GPU-001 (419) | 2026-07-31 06:14 |
+| 61 | module | **0** | 글루시스-케이블-004 (inv id **420**) | 2026-07-31 08:06 |
+
+정정 SQL 초안(트랜잭션·영향행수 가드·불일치 시 ROLLBACK):
+```sql
+BEGIN;
+DO $$
+DECLARE c1 int; c2 int;
+BEGIN
+  UPDATE photos SET entity_id=419 WHERE id IN (58,59,60) AND entity_type='module' AND entity_id=0;
+  GET DIAGNOSTICS c1 = ROW_COUNT;
+  UPDATE photos SET entity_id=420 WHERE id=61 AND entity_type='module' AND entity_id=0;
+  GET DIAGNOSTICS c2 = ROW_COUNT;
+  IF c1<>3 OR c2<>1 THEN RAISE EXCEPTION '영향행 불일치 c1=% c2=% → ROLLBACK', c1,c2; END IF;
+END $$;
+COMMIT;
+```
+- 사진 파일 삭제·수량 변경 없음. 419/420이 그 코드의 module_inventory id임 재확인 완료.
+
+### 별건 기록 (해결은 별도)
+- **cable 유형은 `computing_modules_module_type_check`에 없어** computing_modules 진입 영구 불가 → 구 코드에선 cable이 **항상 entity_id=0**이었음(이번 수정으로 해소).
+  cable을 설치 모듈로 다루는 문제 자체(등록 차단 등)는 **CHECK 확장이 아니라 "케이블 연결 관리" 신설로 예정**(별건).
+- [[BUG-20]] photos.entity_id FK 부재와 같은 뿌리 — FK/정합 검토는 BUG-20에서.
+
+---
+
 ## OPS-2: 평문 백업 덤프 폐기 및 암호화 보관 전환
 - 상태: **[완료] 2026-07-31** | 관련: BL-11(자격증명 암호화, 2026-07-13), BUG-19(매핑 복원 근거)
 - 배경: BUG-19 조사 중 `v2/backups/`에 BL-11 암호화 **이전** 덤프가 다수 잔존함을 확인.

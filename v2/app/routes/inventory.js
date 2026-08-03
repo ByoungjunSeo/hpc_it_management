@@ -436,17 +436,14 @@ router.post('/incoming', requireMaintenance, upload.array('photos', 10), async (
           await Photo.bulkCreate('asset', photoAsset.id, req.files, uploadedBy);
         }
       } else if (isModule) {
-        // For modules, attach to first asset that uses this item_code, or store as module photo
+        // BUG-24: 부품 입고 사진을 module_inventory 행 id 에 귀속.
+        //   (구버전: 설치 computing_module 있으면 자산에, 없으면 entity_id=0 → 유실.
+        //    조회는 GET /api/photos/module/<module_inventory.id> 기준이고 모듈 사진 모달 업로드도
+        //    동일 키라, module_inventory.id 로 통일해 항상 부품 사진으로 표시.)
         const itemCodeForPhoto = itemCode !== undefined ? itemCode : req.body.management_number;
-        const { rows: moduleAssetRows } = await pool.query(
-          'SELECT asset_id FROM computing_modules WHERE specification = $1 LIMIT 1',
-          [itemCodeForPhoto]
-        );
-        if (moduleAssetRows[0]) {
-          await Photo.bulkCreate('asset', moduleAssetRows[0].asset_id, req.files, uploadedBy);
-        } else {
-          // No asset linked yet — store as module photo with item_code as entity_id
-          await Photo.bulkCreate('module', 0, req.files, uploadedBy);
+        const invItem = await ModuleInventory.findByCode(itemCodeForPhoto);
+        if (invItem) {
+          await Photo.bulkCreate('module', invItem.id, req.files, uploadedBy);
         }
       }
     }
