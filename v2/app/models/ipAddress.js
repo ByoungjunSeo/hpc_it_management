@@ -246,6 +246,17 @@ const IpAddress = {
     }
   },
 
+  // BUG-25: 반납 시 IP 회수 — 자산에 assigned 된 풀 IP를 available 로 복귀(syncAssetIps의 release 부분과 동일).
+  //   pool(ip_addresses)만 되돌리고 asset_ips(자산 IP 기록)는 유지 — 배정(syncAssetIps)이 asset_ips를 안 건드리는 것과 대칭.
+  //   reserved(예약)는 의도적 홀드라 건드리지 않음. 반납 트랜잭션 client 지원.
+  async releaseByAsset(assetId, client) {
+    const q = client || pool;
+    return q.query(
+      `UPDATE ip_addresses SET allocation_type='available', asset_id=NULL, assigned_to=NULL, updated_at=NOW()
+       WHERE asset_id=$1 AND allocation_type='assigned'`, [assetId]
+    );
+  },
+
   async updateAllocation(ip, data) {
     return pool.query(
       `UPDATE ip_addresses SET allocation_type=$1, asset_id=$2, assigned_to=$3,

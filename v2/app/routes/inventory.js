@@ -1315,6 +1315,7 @@ router.post('/:id/return', requireMaintenance, async (req, res) => {
         await Asset.markReturned(t.id, client);
         if (i > 0) await EquipmentUsageLog.returnActiveByManagement(t.management_number, returnDate, client);
         await logReturnedModules(client, t, returnDate, req);
+        await IpAddress.releaseByAsset(t.id, client); // BUG-25: 반납 시 IP 풀 회수(available 복귀)
       }
     }
     await client.query('COMMIT');

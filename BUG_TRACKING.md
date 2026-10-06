@@ -699,6 +699,35 @@ COMMIT;
 
 ---
 
+## BUG-25: 장비 반납 시 IP 미회수 (풀에 assigned 잔존)
+- 상태: **[코드 수정 완료 / 기존 27건 정합 게이트] 2026-08-27 (격리 HTTP 검증 PASS, 운영 반영 대기)** | 관련: app/routes/inventory.js(반납 라우트), app/models/ipAddress.js(releaseByAsset 신설)
+
+### 증상·원인
+사용등록 시 IP는 자동으로 풀(`ip_addresses`)에서 `assigned` 처리되나(`inventory.js:942` → `IpAddress.syncAssetIps`),
+**반납 라우트에는 그 반대(회수) 로직이 없어** 반납/비활성 자산의 IP가 풀에 `assigned`로 영구 잔존 → 재사용 불가.
+- 실증: 반납 자산 정우씨에스티-001의 IP 2개가 `assigned`로 남음. 전체 잔여 = **returned 2 + inactive 25 = 27건**.
+
+### 수정 (완료)
+- `IpAddress.releaseByAsset(assetId, client)` 신설: `UPDATE ip_addresses SET allocation_type='available', asset_id=NULL,
+  assigned_to=NULL WHERE asset_id=$1 AND allocation_type='assigned'`. **reserved(예약)는 미변경.**
+- 반납 트랜잭션 대상 루프(자산 + 자식 노드)에서 `releaseByAsset(t.id, client)` 호출.
+- **설계**: 배정(syncAssetIps)이 pool만 건드리고 `asset_ips`(자산 IP 기록)는 유지하므로, 회수도 **pool만 available 복귀·asset_ips 유지**(대칭). 재사용등록 시 syncAssetIps가 재배정.
+- **격리 HTTP 검증 PASS**: 반납 → assigned 2개 available·asset_id NULL 회수 · reserved 1개 보존 · asset status=returned · asset_ips 2건 유지 · 자식 노드 연쇄 대상에도 적용.
+
+### 기존 27건 정합 (★ 게이트 — 별도 승인, 미실행)
+```sql
+BEGIN;
+UPDATE ip_addresses ip SET allocation_type='available', asset_id=NULL, assigned_to=NULL, updated_at=NOW()
+FROM assets a
+WHERE ip.asset_id=a.id AND ip.allocation_type='assigned'
+  AND a.status IN ('returned','inactive','decommissioned');  -- 예상 27행(returned 2 + inactive 25)
+-- 영향행 확인 후 COMMIT / 아니면 ROLLBACK
+COMMIT;
+```
+- **[2026-08-27 실행] returned 2건(정우씨에스티-001)만 회수 완료**(트랜잭션·가드, 운영 반영). **inactive 25건은 사용자 결정으로 제외**(의도적 보류 가능성). reserved 미변경.
+
+---
+
 ## OPS-2: 평문 백업 덤프 폐기 및 암호화 보관 전환
 - 상태: **[완료] 2026-07-31** | 관련: BL-11(자격증명 암호화, 2026-07-13), BUG-19(매핑 복원 근거)
 - 배경: BUG-19 조사 중 `v2/backups/`에 BL-11 암호화 **이전** 덤프가 다수 잔존함을 확인.
