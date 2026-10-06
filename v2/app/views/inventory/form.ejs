@@ -67,6 +67,7 @@
                 <option value="<%= a.management_number %>" data-asset-id="<%= a.id %>"><%= a.management_number %> - <%= a.model_name || '' %><%= a.parent_asset_id ? ' [노드]' : '' %></option>
                 <% }}) } %>
             </datalist>
+            <small id="invMgmtMsg" style="display:none; color:#b45309; margin-top:4px;"></small>
             <!-- Node selector: appears when a chassis with children is selected -->
             <div id="nodeSelectArea" style="display:none; margin-top:6px;">
                 <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
@@ -671,10 +672,16 @@ function populateInfraLinkSelect(assetType) {
 }
 
 // === Asset Type Change (usage form) ===
+var _lastPrefillAssetId = null; // CDU-1d: 마지막 prefill 자산 id(불일치 전환 시 잔여 clear 판단)
 function onUsageTypeChange() {
     var sel = document.getElementById('usageTypeSelect');
     if (!sel) return;
     var val = sel.value;
+    // CDU-1d: 유형 변경 시 관리번호·prefill 잔여값 초기화(교차 유형 혼입 방지)
+    var _mgmtIn = document.getElementById('invMgmtInput');
+    if (_mgmtIn) _mgmtIn.value = '';
+    _lastPrefillAssetId = null;
+    if (typeof clearEquipmentPrefill === 'function') clearEquipmentPrefill();
     var hidden = document.getElementById('usageAssetTypeHidden');
     hidden.value = val;
 
@@ -821,8 +828,21 @@ document.getElementById('invMgmtInput').addEventListener('input', function() {
     }
     // Equipment mode: existing asset auto-fill
     var id = findAssetIdByMgmt(val);
-    if (id) onAssetSelect(id);
+    if (id) { _lastPrefillAssetId = id; onAssetSelect(id); }
+    else if (_lastPrefillAssetId) { _lastPrefillAssetId = null; clearEquipmentPrefill(); } // CDU-1d: 불일치 전환 시 잔여 clear
 });
+
+// CDU-1d: prefill로 채운 장비 필드 초기화(모델/자산번호/연결탱크/Room·Rack·Unit/설치형태)
+function clearEquipmentPrefill() {
+    var mn = document.querySelector('[name="model_name"]'); if (mn) mn.value = '';
+    var an = document.querySelector('[name="asset_number"]'); if (an) an.value = '';
+    var infra = document.getElementById('infraLinkSelect'); if (infra) infra.value = '';
+    var room = document.getElementById('invRoomSelect'); if (room) { room.value = ''; if (typeof onInvRoomChange === 'function') onInvRoomChange(); }
+    var rack = document.getElementById('invRackSelect'); if (rack) { rack.value = ''; if (typeof onInvRackChange === 'function') onInvRackChange(); }
+    var unit = document.querySelector('#invUnitGroup input[name="unit"]'); if (unit) unit.value = '';
+    var mode = document.getElementById('cduInstallMode'); if (mode) { mode.value = 'standalone'; if (typeof onCduInstallModeChange === 'function') onCduInstallModeChange(); }
+    var msg = document.getElementById('invMgmtMsg'); if (msg) msg.style.display = 'none';
+}
 
 // Module location type change
 function onModuleLocationTypeChange() {
@@ -1278,6 +1298,17 @@ function onAssetSelect(assetId) {
             var a = data.asset;
             // CDU-1c: cdu/칠러의 parent_asset_id는 섀시가 아니라 인프라 연결(탱크) → 노드 로직(위치 잠금/섀시 배너) 제외
             var _isInfraLinked = (a.asset_type === 'cdu' || a.asset_type === 'chiller');
+            // CDU-1d: 선택한 자산유형과 다른 유형의 자산이면 prefill 생략 + 안내
+            var _selType = (document.getElementById('usageAssetTypeHidden') || {}).value || '';
+            var _mgmtMsg = document.getElementById('invMgmtMsg');
+            if (_selType && a.asset_type !== _selType) {
+                if (_mgmtMsg) {
+                    _mgmtMsg.textContent = '선택한 자산유형과 다른 유형(' + a.asset_type + ')의 자산입니다 — 자동입력을 건너뜁니다.';
+                    _mgmtMsg.style.display = '';
+                }
+                return;
+            }
+            if (_mgmtMsg) _mgmtMsg.style.display = 'none';
             var ips = data.ips || [];
             var creds = data.credentials || [];
 
@@ -1390,6 +1421,8 @@ function onAssetSelect(assetId) {
                     + (locSource.rack_unit_start ? '' : ' (섀시 위치 미등록 — 위치 없이 등록됩니다)'));
             } else {
                 setInvLocationLock(false);
+                // CDU-1d: 부모 없는 자산(랙장착 CDU·서버·PDU)도 자기 위치로 Unit 프리필. 위치 없으면 비움.
+                if (invUnitInput) invUnitInput.value = a.rack_unit_start ? holesToUnitStr(a.rack_unit_start, a.rack_unit_size) : '';
             }
 
             // CDU-1c: 관리번호 prefill 후 CDU 설치 형태(select) 복원 — rack_id 있으면 랙 내장형, 없으면 독립형(+연결 탱크 선택)
