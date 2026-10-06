@@ -1276,6 +1276,8 @@ function onAssetSelect(assetId) {
         .then(function(data) {
             if (!data) return;
             var a = data.asset;
+            // CDU-1c: cdu/칠러의 parent_asset_id는 섀시가 아니라 인프라 연결(탱크) → 노드 로직(위치 잠금/섀시 배너) 제외
+            var _isInfraLinked = (a.asset_type === 'cdu' || a.asset_type === 'chiller');
             var ips = data.ips || [];
             var creds = data.credentials || [];
 
@@ -1311,14 +1313,14 @@ function onAssetSelect(assetId) {
 
             // If this is a node with a parent chassis, use parent's location
             var locSource = a;
-            if (data.parent && data.parent.room_name) {
+            if (data.parent && data.parent.room_name && !_isInfraLinked) {
                 locSource = data.parent;
             }
 
             // Show chassis info banner if this is a node
             var chassisBanner = document.getElementById('chassisInfoBanner');
             if (chassisBanner) chassisBanner.remove();
-            if (data.parent) {
+            if (data.parent && !_isInfraLinked) {
                 var banner = document.createElement('div');
                 banner.id = 'chassisInfoBanner';
                 banner.style.cssText = 'background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px; padding:8px 14px; margin-bottom:12px; font-size:13px; color:#1e40af;';
@@ -1382,12 +1384,25 @@ function onAssetSelect(assetId) {
 
             // BUG-9 후속: 노드는 부모 섀시 위치로 고정(unit 프리필 + 위치 잠금). 부모 없으면 잠금 해제.
             var invUnitInput = document.querySelector('#invUnitGroup input[name="unit"]');
-            if (data.parent) {
+            if (data.parent && !_isInfraLinked) {
                 if (invUnitInput) invUnitInput.value = holesToUnitStr(locSource.rack_unit_start, locSource.rack_unit_size);
                 setInvLocationLock(true, '블레이드 노드는 섀시(부모) 위치를 따릅니다 — 위치는 변경할 수 없습니다.'
                     + (locSource.rack_unit_start ? '' : ' (섀시 위치 미등록 — 위치 없이 등록됩니다)'));
             } else {
                 setInvLocationLock(false);
+            }
+
+            // CDU-1c: 관리번호 prefill 후 CDU 설치 형태(select) 복원 — rack_id 있으면 랙 내장형, 없으면 독립형(+연결 탱크 선택)
+            if (a.asset_type === 'cdu') {
+                var _cduMode = document.getElementById('cduInstallMode');
+                if (_cduMode) {
+                    _cduMode.value = a.rack_id ? 'rack' : 'standalone';
+                    onCduInstallModeChange();
+                    if (!a.rack_id && a.parent_asset_id) {
+                        var _infraSel = document.getElementById('infraLinkSelect');
+                        if (_infraSel) _infraSel.value = String(a.parent_asset_id);
+                    }
+                }
             }
 
             // IPs — clear existing rows and add from asset
