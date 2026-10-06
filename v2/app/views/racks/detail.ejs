@@ -69,7 +69,7 @@ function getAssetClass(info) {
     var sizeU = Math.ceil(slotSize / 3);
     var baseInfo = {
       id: a.id, asset_type: a.asset_type, ownership: a.ownership,
-      model_name: a.model_name || a.asset_type,
+      model_name: a.model_name || (appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type),
       management_number: a.management_number || '',
       slotStart: slotStart, slotSize: slotSize,
       startU: startU, sizeU: sizeU,
@@ -329,7 +329,7 @@ function getAssetClass(info) {
             %>
             <div class="rack-asset-item" onclick="showAssetPopup(<%= a.id %>)">
                 <strong><%= posLabel %></strong>
-                <%= a.model_name || a.asset_type %><% if (!isSwitchSlot && aSizeU > 1) { %> <span style="font-size:11px;color:#64748b;">(<%= aSizeU %>U)</span><% } %>
+                <%= a.model_name || (appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type) %><% if (!isSwitchSlot && aSizeU > 1) { %> <span style="font-size:11px;color:#64748b;">(<%= aSizeU %>U)</span><% } %>
                 <% if (['server','storage','switch','kvm','other'].includes(a.asset_type)) { %>
                 <span class="asset-power-badge" data-asset-id="<%= a.id %>"></span>
                 <% } %>
@@ -379,6 +379,7 @@ function getAssetClass(info) {
                     <select name="rack_type" class="form-control">
                         <option value="standard" <%= (rack.rack_type || 'standard') === 'standard' ? 'selected' : '' %>>서버랙</option>
                         <option value="immersion" <%= rack.rack_type === 'immersion' ? 'selected' : '' %>>액침탱크</option>
+                        <option value="dlc" <%= rack.rack_type === 'dlc' ? 'selected' : '' %>>DLC 서버랙</option>
                     </select>
                 </div>
                 <div class="form-group">

@@ -264,6 +264,14 @@ router.get('/:id', async (req, res) => {
       );
       connectedInfra = rows;
     }
+    // CDU-1: 이 랙에 직접 장착된 랙 내장형 CDU(rack_id 기준)도 연결 설비로 표시
+    {
+      const { rows: rmCdus } = await pool.query(
+        "SELECT id, asset_type, management_number, model_name, status FROM assets WHERE rack_id = $1 AND asset_type = 'cdu' AND parent_asset_id IS NULL AND status NOT IN ('decommissioned') ORDER BY management_number",
+        [rack.id]
+      );
+      connectedInfra = connectedInfra.concat(rmCdus);
+    }
 
     // Rack usage stats (unique U positions, blade-aware)
     const rackTypeCounts = {};

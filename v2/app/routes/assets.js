@@ -176,12 +176,14 @@ router.post('/', requireMaintenance, async (req, res) => {
         name: req.body.new_rack_name.trim()
       });
     }
-    // Infrastructure types (cdu, immersion_tank, chiller) don't go into racks
-    if (['cdu', 'immersion_tank', 'chiller'].includes(req.body.asset_type)) {
+    // Infrastructure types don't go into racks — CDU-1: 랙 내장형 CDU(rack_id 제공)는 랙 배치 허용
+    const _isCduRack = req.body.asset_type === 'cdu' && req.body.rack_id && req.body.rack_id !== '';
+    if (['immersion_tank', 'chiller'].includes(req.body.asset_type) || (req.body.asset_type === 'cdu' && !_isCduRack)) {
       req.body.rack_id = '';
       req.body.rack_unit_start = '';
       req.body.blade_slot = '';
     }
+    if (_isCduRack) req.body.parent_asset_id = ''; // 상호배타: 랙 내장형은 탱크 연결 해제
 
     // Switch slot placement (for immersion tank switch slots)
     const switchSlot = (req.body.switch_slot || '').trim();
@@ -976,12 +978,14 @@ router.post('/:id', requireMaintenance, async (req, res) => {
         name: req.body.new_rack_name.trim()
       });
     }
-    // Infrastructure types (cdu, immersion_tank, chiller) don't go into racks
-    if (['cdu', 'immersion_tank', 'chiller'].includes(req.body.asset_type)) {
+    // Infrastructure types don't go into racks — CDU-1: 랙 내장형 CDU(rack_id 제공)는 랙 배치 허용
+    const _isCduRack = req.body.asset_type === 'cdu' && req.body.rack_id && req.body.rack_id !== '';
+    if (['immersion_tank', 'chiller'].includes(req.body.asset_type) || (req.body.asset_type === 'cdu' && !_isCduRack)) {
       req.body.rack_id = '';
       req.body.rack_unit_start = '';
       req.body.blade_slot = '';
     }
+    if (_isCduRack) req.body.parent_asset_id = ''; // 상호배타: 랙 내장형은 탱크 연결 해제
     // Clear rack info when location type is not server_room
     if (req.body.loc_type && req.body.loc_type !== 'server_room') {
       req.body.rack_id = '';
@@ -996,8 +1000,8 @@ router.post('/:id', requireMaintenance, async (req, res) => {
       req.body.rack_unit_size = '';
     }
 
-    // Preserve parent_asset_id if not in form
-    if (!req.body.parent_asset_id && beforeAsset.parent_asset_id) {
+    // Preserve parent_asset_id if not in form (CDU-1: 랙 내장형 CDU는 탱크 연결 해제 유지 — 보존 제외)
+    if (!req.body.parent_asset_id && beforeAsset.parent_asset_id && !_isCduRack) {
       req.body.parent_asset_id = beforeAsset.parent_asset_id;
     }
     // BUG-10: 자식 노드 수정 시 node_index는 폼에 없으므로 기존 값 보존.

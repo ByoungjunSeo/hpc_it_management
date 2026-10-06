@@ -64,6 +64,8 @@ async function resolveSubmittedLocation(body) {
 // 반환: 불일치 시 에러 메시지(string), 일치/해당없음 시 null. (클라이언트 잠금 우회 대비 서버 이중 방어)
 async function nodeLocationConflict(asset, body) {
   if (!asset || !asset.parent_asset_id) return null; // 자식 아님 → 검사 없음
+  // CDU-1: cdu/칠러의 parent_asset_id는 블레이드 섀시가 아니라 인프라 연결(탱크)이므로 노드 위치규칙 미적용.
+  if (asset.asset_type === 'cdu' || asset.asset_type === 'chiller') return null;
   const parent = await Asset.findById(asset.parent_asset_id);
   if (!parent) return null;
   const sub = await resolveSubmittedLocation(body);
@@ -746,6 +748,24 @@ router.post('/', requireMaintenance, async (req, res) => {
           req.flash('error', conflict);
           return res.redirect(req.body.returnTo || '/inventory/new');
         }
+        // CDU-1 방어검증(400): cdu/칠러의 연결 대상(linked_infra_asset_id)은 액침탱크만 허용 (기존 무검증).
+        const _linkId = parseInt(req.body.linked_infra_asset_id) || null;
+        const _isInfraLink = (usageAssetType === 'cdu' || usageAssetType === 'chiller'
+          || (targetAsset && (targetAsset.asset_type === 'cdu' || targetAsset.asset_type === 'chiller')));
+        if (_linkId && _isInfraLink) {
+          const _linkTarget = await Asset.findById(_linkId);
+          if (!_linkTarget || _linkTarget.asset_type !== 'immersion_tank') {
+            return res.status(400).send('연결 대상은 액침탱크만 가능합니다.');
+          }
+        }
+        // CDU-1: 랙 내장형 CDU U 겹침 검사 — 자산수정 경로의 checkRackUnitOverlap 재사용(EUL 생성 전 거부).
+        if (targetAsset && targetAsset.asset_type === 'cdu' && (req.body.rack || '').trim()) {
+          const _loc = await resolveSubmittedLocation(req.body);
+          if (_loc.rack_id && _loc.start) {
+            const _ov = await Asset.checkRackUnitOverlap(_loc.rack_id, _loc.start, _loc.size, null, targetAsset.id);
+            if (_ov) { req.flash('error', _ov); return res.redirect(req.body.returnTo || '/inventory/new'); }
+          }
+        }
       }
       // Auto-return existing active usage for the same management_number
       // ★ 설계 §5: returnActiveByManagement는 6a에서 returned 이벤트 append INSERT
@@ -786,8 +806,11 @@ router.post('/', requireMaintenance, async (req, res) => {
             }
 
             // Infrastructure types (immersion_tank, cdu, chiller): room only, no rack placement
+            // CDU-1: 랙 내장형 CDU(랙 입력 있는 cdu)는 room-only에서 제외 → 아래 else(일반 랙 배치) 경로를 탄다.
             const infraAssetTypes = ['immersion_tank', 'cdu', 'chiller'];
-            if (infraAssetTypes.includes(asset.asset_type) || infraAssetTypes.includes(usageAssetType)) {
+            const _isCdu = asset.asset_type === 'cdu' || usageAssetType === 'cdu';
+            const isCduRackMounted = _isCdu && (rackName || '').trim() !== '';
+            if ((infraAssetTypes.includes(asset.asset_type) || infraAssetTypes.includes(usageAssetType)) && !isCduRackMounted) {
               // Clear rack fields for infrastructure types
               updateFields.rack_id = null;
               updateFields.rack_unit_start = null;
@@ -842,6 +865,8 @@ router.post('/', requireMaintenance, async (req, res) => {
                 }
               }
             } else {
+            // CDU-1: 랙 내장형 CDU는 탱크 연결 해제(rack_id/U ↔ parent_asset_id 상호배타)
+            if (isCduRackMounted) updateFields.parent_asset_id = null;
             // Find rack_id by name (and room)
             if (rackName) {
               const allRacks = await Rack.findAll();

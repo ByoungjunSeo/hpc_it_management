@@ -153,6 +153,20 @@
     </div>
 </div>
 
+<!-- CDU-1: CDU 설치 형태 토글 (cdu 전용; 칠러엔 미노출) -->
+<div class="card" id="cduInstallToggle" style="display:none">
+    <div class="card-header"><h2>설치 형태</h2></div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>설치 형태</label>
+            <select name="cdu_install_mode" id="cduInstallMode" class="form-control" onchange="onCduInstallModeChange()">
+                <option value="standalone">독립형 (Room + 연결 액침탱크)</option>
+                <option value="rack">랙 내장형 (랙 + U 배치)</option>
+            </select>
+        </div>
+    </div>
+</div>
+
 <!-- Connected infrastructure asset (CDU→탱크, 칠러→CDU/탱크) -->
 <div class="card" id="infraLinkSection" style="display:none">
     <div class="card-header"><h2>연결 설비</h2></div>
@@ -674,6 +688,9 @@ function onUsageTypeChange() {
     var infraLinkSection = document.getElementById('infraLinkSection');
     var rackUnitGroup = document.getElementById('rackUnitGroup');
     var invRackPreview = document.getElementById('invRackPreview');
+    // CDU-1: 설치 형태 토글은 매 변경마다 기본 숨김 → cdu일 때만 아래에서 노출
+    var cduInstallToggle = document.getElementById('cduInstallToggle');
+    if (cduInstallToggle) cduInstallToggle.style.display = 'none';
 
     if (isModuleType(val)) {
         // Module mode: hide equipment-only sections
@@ -702,9 +719,18 @@ function onUsageTypeChange() {
         // Show tank section only for immersion_tank
         tankSection.style.display = (val === 'immersion_tank') ? '' : 'none';
         // Show infra link section for cdu/chiller
-        if (val === 'cdu' || val === 'chiller') {
+        if (val === 'cdu') {
+            // CDU-1: cdu는 설치 형태 토글 노출. 편집/prefill 시 랙 값이 있으면 랙 내장형으로 복원.
+            populateInfraLinkSelect('cdu');
+            if (cduInstallToggle) cduInstallToggle.style.display = '';
+            var _rackHidden = document.getElementById('invRackHidden');
+            var _isRackMounted = !!(_rackHidden && (_rackHidden.value || '').trim());
+            var _modeSel = document.getElementById('cduInstallMode');
+            if (_modeSel) _modeSel.value = _isRackMounted ? 'rack' : 'standalone';
+            onCduInstallModeChange();
+        } else if (val === 'chiller') {
             infraLinkSection.style.display = '';
-            populateInfraLinkSelect(val);
+            populateInfraLinkSelect('chiller');
         } else {
             infraLinkSection.style.display = 'none';
         }
@@ -725,6 +751,23 @@ function onUsageTypeChange() {
 
         // Restore asset datalist
         restoreAssetDatalist();
+    }
+}
+
+// CDU-1: CDU 설치 형태(독립형/랙 내장형) 토글 — 독립형=연결 액침탱크, 랙 내장형=랙+U
+function onCduInstallModeChange() {
+    var m = document.getElementById('cduInstallMode');
+    var mode = m ? m.value : 'standalone';
+    var infraLinkSection = document.getElementById('infraLinkSection');
+    var rackUnitGroup = document.getElementById('rackUnitGroup');
+    var infraSel = document.getElementById('infraLinkSelect');
+    if (mode === 'rack') {
+        if (infraLinkSection) infraLinkSection.style.display = 'none';
+        if (infraSel) infraSel.value = '';            // 연결 액침탱크 비움(상호배타)
+        if (rackUnitGroup) rackUnitGroup.style.display = '';
+    } else {
+        if (infraLinkSection) infraLinkSection.style.display = '';
+        if (rackUnitGroup) rackUnitGroup.style.display = 'none';
     }
 }
 
