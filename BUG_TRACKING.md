@@ -806,6 +806,16 @@ COMMIT;
 - 수정(CDU-1h, 폼만): 자산 수정/생성 폼에 **CDU 전용 "설치 형태" select**(사용등록과 동일 라벨). 랙 내장형→랙/U(rackSection) 노출·연결대상 비움, 독립형→연결 액침탱크 노출·랙 비움(상호배타). 편집 진입 시 **rack_id 유무로 모드 복원**(onAssetTypeChange cdu 분기가 rackSelect 값으로 판정). 서버측 assets.js는 변경 없음(B-3의 `_isCduRack` 로직 그대로).
 - 검증(격리, **렌더 폼 기본값+폼 자체 JS 실행으로 POST 본문 재구성** — 손입력 금지): 랙장착 CDU 무변경 저장→rack_id/U 보존·parent NULL / 독립형 CDU→parent 보존·rack NULL / 서버→rack/U 보존(회귀). 생성·수정 동일 폼(assets.js:129/927).
 
+### 후속 CDU-1i (2026-10-06, 격리 검증 PASS): 자산 수정 폼 CDU 잔여 UI 결함 2건
+- **증상①(배너·위치잠금 오적용)**: 독립형 CDU(parent=액침탱크)와 **칠러**(parent=탱크) 수정 화면이 블레이드 노드 배너("부모 섀시를 따르며 개별 위치 지정 불가")를 띄우고 위치 섹션을 숨김. parent_asset_id는 인프라(탱크) 연결인데 섀시 자식으로 오인.
+- **증상②(설치 형태 select 위치 흔들림)**: CDU 설치형태 select가 모드별로 다른 위치에 렌더 — 독립형=위치 위, 랙장착=랙 미리보기 아래. 원인: `cduInstallSection`이 위치 컨테이너 밖 **아래**에 고정 배치돼, 앞선 위치 섹션의 표시/숨김에 따라 상대 위치가 달라 보임.
+- 원인(클라이언트, form.ejs): 배너 조건(`asset.parent_asset_id`)·위치 숨김 래퍼 모두 cdu/chiller 미제외. + 설치형태 블록 위치.
+- 원인(서버, **2중**):
+  · `routes/assets.js` `isChildEdit = !!parent_asset_id` → 수정 시 room/rack/U를 빈값으로 강제.
+  · **★ `models/asset.js` create/update의 `isChild = !!data.parent_asset_id`** → 모델이 직접 `isChild ? null : room_id`로 **room_id까지 NULL 처리**. 라우트만 고치면 독립 CDU/칠러의 room이 모델에서 재차 유실됨(격리 1차 검증에서 room NULL로 적발). 라우트·모델 **둘 다** 제외 필요.
+- 수정: 클라이언트 배너 조건·위치 숨김 래퍼 + 서버 `isChildEdit` + **모델 create/update `isChild`** 전부에 `&& !['cdu','chiller'].includes(asset_type)` 제외. 설치형태 블록을 상태 행 아래·위치정보 위로 이동(모드 무관 고정, cdu에서만 노출). 실제 블레이드 노드(섀시 자식)는 기존 배너·위치잠금 유지.
+- 검증(격리, 폼 기본값+폼 JS→POST): 독립 CDU→배너無·room/parent 보존 / 칠러→배너無·room/parent 보존 / 랙 CDU→배너無·설치형태 노출·rack/U 보존 / **랙→독립 전환**→rack 해제·연결대상 노출(상호배타) / 실제 블레이드 노드→배너有·위치 NULL·parent 보존(회귀 유지). 주요 페이지 200.
+
 ---
 
 ## OPS-2: 평문 백업 덤프 폐기 및 암호화 보관 전환
