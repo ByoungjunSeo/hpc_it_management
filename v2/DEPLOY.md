@@ -29,7 +29,7 @@
 > 사내/공개 미러로 교체(main·updates만, security는 스킵)합니다. 미지정 시 기본값은 원본
 > deb.debian.org(회귀 0).
 > ```
-> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.3.0 .
+> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.4.0 .
 > ```
 > 실검증 이력: 2.0.1 이미지는 사무 PC(윈도우)에서 사무망의 deb.debian.org 도메인 차단으로
 > kakao 미러(http, security 제외)를 경유해 빌드·전달했고, 서버 격리 스택에서 정품 검증(amd64,
@@ -229,6 +229,23 @@ DB **스키마 변경이 포함된 릴리스**는 마이그레이션 SQL과 적�
 > **2.2.x → 2.3.0: 스키마 변경 없음, 재시작만.** 신규 `.sql`·마이그레이션이 없으므로
 > 위 절차의 2)~4)만 수행하면 됩니다(이미지 적재 → `.env` 태그 `it-assets:2.3.0` →
 > `up -d`). 데이터 보정도 불필요합니다. 상세는 `RELEASE_NOTICE_2.3.0.md`.
+>
+> **2.3.x → 2.4.0: DDL 포함 — 마이그레이션 적용 필요.** 칠러→CDU 냉각 연결(CDU-2)로
+> `assets.cooling_source_asset_id` 컬럼이 추가됩니다. 순서: **백업 → 마이그레이션 → 확인 →
+> (운영 데이터 조치) → 재기동**. `db/*.sql`은 빈 볼륨에만 자동 실행되므로 **기존 설치는 아래를 수동 적용**:
+> ```bash
+> # (DB 컨테이너명은 배포에 맞게 — 단독 컨테이너면 it-assets-db)
+> bash scripts/backup.sh                                             # 1) 백업
+> docker exec -i <DB컨테이너> psql -U itadmin -d it_assets \
+>   < db/migrations/2026-10-06_1_cdu2_cooling_source.sql             # 2) 마이그레이션(멱등·탱크당 칠러≥2면 자동 중단)
+> docker exec -i <DB컨테이너> psql -U itadmin -d it_assets \
+>   < db/migrations/2026-10-06_1_cdu2_cooling_source.verify.sql      # 3) 적용 전후 확인(읽기전용)
+> # 4) (선택) 운영 데이터 조치 — 랙 내장 CDU 수동 귀속이 필요하면 db/ops/cdu2_ops_data_*.sql 검토 후 적용
+> docker load -i it-assets-2.4.0.tar                                 # 5) 새 이미지
+> # .env에 APP_IMAGE=it-assets:2.4.0 → up -d (재기동)
+> docker compose -f docker-compose.prod.yml up -d
+> ```
+> 상세·운영 조치 대상은 `RELEASE_NOTICE_2.4.0.md`.
 
 ---
 
@@ -257,7 +274,7 @@ docker compose -f docker-compose.prod.yml up -d
 | 증상 | 원인 / 조치 |
 |------|------------|
 | `ERR_SSL_PROTOCOL_ERROR` | 브라우저가 주소를 https로 자동 승격 — 주소를 지우고 `http://` 부터 명시 입력(자동완성 주의, 시크릿 창 활용) |
-| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.3.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
+| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.4.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
 | 앱 컨테이너가 바로 종료 | **먼저 `docker compose -f docker-compose.prod.yml logs app` 로 원인 확인** — ① DB 이미지 누락(오프라인): `docker images`에 `postgres:16-alpine` 있는지 + db healthy 확인 ② 아래 (a)~(c) 메시지별 대응 |
 | (a) `exec … : no such file or directory` (엔트리포인트) | **셸 스크립트 CRLF**(Windows에서 clone/편집). `.sh`·`docker-entrypoint.sh`는 LF여야 함 — `.gitattributes`(eol=lf)로 재발 방지, 이미 CRLF면 `sed -i 's/\r$//' scripts/*.sh docker-entrypoint.sh` 후 재빌드 |
 | (b) `[session-secret] 오류 …` (기동 로그) | `.env` 필수값 미설정 — **SESSION_SECRET·CREDENTIAL_ENCRYPTION_KEY를 32자 이상 무작위**로(`openssl rand -hex 32`). POSTGRES_PASSWORD·INITIAL_ADMIN_PASSWORD도 CHANGE_ME 교체 |
