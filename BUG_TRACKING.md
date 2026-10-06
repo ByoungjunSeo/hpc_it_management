@@ -782,6 +782,21 @@ COMMIT;
 
 ---
 
+> (BUG-29 미사용 — 번호 건너뜀)
+
+## BUG-30: 사용등록 prefill 잔여값(접속정보·네트워크·하드웨어·소유구분) 이월
+- 상태: **[수정 완료] 2026-10-06 (CDU-1g, 격리 검증 PASS)** | 관련: app/views/inventory/form.ejs (clearEquipmentPrefill/clearDynamicRows)
+- 증상: 서버 prefill 후 ①유형 변경(서버→CDU→서버) 또는 ②관리번호 불일치 변경 시, 관리번호·모델은 비워지나 **접속정보 5행·소유구분(업체) 등 prefill 잔여값이 이월**됨.
+- 원인: CDU-1d의 `clearEquipmentPrefill`이 **모델·자산번호·탱크·Room/Rack/Unit·설치형태만** 초기화 → onAssetSelect가 채우는 **소유구분·IP행·접속정보행·하드웨어행·OS·기타**는 미초기화. (1d 이전부터 동적 행 잔존은 기존 결함 — onAssetSelect는 재선택 시 스스로 행을 지우나, 불일치/유형변경은 clearEquipmentPrefill 경유라 누락.)
+- **위험도(조사 3번)**:
+  - **IP(高)**: 저장 시 `mapIpsToCols`→`AssetIp.bulkCreate`(inventory.js:965)+`IpAddress.syncAssetIps`(:967) → 잔여 IP행이 **새 자산 asset_ips로 등록 + 풀 재할당(타 자산 IP 탈취 가능)**.
+  - **하드웨어(中)**: `mapHardwareToCols`→EUL `hardware_json` 스냅샷만. **module_inventory 차감·computing_modules 장착 없음**(usage-reg 경로엔 없음) → 데이터 오염 수준.
+  - **소유구분(中)**: 잘못된 ownership 저장.
+- 수정(CDU-1g): `clearEquipmentPrefill`을 onAssetSelect 역연산으로 확장 — **동적 행(IP·접속정보·하드웨어) 전부 제거(`clearDynamicRows` 신설)** + 소유구분 `company` 복귀 + OS·기타 비움. 자산유형·사용날짜 유지. 초기화는 기존대로 **직전 prefill 있을 때만** 실행. 행 채움/비움 단일 소스화(`clearDynamicRows`).
+- 검증(격리, DOM 목 실제 함수): IP 5→0·접속정보 6→0(헤더 포함)·하드웨어 6→0·소유구분 company·OS/기타/모델 비움 PASS. (다른 자산 prefill 전환은 onAssetSelect가 자체 제거 후 재채움.)
+
+---
+
 ## OPS-2: 평문 백업 덤프 폐기 및 암호화 보관 전환
 - 상태: **[완료] 2026-07-31** | 관련: BL-11(자격증명 암호화, 2026-07-13), BUG-19(매핑 복원 근거)
 - 배경: BUG-19 조사 중 `v2/backups/`에 BL-11 암호화 **이전** 덤프가 다수 잔존함을 확인.

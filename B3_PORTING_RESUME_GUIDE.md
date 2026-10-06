@@ -19,6 +19,8 @@
 >   · **1c**(4b3963d): 관리번호 prefill 시 설치형태 select 복원 + cdu/칠러를 클라이언트 노드 위치잠금에서 제외.
 >   · **1d**(f182392): 부모없는 자산 Unit 프리필(BUG-27), 관리번호 불일치/유형변경 시 prefill 초기화, 유형 다른 자산 prefill 생략+안내.
 >   · **1e**(57df0c1): `_assetMap` 중복 관리번호 active 우선 매핑(BUG-28) + 중복 안내, 랙 미리보기 "현재 위치" 강조(자기제외 유지+표시).
+>   · **1f**(커밋 후 기입): `onCduInstallModeChange`에 cdu 유형 가드 — clearEquipmentPrefill 경유로 서버/PDU에 인프라 화면 오적용 수정.
+>   · **1g**(커밋 후 기입): `clearEquipmentPrefill` 확장(동적 행 IP·접속정보·하드웨어 제거 + 소유구분/OS/기타 초기화, `clearDynamicRows` 단일소스) — BUG-30. IP 잔여행 저장 시 풀 재할당 위험 차단.
 >     데이터: 중복 TPC-SV-4U-07 1건(참조多→접미사 분리 SQL 초안, 게이트) · Unit 유실 13건(수동 검토). **BUG-26/28 뿌리=관리번호 UNIQUE 부재.**
 
 > ★ **v2.2.2 릴리스 준비 (2026-10-06, 문서·버전 표기 — 코드 로직 무변경)** — v2.2.1 이후 수리분 재패키징. HEAD 8a0d6a2.
