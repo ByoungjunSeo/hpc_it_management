@@ -21,6 +21,8 @@
 >   · **1e**(57df0c1): `_assetMap` 중복 관리번호 active 우선 매핑(BUG-28) + 중복 안내, 랙 미리보기 "현재 위치" 강조(자기제외 유지+표시).
 >   · **1f**(커밋 후 기입): `onCduInstallModeChange`에 cdu 유형 가드 — clearEquipmentPrefill 경유로 서버/PDU에 인프라 화면 오적용 수정.
 >   · **1g**(커밋 후 기입): `clearEquipmentPrefill` 확장(동적 행 IP·접속정보·하드웨어 제거 + 소유구분/OS/기타 초기화, `clearDynamicRows` 단일소스) — BUG-30. IP 잔여행 저장 시 풀 재할당 위험 차단.
+>   · **1h**(커밋 후 기입): **자산 수정/생성 폼**(assets/form.ejs)에 CDU 설치형태 토글 — 랙 내장 CDU 무변경 저장 시 랙/U 유실(BUG-31) 수정. onAssetTypeChange가 cdu에서 rackSelect를 비우던 것 → 모드별 노출로 전환.
+> - **★ 검증 규칙 보강(CDU-1h 교훈)**: 격리 HTTP 검증 시 **POST 본문은 "렌더된 폼 기본값 + 폼 자체 JS(onAssetTypeChange 등) 실행 결과"에서 재구성**할 것. 필드값을 손으로 주입하면(예: rack_id 직접 삽입) **폼 로드 JS가 값을 비우는 류의 결함을 놓침**(CDU-1 B-3 공백 사례). 브라우저 도구 없을 때는 렌더 HTML에서 name 필드를 추출하고, 폼의 실제 함수를 DOM 목으로 실행해 최종 전송값을 산출한 뒤 POST.
 >     데이터: 중복 TPC-SV-4U-07 1건(참조多→접미사 분리 SQL 초안, 게이트) · Unit 유실 13건(수동 검토). **BUG-26/28 뿌리=관리번호 UNIQUE 부재.**
 
 > ★ **v2.2.2 릴리스 준비 (2026-10-06, 문서·버전 표기 — 코드 로직 무변경)** — v2.2.1 이후 수리분 재패키징. HEAD 8a0d6a2.

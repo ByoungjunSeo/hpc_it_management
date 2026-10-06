@@ -797,6 +797,17 @@ COMMIT;
 
 ---
 
+## BUG-31: 자산 수정 폼에 CDU 랙 입력 부재 → 무변경 저장 시 랙 배치 유실
+- 상태: **[수정 완료] 2026-10-06 (CDU-1h, 격리 검증 PASS)** | 관련: app/views/assets/form.ejs (onAssetTypeChange/onAssetCduModeChange)
+- 증상: 랙 내장 CDU(TPC-CDU-02, 랙 215 U1-U5) 자산 상세→[수정]→무변경 저장→**랙 그리드에서 사라짐**. 수정 폼이 CDU엔 "서버실+장소+연결 대상"만 노출하고 랙/U 입력란이 없었음.
+- **운영 확인(2026-10-06 17:38)**: TPC-CDU-02(id 1205) = room 64, **rack_id NULL·rack_unit_start NULL**(유실 상태), parent NULL — 증상대로 배치 유실됨.
+- 원인: `form.ejs onAssetTypeChange`(폼 로드 시 1041행에서 호출)가 **cdu일 때 rackSection 숨기고 `rackSelect.value=''`·`rackUnitStart.value=''`로 클리어** → 폼이 빈 rack_id/U를 POST → 서버 `assets.js`의 `_isCduRack`(rack_id 유무 판정)이 false → rack/U를 NULL 처리.
+- **CDU-1 B-3 검증 공백 경위**: B-3은 POST 본문에 **rack_id를 손으로 직접 넣어** 서버 보존 로직만 통과시켰음. 실제 폼이 로드 JS로 rack_id를 비워 보낸다는 점을 놓침 → 폼 렌더+폼 JS 기준 검증이 아니었던 것이 공백.
+- 수정(CDU-1h, 폼만): 자산 수정/생성 폼에 **CDU 전용 "설치 형태" select**(사용등록과 동일 라벨). 랙 내장형→랙/U(rackSection) 노출·연결대상 비움, 독립형→연결 액침탱크 노출·랙 비움(상호배타). 편집 진입 시 **rack_id 유무로 모드 복원**(onAssetTypeChange cdu 분기가 rackSelect 값으로 판정). 서버측 assets.js는 변경 없음(B-3의 `_isCduRack` 로직 그대로).
+- 검증(격리, **렌더 폼 기본값+폼 자체 JS 실행으로 POST 본문 재구성** — 손입력 금지): 랙장착 CDU 무변경 저장→rack_id/U 보존·parent NULL / 독립형 CDU→parent 보존·rack NULL / 서버→rack/U 보존(회귀). 생성·수정 동일 폼(assets.js:129/927).
+
+---
+
 ## OPS-2: 평문 백업 덤프 폐기 및 암호화 보관 전환
 - 상태: **[완료] 2026-07-31** | 관련: BL-11(자격증명 암호화, 2026-07-13), BUG-19(매핑 복원 근거)
 - 배경: BUG-19 조사 중 `v2/backups/`에 BL-11 암호화 **이전** 덤프가 다수 잔존함을 확인.
