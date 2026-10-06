@@ -27,6 +27,17 @@
 
 ## 릴리스 포함 버그 (재패키징 기준)
 
+### v2.2.2 (2026-10-06, 코드만 변경 · DDL 없음 · HEAD 8a0d6a2)
+v2.2.1(bc55032) 이후 수리분을 묶은 버그 수정 릴리스. 스키마·마이그레이션 변경 0건. **격리 HTTP 검증 PASS · 운영 인수 대기.**
+- **BUG-19** — 7/11 B-7f 컷오버의 EUL 재번호 후 photos.entity_id remap 누락 → 입출고 사진 오귀속. 오귀속 10장 원주인 재연결(데이터 정정 완료) + 사진 조인 asset_id 기준 유지 [검증 PASS·정정 완료]
+  - ※ BUG-18("관리번호 조인 누수")은 **오진**이었으며 정정됨(상세 BUG-18 블록·리줌 가이드 폐기 표시).
+- **BUG-22** — 입고·사용등록 5경로 EUL asset_id 미기입 → forward 기입 [검증 PASS·운영 인수 대기]
+- **BUG-24** — 부품 입고 사진 entity_id=0 하드코딩 → module_inventory id 귀속 [검증 PASS·기존 4장 정정 게이트]
+- **BUG-25** — 반납 시 할당 IP 풀 미회수 → available 자동 복귀(reserved 보존) [검증 PASS·기존 정합 returned 2건 완료, inactive 제외]
+- (부수) 배포 유닛 `Restart=always`(SIGTERM 시 systemd 무복구 취약점 해소) · OPS-2 평문 덤프 폐기 7건+암호화 보관 2건 — 운영 조치, 코드 로직 무관.
+
+> v2.2.1 이후 수리는 **v2.2.2로 합류**(tar-태그 일관성). BUG-24 기존 사진·BUG-25 기존 IP는 **자동 보정 안 됨** → 설치본별 수동 점검(RELEASE_NOTICE_2.2.2 §6).
+
 ### v2.2.1 (2026-07-22, 코드만 변경 · DDL 없음)
 v2.2.0 태그(62c2603) 이후 수리분을 묶은 버그 수정 릴리스. 스키마·마이그레이션 변경 0건.
 - **BUG-14** — 부품 "사용 현황" 스텁(빈 목록) → getUsageByCode 실배선 [완료]
@@ -625,7 +636,7 @@ quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_us
 - 상태: **[재작성 안 함 — 해석 경계로 처리]** | BUG-19와 동일 뿌리(EUL 재번호). equipment_usage 감사 216건 중 26건 대상 없음+179건 시각 모순. **과거 감사의 target_id는 신뢰 불가**로 간주(재작성 시 위험 > 이득). 사용자 화면 무관.
 
 ## BUG-22: EUL create 경로에서 asset_id 미기입 (입고 40.6% NULL)
-- 상태: **[수정 완료] 2026-07-31 (격리 HTTP 검증 PASS, 운영 반영 대기)** | 관련: app/routes/inventory.js 322/352/382/411/764
+- 상태: **[격리 검증 PASS · 운영 인수 대기] 2026-07-31** | v2.2.2 합류 | 관련: app/routes/inventory.js 322/352/382/411/764
 
 ### 수정
 `EquipmentUsageLog.create` 호출부 5곳에 `asset_id` 전달(모델은 이미 `data.asset_id` 수용, 모델 무수정):
@@ -651,7 +662,7 @@ quantity_change=count)·노드 단독·모듈0 자산·이중차감 없음(in_us
 ---
 
 ## BUG-24: 부품 입고 사진 entity_id=0 dangling (유실)
-- 상태: **[코드 수정 완료 / 기존 4장 정정 게이트] 2026-08-01 (격리 HTTP 검증 PASS, 운영 반영 대기)** | 관련: app/routes/inventory.js:449, [[BUG-20]] 동일 뿌리(photos.entity_id FK 부재)
+- 상태: **[격리 검증 PASS · 운영 인수 대기 / 기존 4장 정정 게이트] 2026-08-01** | v2.2.2 합류 | 관련: app/routes/inventory.js:449, [[BUG-20]] 동일 뿌리(photos.entity_id FK 부재)
 
 ### 증상·원인
 부품 입고 중 사진 첨부 시 `inventory.js`가 설치 computing_module을 찾아 없으면 `Photo.bulkCreate('module', 0, ...)`로
@@ -700,7 +711,7 @@ COMMIT;
 ---
 
 ## BUG-25: 장비 반납 시 IP 미회수 (풀에 assigned 잔존)
-- 상태: **[코드 수정 완료 / 기존 27건 정합 게이트] 2026-08-27 (격리 HTTP 검증 PASS, 운영 반영 대기)** | 관련: app/routes/inventory.js(반납 라우트), app/models/ipAddress.js(releaseByAsset 신설)
+- 상태: **[격리 검증 PASS · 운영 인수 대기 / 기존 정합 returned 2건 완료·inactive 제외] 2026-08-27** | v2.2.2 합류 | 관련: app/routes/inventory.js(반납 라우트), app/models/ipAddress.js(releaseByAsset 신설)
 
 ### 증상·원인
 사용등록 시 IP는 자동으로 풀(`ip_addresses`)에서 `assigned` 처리되나(`inventory.js:942` → `IpAddress.syncAssetIps`),
