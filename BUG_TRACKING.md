@@ -750,6 +750,38 @@ COMMIT;
 
 ---
 
+## BUG-27: 사용등록 prefill 시 랙 자산 Unit 미기입
+- 상태: **[수정 완료] 2026-10-06 (CDU-1d, 격리 검증 PASS)** | 관련: app/views/inventory/form.ejs (onAssetSelect)
+- 증상: 관리번호 prefill 시 Room/Rack은 채워지나 **Unit 입력칸이 빈칸** → 저장 시 rack_id만 있고 rack_unit_start 없음(랙 그리드에서 U 없는 자산).
+- 원인: `onAssetSelect`가 Unit을 **`if (data.parent)` 노드(블레이드) 분기에서만** 채움(bug9 이래). 부모 없는 일반 자산(서버·PDU·랙장착 CDU)은 Unit 미기입. **회귀 아님 — bug9부터의 기존 갭**(git 0090f6c·409d52f 확인).
+- 수정(CDU-1d): `onAssetSelect` 부모없음(else) 분기에 `invUnitInput.value = a.rack_unit_start ? holesToUnitStr(...) : ''` 추가 — 랙장착 자산은 자기 U로 채우고 위치 없으면 비움.
+- **서버 처리부(빈 Unit) — 확인**: 사용등록 sync의 랙배치(else) 블록은 `if (unitStr){…}`(inventory.js:891-907)만 설정하고, `Asset.update(asset.id, {...asset, ...updateFields})`(:928)가 적용 → **빈 Unit이면 rack_unit_start를 updateFields에 넣지 않아 기존 값이 보존됨(NULL로 덮지 않음)**. 즉 이미 배치된 자산은 빈 Unit 저장에도 U 유실 없음(신규 배치만 U 없이 저장될 수 있어 prefill 기입이 보완). (타임라인 이력 편집 경로 inventory.js:1197은 null-후-설정이라 별개.)
+
+## BUG-28: 중복 관리번호 last-wins prefill 오매핑
+- 상태: **[코드 보강 완료 2026-10-06 (CDU-1e, 격리 검증 PASS) / 데이터 정리 게이트]** | 관련: app/views/inventory/form.ejs (_assetMap)
+- 증상: `TPC-SV-4U-07` prefill 시 Rack="선택"·Unit 빈칸. 원인은 **동일 관리번호 2행**(id 1117 inactive·위치없음 / id 1194 active·rack 200·U4).
+- 원인: `Asset.findAll()`는 `created_at DESC` → 1194 먼저·1117 나중. `_assetMap['mgmt_..']`는 **last-wins** → **1117(inactive·위치없음)로 매핑** → prefill이 위치 없는 행을 불러옴.
+- 수정(CDU-1e, 코드): `_assetMap`을 **active 우선 → 같은 상태면 최신(id 큰 것) 우선**으로 구성 + 중복 관리번호는 prefill 시 안내 문구. (반납 단일 자산 재사용등록 prefill은 유지 — inactive/returned 건너뛰기 안 함.)
+- **데이터 점검(3번, 읽기전용)**: 전체 중복 관리번호 = **TPC-SV-4U-07 1건뿐**. 비활성 1117 참조 多(eul 16·computing_modules 7·audit 13·photos/asset_ips/creds 각 2·module_inventory_logs 6) → **삭제 불가, 보존+관리번호 접미사 변경 권장**.
+- **정리 SQL 초안 (★ 게이트 — 미실행)**:
+  ```sql
+  -- 참조가 많아 삭제 대신 비활성 구행의 관리번호를 접미사로 분리(중복 해소). 운영 반영 후 1회.
+  BEGIN;
+  UPDATE assets SET management_number = management_number || '-OLD1117', updated_at = NOW()
+  WHERE id = 1117 AND management_number = 'TPC-SV-4U-07' AND status <> 'active';
+  -- (선택) 이력 스냅샷 management_number는 비정규화라 그대로 둠(이력 보존). 확인 후 COMMIT/ROLLBACK
+  COMMIT;
+  ```
+- **rack 있고 U 미지정(4번, 읽기전용)**: `rack_id 있고 rack_unit_start NULL, 부모없음` = **13건 — U 유실 아님**.
+  - **6건 = 반납 rack_id 미해제 잔재**(status=`returned`인데 rack_id=212 유지, U만 NULL): 코코링크-001·KTNF-001·KTNF-002·태진티엔에스-001·이슬림코리아-002·이슬림코리아-003(ids 1170/1171/1193/1144/1185/1186). **U 복원 대상 아님** — 반납 자산이므로 rack_id도 해제돼야 정상.
+    · 반납 이벤트(EUL) created_at = **전부 2026-07-11(B-7f 컷오버 이관) 이후**(대부분 7/11 대량, 일부 7/21·7/27·8/26). 원인 후보: **v1 이관 데이터** 또는 **markReturned 외 반납 경로**(markReturned는 rack_id/U 모두 NULL 처리하므로 그 경로였다면 rack_id가 남지 않음).
+    · 처리안 초안(★ 게이트, 미실행): `UPDATE assets SET rack_id=NULL WHERE id IN (1170,1171,1193,1144,1185,1186) AND status='returned' AND rack_unit_start IS NULL;`
+  - **7건 = active 정상 사용 형태**(U 미지정, 조치 없음): TPC-PC-{26,02,03,05,14}·TPC-N-21·TPC-Wifi-01 — PC/네트워크/Wifi류로 U 세부배치 미기입이 자연스러움.
+  - **결론: 사용등록 경로 U 유실 0건** — 빈 Unit 저장 시 기존 rack_unit_start 보존 확인(inventory.js:891-907 / :928). 위 13건은 모두 사용등록 prefill/저장과 무관(반납 잔재 또는 원래 미지정).
+- **뿌리 공유**: BUG-26(U겹침 미검사) · BUG-28 모두 **`assets.management_number` UNIQUE 제약 부재**가 근본. 중복 방지(UNIQUE 또는 입고 채번 정합)는 상위 트랙에서 처리 필요.
+
+---
+
 ## OPS-2: 평문 백업 덤프 폐기 및 암호화 보관 전환
 - 상태: **[완료] 2026-07-31** | 관련: BL-11(자격증명 암호화, 2026-07-13), BUG-19(매핑 복원 근거)
 - 배경: BUG-19 조사 중 `v2/backups/`에 BL-11 암호화 **이전** 덤프가 다수 잔존함을 확인.
