@@ -1,7 +1,20 @@
 # B-3 이후 애플리케이션 이식 — 재개 가이드
 
-> 작성일: 2026-06-26 / 최종 현행화: 2026-10-06 (v2.2.2 릴리스 준비 — 버전·릴리스노트)
+> 작성일: 2026-06-26 / 최종 현행화: 2026-10-06 (CDU-1 랙 내장형 CDU 지원)
 > 작성 목적: 서버 종료 전 맥락 보존. 재개 시 이 문서 + git log부터 확인.
+
+> ★ **CDU-1 랙 내장형 CDU 지원 (2026-10-06, 격리 HTTP 검증 PASS · 운영 인수 대기)** — DLC 랙용 랙 내장형 CDU.
+> - **설계**: 랙 내장형 CDU = rack_id + rack_unit_start/size, parent_asset_id NULL(연결 랙 = rack_id, **DDL 없음**).
+>   독립형 CDU = 기존(Room + parent→액침탱크). 설치 형태는 저장 안 함(폼 토글, 편집 시 rack_id 유무로 복원). 칠러는 독립형 유지.
+> - **구현 파일**: `routes/inventory.js`(사용등록 분기: cdu+랙 입력 → 일반 랙 배치 경로·parent NULL 상호배타 / 연결대상 비-탱크 400 방어 /
+>   랙 내장 CDU U겹침 checkRackUnitOverlap 재사용 / **nodeLocationConflict에서 cdu·칠러 제외** — parent가 섀시 아닌 인프라 링크라) ·
+>   `views/inventory/form.ejs`(cdu 전용 "설치 형태" 토글 onCduInstallModeChange) · `routes/racks.js`(랙 상세 연결설비에 랙 내장 CDU 포함) ·
+>   `views/racks/detail.ejs`·`room.ejs`(rack_type 'dlc' 선택지, CHECK 없음).
+> - **표시**: CDU 상세 "위치 정보" 카드가 rack_id 기존 렌더 → 설치 랙 표시(추가 코드 불필요). 랙 그리드는 parent NULL+rack_unit라 자동 렌더.
+> - **격리 검증(V-1~10) PASS**: 랙장착 저장·U겹침 거부·독립형 회귀·400·상호배타·칠러 불변·반납 U해제(markReturned가 room/rack/U NULL)·
+>   렌더 script 파싱·페이지 200·audit 정상. (운영 접촉 없음, pkill 미사용.)
+> - **운영 반영 후 수동(브라우저)**: 랙 215 rack_type='dlc' 변경, TPC-CDU-02 랙 내장형 재등록. **U겹침은 사용등록 경로 전체 갭**(서버 포함)
+>   이라 CDU만 checkRackUnitOverlap 적용 — 전역 적용은 별건.
 
 > ★ **v2.2.2 릴리스 준비 (2026-10-06, 문서·버전 표기 — 코드 로직 무변경)** — v2.2.1 이후 수리분 재패키징. HEAD 8a0d6a2.
 > - **포함 수리**: BUG-19(컷오버 사진 오귀속 정정·조인 asset_id 유지, 10장 재연결 완료) · BUG-22(입고/사용등록 asset_id 기입) ·
