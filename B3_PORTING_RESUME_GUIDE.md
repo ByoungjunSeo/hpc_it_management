@@ -1,7 +1,17 @@
 # B-3 이후 애플리케이션 이식 — 재개 가이드
 
-> 작성일: 2026-06-26 / 최종 현행화: 2026-10-06 (CDU-1 랙 내장형 CDU 지원)
+> 작성일: 2026-06-26 / 최종 현행화: 2026-10-06 (CDU-2 칠러→CDU 냉각 연결)
 > 작성 목적: 서버 종료 전 맥락 보존. 재개 시 이 문서 + git log부터 확인.
+
+> ★ **CDU-2 칠러 → CDU 1:N 냉각 연결 (2026-10-06, 격리 + 운영 덤프 리허설 PASS · 운영 적용/인수 대기 · v2.4.0 · 미커밋)**
+> - **설계**: `assets.cooling_source_asset_id INTEGER NULL REFERENCES assets(id) ON DELETE SET NULL`(CDU→칠러). 칠러 1 : CDU N.
+>   `parent_asset_id`(독립형 CDU→탱크)와 **직교**. 칠러는 탱크 직결 폐지(parent NULL). 랙 내장 CDU도 공급 칠러 지정 가능.
+> - **DDL**: `db/02_schema_assets.sql`(컬럼+인덱스) + 마이그레이션 `db/migrations/2026-10-06_1_cdu2_cooling_source.sql`
+>   (ADD COLUMN/INDEX IF NOT EXISTS 멱등 · DO 가드로 탱크당 칠러≥2면 RAISE·롤백 · 칠러→탱크를 CDU.cooling_source로 이전+칠러 parent NULL 동일 트랜잭션). 확인용 `*.verify.sql`.
+> - **운영 조치(승인 후)**: `db/ops/cdu2_ops_data_20261006.sql` — 랙 내장 TPC-CDU-02(1205).cooling_source=1177(TPC-CHI-01). 마이그레이션은 TPC-CDU-01(1176)만 자동 귀속.
+> - **코드**: models/asset.js(create/update 컬럼+findByCoolingSource), routes/assets.js(생성·수정 400 검증·칠러 parent null·상세 coolingSource/suppliedCdus·삭제 가드), routes/inventory.js(사용등록 검증·반영), routes/racks.js(connectedInfra 칠러 조인), views(assets/form·detail, inventory/form[prefill 짝], racks/detail).
+> - **검증**: 멱등 2회·가드 중단/롤백·신규 스키마↔마이그 동등(컬럼 순서만 상이)·운영 덤프 리허설(1176→1177·칠러 parent NULL·기타행 무변경·무결성 0위반)·앱 스모크 G2~G9/G13 PASS·FK SET NULL 안전망.
+> - **남은 일**: 커밋, 운영 백업→마이그레이션→확인→ops SQL→재시작, 버전 번들 재조립 sha 기입. [[BUG-29]] 반납 rack_id 별건.
 
 > ★ **CDU-1 랙 내장형 CDU 지원 (2026-10-06, 격리 HTTP 검증 PASS · 운영 인수 대기)** — DLC 랙용 랙 내장형 CDU.
 > - **설계**: 랙 내장형 CDU = rack_id + rack_unit_start/size, parent_asset_id NULL(연결 랙 = rack_id, **DDL 없음**).

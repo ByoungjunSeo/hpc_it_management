@@ -184,6 +184,18 @@ router.post('/', requireMaintenance, async (req, res) => {
       req.body.blade_slot = '';
     }
     if (_isCduRack) req.body.parent_asset_id = ''; // 상호배타: 랙 내장형은 탱크 연결 해제
+    if (req.body.asset_type === 'chiller') req.body.parent_asset_id = ''; // CDU-2: 칠러는 탱크에 직결하지 않음
+
+    // CDU-2: 공급 칠러 검증 — 지정 시 대상은 활성 칠러만(아니면 400). cdu만 보유.
+    if (req.body.cooling_source_asset_id) {
+      if (req.body.asset_type !== 'cdu') { req.body.cooling_source_asset_id = ''; }
+      else {
+        const _src = await Asset.findById(parseInt(req.body.cooling_source_asset_id));
+        if (!_src || _src.asset_type !== 'chiller' || _src.status !== 'active') {
+          return res.status(400).send('공급 칠러는 활성 상태의 칠러만 지정할 수 있습니다.');
+        }
+      }
+    }
 
     // Switch slot placement (for immersion tank switch slots)
     const switchSlot = (req.body.switch_slot || '').trim();
@@ -516,16 +528,27 @@ router.get('/:id', async (req, res) => {
     // Get parent infrastructure asset
     const parentAsset = asset.parent_asset_id ? await Asset.findById(asset.parent_asset_id) : null;
 
-    // Get child infrastructure assets
+    // Get child infrastructure assets (CDU-2: 각 CDU 옆에 공급 칠러 관리번호 동반)
     const infraTypes = ['immersion_tank', 'cdu', 'chiller'];
     let childInfraAssets = [];
     if (infraTypes.includes(asset.asset_type)) {
       const { rows } = await pool.query(
-        "SELECT id, asset_type, management_number, model_name, status FROM assets WHERE parent_asset_id = $1 AND asset_type IN ('cdu','chiller') ORDER BY asset_type, management_number",
+        `SELECT a.id, a.asset_type, a.management_number, a.model_name, a.status,
+                a.cooling_source_asset_id, chi.management_number AS cooling_source_mgmt, chi.status AS cooling_source_status
+         FROM assets a
+         LEFT JOIN assets chi ON a.cooling_source_asset_id = chi.id
+         WHERE a.parent_asset_id = $1 AND a.asset_type IN ('cdu','chiller')
+         ORDER BY a.asset_type, a.management_number`,
         [asset.id]
       );
       childInfraAssets = rows;
     }
+
+    // CDU-2: CDU면 공급 칠러, 칠러면 공급 중인 CDU 목록
+    const coolingSource = (asset.asset_type === 'cdu' && asset.cooling_source_asset_id)
+      ? await Asset.findById(asset.cooling_source_asset_id) : null;
+    const suppliedCdus = (asset.asset_type === 'chiller')
+      ? await Asset.findByCoolingSource(asset.id) : [];
 
     const assetPhotos = await Photo.findByAssetWithUsageLogs(asset.id, asset.management_number);
 
@@ -545,6 +568,8 @@ router.get('/:id', async (req, res) => {
       linkedRackAssetCount,
       parentAsset,
       childInfraAssets,
+      coolingSource,
+      suppliedCdus,
       rooms,
       assetPhotos,
       activeLendings,
@@ -986,6 +1011,7 @@ router.post('/:id', requireMaintenance, async (req, res) => {
       req.body.blade_slot = '';
     }
     if (_isCduRack) req.body.parent_asset_id = ''; // 상호배타: 랙 내장형은 탱크 연결 해제
+    if (req.body.asset_type === 'chiller') req.body.parent_asset_id = ''; // CDU-2: 칠러는 탱크에 직결하지 않음
     // Clear rack info when location type is not server_room
     if (req.body.loc_type && req.body.loc_type !== 'server_room') {
       req.body.rack_id = '';
@@ -1001,8 +1027,27 @@ router.post('/:id', requireMaintenance, async (req, res) => {
     }
 
     // Preserve parent_asset_id if not in form (CDU-1: 랙 내장형 CDU는 탱크 연결 해제 유지 — 보존 제외)
-    if (!req.body.parent_asset_id && beforeAsset.parent_asset_id && !_isCduRack) {
+    // CDU-2: 칠러는 탱크 직결을 쓰지 않으므로 보존 대상에서 제외.
+    if (!req.body.parent_asset_id && beforeAsset.parent_asset_id && !_isCduRack && req.body.asset_type !== 'chiller') {
       req.body.parent_asset_id = beforeAsset.parent_asset_id;
+    }
+
+    // CDU-2: 공급 칠러 — cdu만 보유. 변경/신규 지정 시 활성 칠러만 허용(400), 자기자신 금지.
+    //   값이 이전과 같으면(무변경) 검증 생략 → 기존 참조는 대상이 비활성이 돼도 유지.
+    if (req.body.asset_type !== 'cdu') {
+      req.body.cooling_source_asset_id = '';
+    } else {
+      const _coolId = parseInt(req.body.cooling_source_asset_id) || null;
+      const _beforeCool = beforeAsset.cooling_source_asset_id || null;
+      if (_coolId && _coolId === parseInt(req.params.id)) {
+        return res.status(400).send('자기 자신을 공급 칠러로 지정할 수 없습니다.');
+      }
+      if (_coolId && _coolId !== _beforeCool) {
+        const _src = await Asset.findById(_coolId);
+        if (!_src || _src.asset_type !== 'chiller' || _src.status !== 'active') {
+          return res.status(400).send('공급 칠러는 활성 상태의 칠러만 지정할 수 있습니다.');
+        }
+      }
     }
     // BUG-10: 자식 노드 수정 시 node_index는 폼에 없으므로 기존 값 보존.
     if (req.body.node_index == null && beforeAsset.node_index != null) {
@@ -1144,6 +1189,15 @@ router.post('/:id/delete', requireMaintenance, async (req, res) => {
         }
         // Delete linked rack if empty
         await Rack.delete(linkedRack.id);
+      }
+    }
+    // CDU-2: 칠러 삭제 시 공급 중인 CDU가 있으면 경고 후 중단(탱크 삭제 방어와 동일 방식).
+    //   (삭제를 강행하면 FK ON DELETE SET NULL로 CDU.cooling_source가 끊김 — 의도치 않은 유실 방지)
+    if (asset && asset.asset_type === 'chiller') {
+      const supplied = await Asset.findByCoolingSource(asset.id);
+      if (supplied.length > 0) {
+        throw new Error('이 칠러가 공급 중인 CDU ' + supplied.length + '대(' +
+          supplied.map(c => c.management_number).join(', ') + ')가 있어 삭제할 수 없습니다. 먼저 CDU의 공급 칠러를 변경/해제해주세요.');
       }
     }
     await Photo.deleteByEntity('asset', parseInt(req.params.id));

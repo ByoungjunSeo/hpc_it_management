@@ -282,6 +282,29 @@
         </div>
     </div>
 
+    <!-- CDU-2: 공급 칠러 (cdu 전용 — 독립형·랙 내장형 공통, 설치형태와 직교) -->
+    <div id="coolingSourceSection" style="display:none;">
+        <div class="card-header mt-2"><h2>공급 칠러</h2></div>
+        <div class="form-row">
+            <div class="form-group" style="flex:2">
+                <label>공급 칠러 (냉각)</label>
+                <select name="cooling_source_asset_id" id="coolingSourceSelect" class="form-control">
+                    <option value="">미지정</option>
+                    <%
+                      const chillerAssets = (typeof assets !== 'undefined' ? assets : []).filter(function(a) {
+                        // 활성 칠러만 선택지로. 단, 현재 자산의 기존 공급 칠러가 비활성이면 유지 표시를 위해 포함.
+                        return a.asset_type === 'chiller' && (a.status === 'active' || (asset && asset.cooling_source_asset_id == a.id));
+                      });
+                      chillerAssets.forEach(function(a) {
+                    %>
+                    <option value="<%= a.id %>" <%= asset?.cooling_source_asset_id == a.id ? 'selected' : '' %>><%= a.management_number || a.model_name %><%= a.model_name && a.management_number ? ' (' + a.model_name + ')' : '' %><%= a.status !== 'active' ? ' [' + a.status + ']' : '' %></option>
+                    <% }) %>
+                </select>
+                <small class="text-muted" style="font-size:11px;">칠러 1대가 여러 CDU에 공급 가능. 활성 칠러만 지정됩니다.</small>
+            </div>
+        </div>
+    </div>
+
     <input type="hidden" name="_ip_section_present" value="1">
     <div class="card-header mt-2"><h2>IP 주소</h2></div>
 
@@ -588,7 +611,9 @@ function onAssetTypeChange() {
     var tankSection = document.getElementById('tankSection');
     var infraLinkSection = document.getElementById('infraLinkSection');
     var cduInstallSection = document.getElementById('cduInstallSection');
+    var coolingSourceSection = document.getElementById('coolingSourceSection'); // CDU-2
     if (cduInstallSection) cduInstallSection.style.display = 'none'; // 기본 숨김, cdu에서만 노출
+    if (coolingSourceSection) coolingSourceSection.style.display = 'none'; // CDU-2: cdu에서만 노출
     if (assetType === 'immersion_tank') {
         rackSection.style.display = 'none';
         tankSection.style.display = '';
@@ -599,13 +624,16 @@ function onAssetTypeChange() {
         // CDU-1h: 설치 형태 토글 노출. 편집 진입 시 rack 값 있으면 랙 내장형으로 복원.
         tankSection.style.display = 'none';
         if (cduInstallSection) cduInstallSection.style.display = '';
+        if (coolingSourceSection) coolingSourceSection.style.display = ''; // CDU-2: 공급 칠러(모드 무관)
         var _hasRack = !!document.getElementById('rackSelect').value;
         document.getElementById('cduInstallMode').value = _hasRack ? 'rack' : 'standalone';
         onAssetCduModeChange();
     } else if (assetType === 'chiller') {
+        // CDU-2: 칠러는 탱크에 직결하지 않음 — 연결 액침탱크 숨김·비움.
         rackSection.style.display = 'none';
         tankSection.style.display = 'none';
-        infraLinkSection.style.display = '';
+        infraLinkSection.style.display = 'none';
+        var _infra = document.getElementById('infraLinkSelect'); if (_infra) _infra.value = '';
         document.getElementById('rackSelect').value = '';
         document.getElementById('rackUnitStart').value = '';
     } else {

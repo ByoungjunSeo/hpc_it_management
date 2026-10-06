@@ -55,6 +55,10 @@ CREATE TABLE assets (
         REFERENCES server_rooms(id) ON DELETE SET NULL ON UPDATE CASCADE,
     parent_asset_id INTEGER
         REFERENCES assets(id) ON DELETE CASCADE ON UPDATE CASCADE,
+    -- CDU-2: 공급 칠러(칠러 1 : CDU N). parent_asset_id(독립형 CDU→탱크)와 직교.
+    --   칠러 삭제 시 참조만 해제(ON DELETE SET NULL) — CDU는 유지.
+    cooling_source_asset_id INTEGER
+        REFERENCES assets(id) ON DELETE SET NULL ON UPDATE CASCADE,
     shelf_size INTEGER DEFAULT 0,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -64,6 +68,7 @@ CREATE INDEX idx_assets_rack ON assets(rack_id);
 CREATE INDEX idx_assets_type ON assets(asset_type);
 CREATE INDEX idx_assets_ownership ON assets(ownership);
 CREATE INDEX idx_assets_parent ON assets(parent_asset_id);
+CREATE INDEX idx_assets_cooling_source ON assets(cooling_source_asset_id);  -- CDU-2
 -- BUG-10: 같은 부모(섀시) 아래 node_index 유일성 — 부모/번호 지정 노드에 한함(부분 유니크).
 -- (구 idx_assets_parent_slot_unique(blade_slot 기반)를 대체 — blade_slot은 렌더용 의미로 원복)
 CREATE UNIQUE INDEX idx_assets_parent_node_unique ON assets(parent_asset_id, node_index)

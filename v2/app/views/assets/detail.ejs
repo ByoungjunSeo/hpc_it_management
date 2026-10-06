@@ -164,6 +164,52 @@
 </div>
 <% } %>
 
+<%# CDU-2: CDU의 공급 칠러 %>
+<% if (asset.asset_type === 'cdu' && typeof coolingSource !== 'undefined' && coolingSource) { %>
+<div class="card">
+    <div class="card-header"><h2>공급 칠러</h2></div>
+    <div class="form-row"><div class="form-group">
+        <label>냉각 공급원</label>
+        <p>
+            <a href="/assets/<%= coolingSource.id %>">
+                <span class="badge badge-chiller"><%= appConfig.assetTypes.find(t => t.value === 'chiller')?.label || '칠러' %></span>
+                <%= coolingSource.management_number || coolingSource.model_name || coolingSource.id %>
+            </a>
+            <% if (coolingSource.status === 'returned') { %>
+                <span style="margin-left:6px; padding:2px 8px; border-radius:10px; background:#fde047; color:#713f12; font-size:11px; font-weight:600;">공급 칠러 반납됨</span>
+            <% } else if (coolingSource.status !== 'active') { %>
+                <span style="margin-left:6px; padding:2px 8px; border-radius:10px; background:#e5e7eb; color:#374151; font-size:11px; font-weight:600;">공급 칠러 <%= coolingSource.status %></span>
+            <% } %>
+        </p>
+    </div></div>
+</div>
+<% } %>
+
+<%# CDU-2: 칠러가 공급 중인 CDU 목록 %>
+<% if (asset.asset_type === 'chiller' && typeof suppliedCdus !== 'undefined' && suppliedCdus.length > 0) { %>
+<div class="card">
+    <div class="card-header"><h2>공급 중인 CDU (<%= suppliedCdus.length %>대)</h2></div>
+    <% if (asset.status === 'returned') { %>
+    <p style="margin:0 0 8px; padding:8px 12px; background:#fde047; color:#713f12; border-radius:4px; font-size:13px;">이 칠러는 <b>반납</b> 상태이나 아직 CDU에 공급원으로 연결되어 있습니다. 연결을 정리하세요.</p>
+    <% } %>
+    <div class="table-wrapper">
+        <table>
+            <thead><tr><th>관리번호</th><th>모델명</th><th>배치</th><th>상태</th></tr></thead>
+            <tbody>
+                <% suppliedCdus.forEach(cdu => { %>
+                <tr>
+                    <td><a href="/assets/<%= cdu.id %>"><%= cdu.management_number || '-' %></a></td>
+                    <td><%= cdu.model_name || '-' %></td>
+                    <td><%= cdu.rack_name ? (cdu.rack_name + ' (랙 내장)') : (cdu.parent_asset_id ? '독립형' : '-') %></td>
+                    <td><span class="badge badge-<%= cdu.status === 'active' ? 'success' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === cdu.status)?.label %></span></td>
+                </tr>
+                <% }) %>
+            </tbody>
+        </table>
+    </div>
+</div>
+<% } %>
+
 <%- include('../partials/photo-section', { entityType: 'asset', entityId: asset.id, photos: typeof assetPhotos !== 'undefined' ? assetPhotos : [], editable: true }) %>
 
 <% if (typeof childInfraAssets !== 'undefined' && childInfraAssets && childInfraAssets.length > 0) { %>
@@ -176,6 +222,7 @@
                     <th>유형</th>
                     <th>관리번호</th>
                     <th>모델명</th>
+                    <th>공급 칠러</th>
                     <th>상태</th>
                 </tr>
             </thead>
@@ -185,6 +232,7 @@
                     <td><span class="badge badge-<%= child.asset_type %>"><%= appConfig.assetTypes.find(t => t.value === child.asset_type)?.label %></span></td>
                     <td><a href="/assets/<%= child.id %>"><%= child.management_number || '-' %></a></td>
                     <td><%= child.model_name || '-' %></td>
+                    <td><% if (child.asset_type === 'cdu' && child.cooling_source_mgmt) { %><a href="/assets/<%= child.cooling_source_asset_id %>"><%= child.cooling_source_mgmt %></a><% if (child.cooling_source_status === 'returned') { %> <span style="color:#b45309; font-size:11px;">(반납)</span><% } %><% } else { %>-<% } %></td>
                     <td><span class="badge badge-<%= child.status === 'active' ? 'success' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === child.status)?.label %></span></td>
                 </tr>
                 <% }) %>

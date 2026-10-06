@@ -27,6 +27,17 @@
 
 ## 릴리스 포함 버그 (재패키징 기준)
 
+### v2.4.0 (2026-10-06, CDU-2 칠러→CDU 냉각 연결 · **DDL 포함**)
+칠러 1 : CDU N 냉각 연결. `assets.cooling_source_asset_id`(칠러 참조, ON DELETE SET NULL) 추가.
+마이그레이션 `db/migrations/2026-10-06_1_cdu2_cooling_source.sql`(멱등·탱크당 칠러≥2 가드) + 신규 설치 스키마(02) 반영.
+**격리 검증 + 운영 DB 덤프 리허설 PASS · 운영 인수/적용 대기.**
+- CDU에 "공급 칠러"(독립형·랙 내장형 공통), 칠러 폼 "연결 액침탱크" 제거, 칠러 상세 "공급 중인 CDU", 랙/탱크 상세 CDU→칠러.
+- 검증: 활성 칠러만 지정(400)·자기자신 금지, 칠러 반납 경고·참조 유지, 칠러 삭제 시 공급 CDU 가드 + FK SET NULL 안전망.
+- 운영 데이터 조치(랙 내장 CDU 수동 귀속)는 `db/ops/cdu2_ops_data_*.sql` — **승인 후 적용**. [[BUG-29]]는 별건(미포함).
+
+### v2.3.0 (2026-10-06, 랙 내장형 CDU·DLC·오프라인 차트 · DDL 없음)
+CDU-1 랙 내장형 CDU + 1c~1i 프리필/폼 수리 + 랙 표시(BUG-32 DLC·BUG-33 서버실명)·Chart.js 로컬 번들(BUG-34)·데모 스크립트.
+
 ### v2.2.2 (2026-10-06, 코드만 변경 · DDL 없음 · HEAD 8a0d6a2)
 v2.2.1(bc55032) 이후 수리분을 묶은 버그 수정 릴리스. 스키마·마이그레이션 변경 0건. **격리 HTTP 검증 PASS · 운영 인수 대기.**
 - **BUG-19** — 7/11 B-7f 컷오버의 EUL 재번호 후 photos.entity_id remap 누락 → 입출고 사진 오귀속. 오귀속 10장 원주인 재연결(데이터 정정 완료) + 사진 조인 asset_id 기준 유지 [검증 PASS·정정 완료]
@@ -840,6 +851,34 @@ COMMIT;
 - 상태: **[수정 완료] 2026-10-06 (v2.3.0, 격리 스모크 PASS)** | 관련: app/views/dashboard.ejs:286, app/public/vendor/chart.js
 - 증상: 대시보드가 `https://cdn.jsdelivr.net/npm/chart.js@4`를 로드 — 인터넷 차단 사내망에서 차트가 비어 보일 수 있음(뷰 전체 유일 외부 CDN).
 - 수정: **Chart.js v4.5.1 UMD**를 `public/vendor/chart.js`로 번들(출처 `chart.js@4.5.1` npm, sha256 `ecc3cd1eeb8c34d2178e3f59fd63ec5a3d84358c11730af0b9958dc886d7652a`, MIT — `public/vendor/chart.js.LICENSE.md` 동봉). `dashboard.ejs:286` src를 `/vendor/chart.js`로 교체(express.static 루트 서빙). 외부 요청 0건.
+
+---
+
+## BUG-35: 랙 상세 "연결 자산" 표기가 모델명/자산번호 (관리번호 아님)
+- 상태: **[조사 예정]** | 관련: app/views/racks/detail.ejs(연결 자산 표시), routes/racks.js(linked_* 조회)
+- 증상: 랙 상세 사이드바 "연결 자산"이 `linked_model_name || linked_asset_number || '자산 #id'` 순으로 표기 — **관리번호(management_number)가 아니라 모델명**이 뜬다(예: 탱크 연결 랙에서 탱크 관리번호 대신 모델명 노출).
+- 조치(안): 연결 자산 표기를 **관리번호 우선**으로 변경(관리번호 → 모델명 → #id). racks.js의 linked_* 조회에 `linked_management_number` 추가 필요.
+
+## BUG-36: 탱크 재(再)사용등록 시 연결 랙 U가 기본 42로 덮어써짐
+- 상태: **[조사 예정]** | 관련: app/routes/inventory.js(탱크 연결 랙 update, `tank_capacity_u` 처리)
+- 증상: 액침탱크를 사용등록으로 다시 저장하면, `tank_capacity_u` 미입력 시 연결 랙의 `total_units`가 **기본 42로 덮어써진다**(예: AquaRack 21U → 42U로 변경). inventory.js의 `Rack.update(...total_units: tankCapacityU...)`에서 `parseInt(req.body.tank_capacity_u) || 42`가 기존값을 무시.
+- 조치(안): 미입력 시 **기존 `total_units` 보존**(폼에 현재 U 프리필 또는 `|| 42` 대신 `|| linkedRack.total_units`). BUG-27(빈 Unit 보존)과 동류.
+
+## BUG-37: backup.sh가 systemd 배포의 uploads 경로를 백업하지 못함
+- 상태: **[조사 예정]** | 관련: scripts/backup.sh(uploads 백업 경로), 배포 형태(systemd 노드 vs compose)
+- 증상: `backup.sh`가 업로드 사진을 **compose named volume(`uploads`) 기준**으로 백업 → **systemd(호스트 직접 구동) 배포**에서는 실제 uploads 디렉터리(호스트 경로)를 가리키지 못해 사진이 백업에서 누락.
+- 조치(안): 배포 형태 감지 또는 `UPLOADS_PATH` env로 업로드 경로를 지정받아 백업. DB 덤프는 영향 없음(사진 파일만).
+
+---
+
+## OPS-3: CDU-2 운영 적용 + 탱크 연결 랙 정정 (2026-10-06)
+- 상태: **[완료] 2026-10-06** | 관련: [[BUG-29]] 별건, CDU-2(v2.4.0), db/migrations/2026-10-06_1_cdu2_cooling_source.sql, db/ops/cdu2_ops_data_20261006.sql
+- **CDU-2 마이그레이션 운영 적용**: `assets.cooling_source_asset_id` 추가 + 이전 수행.
+  - TPC-CDU-01(1176): `cooling_source=1177`(TPC-CHI-01), parent=1175 유지(자동 이전).
+  - TPC-CHI-01(1177): `parent_asset_id` → **NULL**(칠러 탱크 직결 폐지).
+- **ops SQL 적용**: 랙 내장 TPC-CDU-02(1205): `cooling_source=1177`(수동 귀속) → 칠러 1177이 CDU 1176·1205 **1:2 공급**.
+- **탱크 연결 랙 정정(SQL 직접)**: 랙 **212 `AquaRack 21U (탱크)`**(immersion, 21U, room 64)에 `linked_asset_id=1175`(TPC-TANK-01) 연결 — 탱크↔연결 랙 링크 누락 정정. ⚠ **감사 로그 없음**(DB 직접 UPDATE).
+- 적용 후 상태(읽기전용 확인): 1176/1205 cooling=1177, 1177 parent NULL, 랙 212 linked_asset_id=1175. (랙 215 `DLC 서버랙`은 TPC-CDU-02 배치 랙 — 별개, 링크 무관.)
 
 ---
 

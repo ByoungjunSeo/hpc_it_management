@@ -259,15 +259,23 @@ router.get('/:id', async (req, res) => {
     let connectedInfra = [];
     if (rack.linked_asset_id) {
       const { rows } = await pool.query(
-        "SELECT id, asset_type, management_number, model_name, status FROM assets WHERE parent_asset_id = $1 AND asset_type IN ('cdu','chiller') ORDER BY asset_type, management_number",
+        `SELECT a.id, a.asset_type, a.management_number, a.model_name, a.status,
+                a.cooling_source_asset_id, chi.management_number AS cooling_source_mgmt, chi.status AS cooling_source_status
+         FROM assets a LEFT JOIN assets chi ON a.cooling_source_asset_id = chi.id
+         WHERE a.parent_asset_id = $1 AND a.asset_type IN ('cdu','chiller')
+         ORDER BY a.asset_type, a.management_number`,
         [rack.linked_asset_id]
       );
       connectedInfra = rows;
     }
-    // CDU-1: 이 랙에 직접 장착된 랙 내장형 CDU(rack_id 기준)도 연결 설비로 표시
+    // CDU-1: 이 랙에 직접 장착된 랙 내장형 CDU(rack_id 기준)도 연결 설비로 표시 (CDU-2: 공급 칠러 동반)
     {
       const { rows: rmCdus } = await pool.query(
-        "SELECT id, asset_type, management_number, model_name, status FROM assets WHERE rack_id = $1 AND asset_type = 'cdu' AND parent_asset_id IS NULL AND status NOT IN ('decommissioned') ORDER BY management_number",
+        `SELECT a.id, a.asset_type, a.management_number, a.model_name, a.status,
+                a.cooling_source_asset_id, chi.management_number AS cooling_source_mgmt, chi.status AS cooling_source_status
+         FROM assets a LEFT JOIN assets chi ON a.cooling_source_asset_id = chi.id
+         WHERE a.rack_id = $1 AND a.asset_type = 'cdu' AND a.parent_asset_id IS NULL AND a.status NOT IN ('decommissioned')
+         ORDER BY a.management_number`,
         [rack.id]
       );
       connectedInfra = connectedInfra.concat(rmCdus);

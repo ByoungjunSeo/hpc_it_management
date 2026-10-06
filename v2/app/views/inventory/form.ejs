@@ -168,7 +168,7 @@
     </div>
 </div>
 
-<!-- Connected infrastructure asset (CDU→탱크, 칠러→CDU/탱크) -->
+<!-- Connected infrastructure asset (CDU→탱크) -->
 <div class="card" id="infraLinkSection" style="display:none">
     <div class="card-header"><h2>연결 설비</h2></div>
     <div class="form-row">
@@ -177,6 +177,20 @@
             <select name="linked_infra_asset_id" id="infraLinkSelect" class="form-control">
                 <option value="">미지정</option>
             </select>
+        </div>
+    </div>
+</div>
+
+<!-- CDU-2: 공급 칠러 (cdu 전용 — 독립형·랙 내장형 공통) -->
+<div class="card" id="coolingSourceSection" style="display:none">
+    <div class="card-header"><h2>공급 칠러</h2></div>
+    <div class="form-row">
+        <div class="form-group" style="flex:2">
+            <label>공급 칠러 (냉각)</label>
+            <select name="cooling_source_asset_id" id="coolingSourceSelect" class="form-control">
+                <option value="">미지정</option>
+            </select>
+            <small class="text-muted" style="font-size:11px;">칠러 1대가 여러 CDU에 공급 가능. 활성 칠러만 지정됩니다.</small>
         </div>
     </div>
 </div>
@@ -671,6 +685,22 @@ function populateInfraLinkSelect(assetType) {
     });
 }
 
+// CDU-2: 공급 칠러 후보(활성 칠러). CDU 사용등록 시 공급 칠러 select 채움.
+var _chillerAssets = <%- JSON.stringify((typeof assets !== 'undefined' ? assets : []).filter(a => a.asset_type === 'chiller' && a.status === 'active').map(a => ({ id: a.id, mgmt: a.management_number || '', model: a.model_name || '', room: a.room_name || '' }))) %>;
+function populateCoolingSourceSelect() {
+    var sel = document.getElementById('coolingSourceSelect');
+    if (!sel) return;
+    var cur = sel.value;
+    sel.innerHTML = '<option value="">미지정</option>';
+    _chillerAssets.forEach(function(a) {
+        var opt = document.createElement('option');
+        opt.value = a.id;
+        opt.textContent = '[칠러] ' + a.mgmt + (a.model ? ' (' + a.model + ')' : '') + (a.room ? ' - ' + a.room : '');
+        sel.appendChild(opt);
+    });
+    if (cur) sel.value = cur;
+}
+
 // === Asset Type Change (usage form) ===
 var _lastPrefillAssetId = null; // CDU-1d: 마지막 prefill 자산 id(불일치 전환 시 잔여 clear 판단)
 function onUsageTypeChange() {
@@ -698,6 +728,9 @@ function onUsageTypeChange() {
     // CDU-1: 설치 형태 토글은 매 변경마다 기본 숨김 → cdu일 때만 아래에서 노출
     var cduInstallToggle = document.getElementById('cduInstallToggle');
     if (cduInstallToggle) cduInstallToggle.style.display = 'none';
+    // CDU-2: 공급 칠러 섹션도 기본 숨김 → cdu일 때만 노출
+    var coolingSourceSection = document.getElementById('coolingSourceSection');
+    if (coolingSourceSection) coolingSourceSection.style.display = 'none';
 
     if (isModuleType(val)) {
         // Module mode: hide equipment-only sections
@@ -730,15 +763,16 @@ function onUsageTypeChange() {
             // CDU-1: cdu는 설치 형태 토글 노출. 편집/prefill 시 랙 값이 있으면 랙 내장형으로 복원.
             populateInfraLinkSelect('cdu');
             if (cduInstallToggle) cduInstallToggle.style.display = '';
+            // CDU-2: 공급 칠러 섹션 노출(설치형태와 무관)
+            if (coolingSourceSection) coolingSourceSection.style.display = '';
+            populateCoolingSourceSelect();
             var _rackHidden = document.getElementById('invRackHidden');
             var _isRackMounted = !!(_rackHidden && (_rackHidden.value || '').trim());
             var _modeSel = document.getElementById('cduInstallMode');
             if (_modeSel) _modeSel.value = _isRackMounted ? 'rack' : 'standalone';
             onCduInstallModeChange();
-        } else if (val === 'chiller') {
-            infraLinkSection.style.display = '';
-            populateInfraLinkSelect('chiller');
         } else {
+            // CDU-2: 칠러는 탱크에 직결하지 않음 — 연결 설비(탱크) 숨김. 그 외 인프라도 숨김.
             infraLinkSection.style.display = 'none';
         }
 
@@ -853,6 +887,7 @@ function clearEquipmentPrefill() {
     var mn = document.querySelector('[name="model_name"]'); if (mn) mn.value = '';
     var an = document.querySelector('[name="asset_number"]'); if (an) an.value = '';
     var infra = document.getElementById('infraLinkSelect'); if (infra) infra.value = '';
+    var cool = document.getElementById('coolingSourceSelect'); if (cool) cool.value = ''; // CDU-2: 공급 칠러 초기화
     var room = document.getElementById('invRoomSelect'); if (room) { room.value = ''; if (typeof onInvRoomChange === 'function') onInvRoomChange(); }
     var rack = document.getElementById('invRackSelect'); if (rack) { rack.value = ''; if (typeof onInvRackChange === 'function') onInvRackChange(); }
     var unit = document.querySelector('#invUnitGroup input[name="unit"]'); if (unit) unit.value = '';
@@ -1478,6 +1513,9 @@ function onAssetSelect(assetId) {
                         if (_infraSel) _infraSel.value = String(a.parent_asset_id);
                     }
                 }
+                // CDU-2: 공급 칠러 prefill (설치형태 무관). clearEquipmentPrefill과 짝.
+                var _coolSel = document.getElementById('coolingSourceSelect');
+                if (_coolSel) _coolSel.value = a.cooling_source_asset_id ? String(a.cooling_source_asset_id) : '';
             }
 
             // IPs — clear existing rows and add from asset

@@ -161,6 +161,20 @@ const Asset = {
     return rows;
   },
 
+  // CDU-2: 이 칠러가 공급 중인 CDU 목록(cooling_source 기반). 칠러 상세·삭제 가드용.
+  async findByCoolingSource(chillerId) {
+    const { rows } = await pool.query(`
+      SELECT a.id, a.asset_type, a.management_number, a.model_name, a.status,
+             a.rack_id, a.parent_asset_id, r.name as rack_name
+      FROM assets a
+      LEFT JOIN racks r ON a.rack_id = r.id
+      WHERE a.cooling_source_asset_id = $1
+      ORDER BY a.management_number
+    `, [chillerId]);
+    rows.forEach(fixDates);
+    return rows;
+  },
+
   // BL-2/BUG-10: 블레이드 노드 일괄 생성 — 단일 트랜잭션(전체 성공 또는 전체 롤백).
   // nodes: [{ management_number, node_index, model_name, manufacturer, serial_number }]
   // inherited: { asset_type, ownership, status } — 위치는 상속하지 않음(BUG-9: 노드는 독립 물리 위치 없음)
@@ -262,9 +276,9 @@ const Asset = {
         model_name, manufacturer, serial_number, room_id, rack_id, rack_unit_start, rack_unit_size,
         parent_asset_id, blade_slot,
         ip_address, ssh_port, ssh_user, ssh_password, assigned_user, purpose, status,
-        purchase_date, warranty_end, notes, node_index)
+        purchase_date, warranty_end, notes, node_index, cooling_source_asset_id)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-              $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+              $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
       RETURNING id`,
       [data.asset_number, data.management_number, data.asset_type, data.ownership || 'company',
        data.vendor_id || null, data.model_name, data.manufacturer, data.serial_number,
@@ -273,7 +287,8 @@ const Asset = {
        data.parent_asset_id || null, data.blade_slot || null,
        data.ip_address, data.ssh_port || 22, data.ssh_user || 'root', data.ssh_password,
        data.assigned_user, data.purpose, data.status || 'active',
-       data.purchase_date || null, data.warranty_end || null, data.notes, data.node_index || null]
+       data.purchase_date || null, data.warranty_end || null, data.notes, data.node_index || null,
+       data.cooling_source_asset_id || null]  // CDU-2: 공급 칠러
     );
     return rows[0].id;
   },
@@ -287,8 +302,9 @@ const Asset = {
         model_name=$6, manufacturer=$7, serial_number=$8, room_id=$9, rack_id=$10, rack_unit_start=$11, rack_unit_size=$12,
         parent_asset_id=$13, blade_slot=$14,
         ip_address=$15, ssh_port=$16, ssh_user=$17, ssh_password=$18, assigned_user=$19, purpose=$20, status=$21,
-        purchase_date=$22, warranty_end=$23, notes=$24, node_index=$25, updated_at=CURRENT_TIMESTAMP
-      WHERE id=$26`,
+        purchase_date=$22, warranty_end=$23, notes=$24, node_index=$25,
+        cooling_source_asset_id=$26, updated_at=CURRENT_TIMESTAMP
+      WHERE id=$27`,
       [data.asset_number, data.management_number, data.asset_type, data.ownership || 'company',
        data.vendor_id || null, data.model_name, data.manufacturer, data.serial_number,
        isChild ? null : (data.room_id || null), isChild ? null : (data.rack_id || null),
@@ -296,7 +312,8 @@ const Asset = {
        data.parent_asset_id || null, data.blade_slot || null,
        data.ip_address, data.ssh_port || 22, data.ssh_user || 'root', data.ssh_password,
        data.assigned_user, data.purpose, data.status || 'active',
-       data.purchase_date || null, data.warranty_end || null, data.notes, data.node_index || null, id]
+       data.purchase_date || null, data.warranty_end || null, data.notes, data.node_index || null,
+       data.cooling_source_asset_id || null, id]  // CDU-2: 공급 칠러
     );
   },
 

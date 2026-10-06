@@ -277,6 +277,10 @@ function getAssetClass(info) {
                     <span class="badge badge-<%= ci.asset_type %>"><%= ci.asset_type === 'cdu' ? 'CDU' : ci.asset_type === 'chiller' ? '칠러' : ci.asset_type %></span>
                     <a href="/assets/<%= ci.id %>"><%= ci.management_number || ci.model_name || '#' + ci.id %></a>
                     <% if (ci.model_name && ci.management_number) { %><span style="color:#64748b;">(<%= ci.model_name %>)</span><% } %>
+                    <%# CDU-2: CDU면 공급 칠러 표시 %>
+                    <% if (ci.asset_type === 'cdu' && ci.cooling_source_mgmt) { %>
+                        <span style="color:#64748b;">← 칠러</span> <a href="/assets/<%= ci.cooling_source_asset_id %>"><%= ci.cooling_source_mgmt %></a><% if (ci.cooling_source_status === 'returned') { %> <span style="color:#b45309;">(반납)</span><% } %>
+                    <% } %>
                 </p>
                 <% }) %>
             </div>

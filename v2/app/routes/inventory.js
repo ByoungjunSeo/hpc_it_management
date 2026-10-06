@@ -758,6 +758,22 @@ router.post('/', requireMaintenance, async (req, res) => {
             return res.status(400).send('연결 대상은 액침탱크만 가능합니다.');
           }
         }
+        // CDU-2 방어검증(400): cdu의 공급 칠러(cooling_source)는 활성 칠러만. 자기자신 금지.
+        //   변경/신규 지정 시에만 검증(무변경이면 기존값 유지 — 비활성이 돼도 유지).
+        const _coolId = parseInt(req.body.cooling_source_asset_id) || null;
+        const _isCduReg = usageAssetType === 'cdu' || (targetAsset && targetAsset.asset_type === 'cdu');
+        if (_coolId && _isCduReg) {
+          if (targetAsset && _coolId === targetAsset.id) {
+            return res.status(400).send('자기 자신을 공급 칠러로 지정할 수 없습니다.');
+          }
+          const _before = targetAsset ? (targetAsset.cooling_source_asset_id || null) : null;
+          if (_coolId !== _before) {
+            const _src = await Asset.findById(_coolId);
+            if (!_src || _src.asset_type !== 'chiller' || _src.status !== 'active') {
+              return res.status(400).send('공급 칠러는 활성 상태의 칠러만 지정할 수 있습니다.');
+            }
+          }
+        }
         // CDU-1: 랙 내장형 CDU U 겹침 검사 — 자산수정 경로의 checkRackUnitOverlap 재사용(EUL 생성 전 거부).
         if (targetAsset && targetAsset.asset_type === 'cdu' && (req.body.rack || '').trim()) {
           const _loc = await resolveSubmittedLocation(req.body);
@@ -921,6 +937,14 @@ router.post('/', requireMaintenance, async (req, res) => {
                 updateFields.purpose = tn + '(' + td + ')';
               } else {
                 updateFields.purpose = tn;
+              }
+            }
+
+            // CDU-2: 공급 칠러 반영 — cdu에 한해(독립형·랙 내장형 공통). 검증은 위 EUL 생성 전 수행됨.
+            //   미제출(undefined)이면 ...asset로 기존값 보존, 빈 문자열이면 명시적 해제(NULL).
+            if (asset.asset_type === 'cdu' || usageAssetType === 'cdu') {
+              if (req.body.cooling_source_asset_id !== undefined) {
+                updateFields.cooling_source_asset_id = parseInt(req.body.cooling_source_asset_id) || null;
               }
             }
 
