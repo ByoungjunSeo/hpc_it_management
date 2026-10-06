@@ -1244,11 +1244,28 @@ var _currentAssetUSize = 1;
 
 // === Asset auto-fill logic ===
 <% if (typeof assets !== 'undefined') { %>
-var _assetMap = {};
-<% assets.forEach(a => { %>
-_assetMap['mgmt_<%= (a.management_number || '').replace(/'/g, "\\'") %>'] = <%= a.id %>;
-_assetMap['anum_<%= (a.asset_number || '').replace(/'/g, "\\'") %>'] = <%= a.id %>;
-<% }) %>
+// CDU-1e: 중복 관리번호는 active 우선 → 같은 상태면 최신(id 큰 것) 우선으로 매핑 + 중복건수 추적
+var _assetRows = [
+<% assets.forEach(a => { %>  { id: <%= a.id %>, mgmt: '<%= (a.management_number || '').replace(/'/g, "\\'") %>', anum: '<%= (a.asset_number || '').replace(/'/g, "\\'") %>', status: '<%= a.status || '' %>' },
+<% }) %>];
+var _assetMap = {}, _assetDupCount = {};
+(function() {
+  var byMgmt = {};
+  _assetRows.forEach(function(r) {
+    if (r.anum) _assetMap['anum_' + r.anum] = r.id;
+    if (r.mgmt) (byMgmt[r.mgmt] = byMgmt[r.mgmt] || []).push(r);
+  });
+  Object.keys(byMgmt).forEach(function(mg) {
+    var rows = byMgmt[mg];
+    _assetDupCount[mg] = rows.length;
+    rows.sort(function(x, y) {
+      var xo = (x.status === 'active') ? 0 : 1, yo = (y.status === 'active') ? 0 : 1;
+      if (xo !== yo) return xo - yo;   // active 우선
+      return y.id - x.id;              // 같은 상태면 최신(큰 id) 우선
+    });
+    _assetMap['mgmt_' + mg] = rows[0].id;
+  });
+})();
 
 function findAssetIdByMgmt(val) { return _assetMap['mgmt_' + val] || null; }
 function findAssetIdByAnum(val) { return _assetMap['anum_' + val] || null; }
@@ -1309,6 +1326,11 @@ function onAssetSelect(assetId) {
                 return;
             }
             if (_mgmtMsg) _mgmtMsg.style.display = 'none';
+            // CDU-1e: 중복 관리번호면 안내(활성 자산 기준으로 매핑됨)
+            if (_mgmtMsg && a.management_number && _assetDupCount[a.management_number] > 1) {
+                _mgmtMsg.textContent = '동일 관리번호 자산이 ' + _assetDupCount[a.management_number] + '건 있습니다 — 활성 자산 기준으로 불러왔습니다.';
+                _mgmtMsg.style.display = '';
+            }
             var ips = data.ips || [];
             var creds = data.credentials || [];
 
@@ -1594,6 +1616,7 @@ document.getElementById('invAssetNumInput').addEventListener('input', function()
 var _invRackOccupancy = {}; // uMap[u] = { full, left, right }
 var _invTotalU = 42;
 var _invCurrentAssetId = null; // 현재 선택된 자산 ID (자기 자신 제외용)
+var _invCurrentAssetPos = null; // CDU-1e: 현재 자산의 기존 랙 위치(미리보기 강조)
 
 function escapeInvHtml(str) {
     var d = document.createElement('div'); d.textContent = str; return d.innerHTML;
@@ -1664,8 +1687,13 @@ function renderInvRackPreview(data) {
     // Build slot-level occupancy map: _invRackOccupancy[slot] = { full, left, right }
     // 현재 선택된 자산은 점유에서 제외 (기존 위치 재선택 허용)
     _invRackOccupancy = {};
+    _invCurrentAssetPos = null; // CDU-1e: 현재 자산의 기존 위치(미리보기 강조용)
     data.assets.forEach(function(a) {
-        if (_invCurrentAssetId && a.id === _invCurrentAssetId) return; // 자기 자신 제외
+        if (_invCurrentAssetId && a.id === _invCurrentAssetId) {
+            // 겹침 판정에선 제외(재선택 허용)하되, 현재 위치는 별도 강조 표시
+            if (a.rack_unit_start) _invCurrentAssetPos = { start: a.rack_unit_start, size: a.rack_unit_size || 3, mgmt: a.management_number };
+            return;
+        }
         var slotStart = a.rack_unit_start;
         var slotSize = a.rack_unit_size || 3;
         var side = a.blade_slot || 'full';
@@ -1739,6 +1767,11 @@ function renderInvRackPreview(data) {
                 } else {
                     html += '<td class="inv-rack-empty" style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')"></td>';
                 }
+            } else if (_invCurrentAssetPos && slot >= _invCurrentAssetPos.start && slot < _invCurrentAssetPos.start + _invCurrentAssetPos.size) {
+                // CDU-1e: 현재 자산의 기존 위치 — 강조 표시(클릭 재선택 가능, 겹침판정엔 미포함)
+                html += '<td colspan="2" style="' + cellH + ' background:#fef9c3; cursor:pointer;" onclick="onInvSlotClick(' + slot + ')">';
+                if (_invCurrentAssetPos.start === slot) html += '<span style="color:#854d0e; font-weight:600; font-size:10px;">현재 위치: ' + escapeInvHtml(_invCurrentAssetPos.mgmt || '') + '</span>';
+                html += '</td>';
             } else {
                 html += '<td colspan="2" class="inv-rack-empty" style="' + emptyCell + '" onclick="onInvSlotClick(' + slot + ')"></td>';
             }
