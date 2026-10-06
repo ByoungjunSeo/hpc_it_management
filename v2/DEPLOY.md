@@ -29,7 +29,7 @@
 > 사내/공개 미러로 교체(main·updates만, security는 스킵)합니다. 미지정 시 기본값은 원본
 > deb.debian.org(회귀 0).
 > ```
-> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.2.2 .
+> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.3.0 .
 > ```
 > 실검증 이력: 2.0.1 이미지는 사무 PC(윈도우)에서 사무망의 deb.debian.org 도메인 차단으로
 > kakao 미러(http, security 제외)를 경유해 빌드·전달했고, 서버 격리 스택에서 정품 검증(amd64,
@@ -226,6 +226,10 @@ DB **스키마 변경이 포함된 릴리스**는 마이그레이션 SQL과 적�
 자동 실행되므로 기존 설치에는 적용되지 않습니다). 데이터 보정이 수반되는 릴리스
 (예: 랙 실장 단위 개선)도 동일하게 보정 절차를 릴리스 노트로 안내합니다.
 
+> **2.2.x → 2.3.0: 스키마 변경 없음, 재시작만.** 신규 `.sql`·마이그레이션이 없으므로
+> 위 절차의 2)~4)만 수행하면 됩니다(이미지 적재 → `.env` 태그 `it-assets:2.3.0` →
+> `up -d`). 데이터 보정도 불필요합니다. 상세는 `RELEASE_NOTICE_2.3.0.md`.
+
 ---
 
 ## 7. 재시작 / 중지 / 초기화
@@ -253,7 +257,7 @@ docker compose -f docker-compose.prod.yml up -d
 | 증상 | 원인 / 조치 |
 |------|------------|
 | `ERR_SSL_PROTOCOL_ERROR` | 브라우저가 주소를 https로 자동 승격 — 주소를 지우고 `http://` 부터 명시 입력(자동완성 주의, 시크릿 창 활용) |
-| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.2.2`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
+| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.3.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
 | 앱 컨테이너가 바로 종료 | **먼저 `docker compose -f docker-compose.prod.yml logs app` 로 원인 확인** — ① DB 이미지 누락(오프라인): `docker images`에 `postgres:16-alpine` 있는지 + db healthy 확인 ② 아래 (a)~(c) 메시지별 대응 |
 | (a) `exec … : no such file or directory` (엔트리포인트) | **셸 스크립트 CRLF**(Windows에서 clone/편집). `.sh`·`docker-entrypoint.sh`는 LF여야 함 — `.gitattributes`(eol=lf)로 재발 방지, 이미 CRLF면 `sed -i 's/\r$//' scripts/*.sh docker-entrypoint.sh` 후 재빌드 |
 | (b) `[session-secret] 오류 …` (기동 로그) | `.env` 필수값 미설정 — **SESSION_SECRET·CREDENTIAL_ENCRYPTION_KEY를 32자 이상 무작위**로(`openssl rand -hex 32`). POSTGRES_PASSWORD·INITIAL_ADMIN_PASSWORD도 CHANGE_ME 교체 |
@@ -264,3 +268,33 @@ docker compose -f docker-compose.prod.yml up -d
 | IP 관리 화면이 비어있음 | 서브넷 미등록 — 정상. **IP 관리 화면의 [＋ 서브넷 등록]으로 대역 추가**(CIDR /16~/30) |
 | 스캔 실패(unreachable/auth) | 대상 IP·자격증명 등록 확인 + 컨테이너→대상 22/TCP 방화벽 |
 | 사진 안 보임 | uploads named volume 확인: `docker volume ls` |
+
+---
+
+## 9. 데모 데이터 (PoC 체험용) — v2.3.0~
+
+PoC/시연용으로 **DEMO- 접두 가상 데이터**(서버실·랙·장비·부품·IP·대여)를 한 번에 넣는 스크립트입니다.
+앱 화면과 동일한 HTTP 경로로 투입하므로 이력·감사 로그·IP 풀이 실제 사용과 똑같이 쌓입니다.
+앱 이미지(`v2/app/scripts/seed-demo.js`)에 포함되어 별도 전달이 필요 없습니다.
+
+```bash
+# (앱 컨테이너 안에서 실행 — admin 비밀번호를 바꿨다면 -e ADMIN_PASSWORD=<현재비밀번호> 추가)
+docker exec it-assets-app-1 node --no-warnings scripts/seed-demo.js
+```
+
+투입 결과(예): 자산 11대(랙 배치 9), 랙 3개(DLC 1), 할당 IP 15개, 사진 2장, 대여 1건.
+`DEMO-CDU-01`은 `DEMO-RACK-C`에 랙 내장(U1~U4), `DEMO-SV-06`은 반납 시연(할당 IP 자동 회수).
+
+> **부품 두 기능 구분**: `입출고 > 부품 사용등록 = 이미 장착된 부품 등록(재고 차감 없음)` / `부품 재고 > 모듈 설치 = 보관 재고에서 꺼내 장착(재고 차감)`.
+
+> **안전장치**: 자산·서버실·서브넷·부품이 **하나라도 있으면 아무것도 하지 않고 종료**합니다(exit 2).
+> 즉 **빈 신규 설치본에서만** 동작하며, 운영 데이터가 있는 시스템에서는 실행해도 변경이 없습니다.
+> ⚠ **운영 서버에서는 실행하지 마세요** — PoC 전용입니다.
+
+### 데모 설치본 초기화
+데모 체험 후 깨끗이 비우려면(⚠ **데모 설치본에서만**, 운영 금지):
+
+```bash
+docker compose -f docker-compose.prod.yml down -v   # ⚠ DB·사진 전 삭제 — 데모 설치본에서만
+docker compose -f docker-compose.prod.yml up -d      # 빈 볼륨 재생성(스키마 자동 적재)
+```
