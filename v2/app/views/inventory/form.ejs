@@ -837,6 +837,18 @@ document.getElementById('invMgmtInput').addEventListener('input', function() {
 });
 
 // CDU-1d: prefill로 채운 장비 필드 초기화(모델/자산번호/연결탱크/Room·Rack·Unit/설치형태)
+// CDU-1g: onAssetSelect가 추가하는 동적 행(접속정보·네트워크·하드웨어) 일괄 제거 — 행 채움/비움 단일 소스
+function clearDynamicRows() {
+    var ip = document.getElementById('ipRows');
+    if (ip) ip.querySelectorAll('.inv-ip-row').forEach(function(r) { r.remove(); });
+    var cr = document.getElementById('credRows');
+    if (cr) { cr.querySelectorAll('.inv-cred-row').forEach(function(r) { r.remove(); }); var ch = cr.querySelector('.cred-row-header'); if (ch) ch.remove(); }
+    var hw = document.getElementById('hwRows');
+    if (hw) { hw.querySelectorAll('.inv-hw-row').forEach(function(r) { r.remove(); }); var hh = hw.querySelector('.hw-row-header'); if (hh) hh.remove(); }
+}
+
+// CDU-1g: onAssetSelect가 채우는 전 필드의 역연산(기본정보·소유구분·위치·동적행·OS·기타).
+//   ※ onAssetSelect 채움 지점과 짝 — 필드 추가 시 양쪽을 함께 갱신할 것. 자산유형·사용날짜는 유지.
 function clearEquipmentPrefill() {
     var mn = document.querySelector('[name="model_name"]'); if (mn) mn.value = '';
     var an = document.querySelector('[name="asset_number"]'); if (an) an.value = '';
@@ -845,6 +857,10 @@ function clearEquipmentPrefill() {
     var rack = document.getElementById('invRackSelect'); if (rack) { rack.value = ''; if (typeof onInvRackChange === 'function') onInvRackChange(); }
     var unit = document.querySelector('#invUnitGroup input[name="unit"]'); if (unit) unit.value = '';
     var mode = document.getElementById('cduInstallMode'); if (mode) { mode.value = 'standalone'; if (typeof onCduInstallModeChange === 'function') onCduInstallModeChange(); }
+    var owner = document.querySelector('[name="ownership"]'); if (owner) owner.value = 'company'; // 폼 기본값 복귀
+    var os = document.querySelector('[name="os"]'); if (os) os.value = '';
+    var notes = document.querySelector('[name="notes"]'); if (notes) notes.value = '';
+    clearDynamicRows(); // 접속정보·네트워크·하드웨어 행 전부 제거
     var msg = document.getElementById('invMgmtMsg'); if (msg) msg.style.display = 'none';
 }
 
