@@ -763,6 +763,10 @@ function onUsageTypeChange() {
 
 // CDU-1: CDU 설치 형태(독립형/랙 내장형) 토글 — 독립형=연결 액침탱크, 랙 내장형=랙+U
 function onCduInstallModeChange() {
+    // CDU-1f: cdu 유형일 때만 설치형태 화면 전환. 그 외 유형에서 호출되면(예: clearEquipmentPrefill 경유) 무시
+    //   → 서버/PDU 등에 인프라 화면(연결 액침탱크 노출·rackUnit 숨김)이 잘못 적용되지 않도록.
+    var _ut = (document.getElementById('usageTypeSelect') || {}).value;
+    if (_ut !== 'cdu') return;
     var m = document.getElementById('cduInstallMode');
     var mode = m ? m.value : 'standalone';
     var infraLinkSection = document.getElementById('infraLinkSection');
