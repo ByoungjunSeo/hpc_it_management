@@ -1629,8 +1629,22 @@
     margin-left: 4px;
 }
 
+/* DLC(수냉) 서버랙 배지 — immersion과 구분되는 색 */
+.rack-type-badge.dlc {
+    display: inline-block;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #6366f1, #0ea5e9);
+    color: white;
+    font-weight: 600;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
 /* Header badge in page title */
-h1 .rack-type-badge.immersion {
+h1 .rack-type-badge.immersion,
+h1 .rack-type-badge.dlc {
     font-size: 12px;
     padding: 3px 10px;
 }

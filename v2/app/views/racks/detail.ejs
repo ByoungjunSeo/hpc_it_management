@@ -1,7 +1,7 @@
 <%- include('../partials/header', { title, currentPath, extraCss }) %>
 
 <div class="page-header">
-    <h1><%= rack.room_name %> &gt; <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } %><%= rack.name %> (<%= totalUnits %>U)<% if (rack.rack_type === 'immersion') { %> <span class="rack-type-badge immersion">액침탱크</span><% } %></h1>
+    <h1><%= rack.room_name %> &gt; <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } else if (rack.rack_type === 'dlc') { %>&#x2744; <% } %><%= rack.name %> (<%= totalUnits %>U)<% if (rack.rack_type === 'immersion') { %> <span class="rack-type-badge immersion">액침탱크</span><% } else if (rack.rack_type === 'dlc') { %> <span class="rack-type-badge dlc">DLC 서버랙</span><% } %></h1>
     <div class="btn-group">
         <button class="btn btn-warning" id="btnPowerCheck" onclick="checkPowerStatus()">&#x26A1; 전원 상태 확인</button>
         <a href="/assets/new?rack_id=<%= rack.id %>" class="btn btn-primary">+ 장비 추가</a>
@@ -255,7 +255,7 @@ function getAssetClass(info) {
             </div>
             <p><strong>서버실:</strong> <%= rack.room_name %></p>
             <p><strong>이름:</strong> <%= rack.name %></p>
-            <p><strong>유형:</strong> <% if (rack.rack_type === 'immersion') { %><span class="rack-type-badge immersion">&#x1F4A7; 액침탱크</span><% } else { %>서버랙<% } %></p>
+            <p><strong>유형:</strong> <% if (rack.rack_type === 'immersion') { %><span class="rack-type-badge immersion">&#x1F4A7; 액침탱크</span><% } else if (rack.rack_type === 'dlc') { %><span class="rack-type-badge dlc">&#x2744; DLC 서버랙</span><% } else { %>서버랙<% } %></p>
             <p><strong>총 U:</strong> <%= totalUnits %></p>
             <p><strong>장비 수:</strong> <%= assets.length %>대</p>
             <% if (rack.switch_slots) { %><p><strong>스위치 슬롯:</strong> <%= rack.switch_slots %>개</p><% } %>

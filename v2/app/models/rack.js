@@ -96,7 +96,14 @@ const Rack = {
   },
 
   async findById(id) {
-    const { rows } = await pool.query('SELECT * FROM racks WHERE id = $1', [id]);
+    // BUG-33: 랙 상세 "서버실" 표시용 room_name 포함(server_rooms LEFT JOIN).
+    //   r.* 외 room_name만 가산 — 기존 호출처는 모두 필드 접근이라 영향 없음.
+    const { rows } = await pool.query(
+      `SELECT r.*, sr.name AS room_name
+       FROM racks r
+       LEFT JOIN server_rooms sr ON r.room_id = sr.id
+       WHERE r.id = $1`, [id]
+    );
     return fixDates(rows[0] || null);
   },
 

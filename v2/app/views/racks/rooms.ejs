@@ -109,8 +109,8 @@
              data-rack-id="<%= rack.id %>" data-rack-type="<%= rack.rack_type || 'standard' %>" data-order="<%= rackIdx %>">
             <div class="wide-rack-header">
                 <span class="drag-handle">&#x2630;</span>
-                <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } %><%= rack.name %>
-                <% if (rack.rack_type === 'immersion') { %><span class="rack-type-badge immersion">액침</span><% } %>
+                <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } else if (rack.rack_type === 'dlc') { %>&#x2744; <% } %><%= rack.name %>
+                <% if (rack.rack_type === 'immersion') { %><span class="rack-type-badge immersion">액침</span><% } else if (rack.rack_type === 'dlc') { %><span class="rack-type-badge dlc">DLC</span><% } %>
                 <span class="wide-rack-summary"><%= usedU %>/<%= totalUnits %>U</span>
             </div>
             <%

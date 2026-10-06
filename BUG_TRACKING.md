@@ -782,7 +782,13 @@ COMMIT;
 
 ---
 
-> (BUG-29 미사용 — 번호 건너뜀)
+## BUG-29: 일부 반납 경로에서 rack_id 미해제 (조사 예정)
+- 상태: **[조사 예정]** | 관련: app/routes/inventory.js(반납 라우트), assets.rack_id
+- 증상: 장비 반납 시 `rack_id`가 해제되지 않고 남는 경로가 존재(랙 배치도·"랙 미지정" 집계에 잔재로 노출).
+- 근거: `fb1cc25`(CDU-1e 문서) 기록 — **U 미지정 13건 중 반납분 rack_id 잔재 6건**
+  (관리번호 1170/1171/1193/1144/1185/1186, 전부 status=returned). 나머지 7건은 active 정상, U 유실 0건.
+- 범위: 반납 처리에서 위치 해제 정책 확정 필요(rack_id/rack_unit_start 동시 해제 여부, reserved 제외). BUG-25(IP 회수)와 동류이나 **별건**.
+- 조치: 반납 라우트의 위치 필드 해제 로직 점검 + 기존 잔재 6건 1회 보정(설치본별, 읽기전용 확인 후). **본 릴리스 미포함(조사 예정).**
 
 ## BUG-30: 사용등록 prefill 잔여값(접속정보·네트워크·하드웨어·소유구분) 이월
 - 상태: **[수정 완료] 2026-10-06 (CDU-1g, 격리 검증 PASS)** | 관련: app/views/inventory/form.ejs (clearEquipmentPrefill/clearDynamicRows)
@@ -815,6 +821,25 @@ COMMIT;
   · **★ `models/asset.js` create/update의 `isChild = !!data.parent_asset_id`** → 모델이 직접 `isChild ? null : room_id`로 **room_id까지 NULL 처리**. 라우트만 고치면 독립 CDU/칠러의 room이 모델에서 재차 유실됨(격리 1차 검증에서 room NULL로 적발). 라우트·모델 **둘 다** 제외 필요.
 - 수정: 클라이언트 배너 조건·위치 숨김 래퍼 + 서버 `isChildEdit` + **모델 create/update `isChild`** 전부에 `&& !['cdu','chiller'].includes(asset_type)` 제외. 설치형태 블록을 상태 행 아래·위치정보 위로 이동(모드 무관 고정, cdu에서만 노출). 실제 블레이드 노드(섀시 자식)는 기존 배너·위치잠금 유지.
 - 검증(격리, 폼 기본값+폼 JS→POST): 독립 CDU→배너無·room/parent 보존 / 칠러→배너無·room/parent 보존 / 랙 CDU→배너無·설치형태 노출·rack/U 보존 / **랙→독립 전환**→rack 해제·연결대상 노출(상호배타) / 실제 블레이드 노드→배너有·위치 NULL·parent 보존(회귀 유지). 주요 페이지 200.
+
+---
+
+## BUG-32: DLC 랙이 랙 상세 "유형:"에 "서버랙"으로 표시 (표시 결함)
+- 상태: **[수정 완료] 2026-10-06 (v2.3.0, 격리 스모크 PASS)** | 관련: app/views/racks/detail.ejs, room.ejs, rooms.ejs, public/css/rack.css
+- 증상: `rack_type='dlc'`로 저장한 랙의 상세 화면 "유형:"이 **"서버랙"**으로 표시(DLC 구분 안 됨). 저장값·수정 폼 옵션("DLC 서버랙")은 정상.
+- 원인: `detail.ejs:258`이 `rack_type==='immersion'`만 분기, 그 외(=dlc 포함)는 `else`→"서버랙". 제목(:4)·목록 배지(room.ejs:133, rooms.ejs:112-113)도 immersion만 특례.
+- 수정: 위 4개 뷰에 `dlc` 분기 추가(상세 "유형:"=`❄ DLC 서버랙` 배지, 제목·목록에 ❄ 아이콘·배지). `rack.css`에 `.rack-type-badge.dlc` 추가(immersion과 구분색). 로직·데이터 무변경, 표시 전용.
+
+## BUG-33: 랙 상세 "서버실:" 값이 비어 있음 (조인 누락)
+- 상태: **[수정 완료] 2026-10-06 (v2.3.0, 격리 스모크 PASS)** | 관련: app/models/rack.js(findById), app/views/racks/detail.ejs:256, :4
+- 증상: 랙 상세 "서버실:"(및 제목의 서버실명)이 공란. v2.2.2·HEAD 동일.
+- 원인: `Rack.findById`가 `SELECT * FROM racks`만 수행 → `room_name` 미포함 → 뷰에서 `rack.room_name` undefined.
+- 수정: `findById`에 `LEFT JOIN server_rooms sr ON r.room_id=sr.id`, `sr.name AS room_name`(`findByLinkedAsset`과 동일 패턴). `r.*`에 room_name만 가산 — 호출처 7곳 전부 필드 접근이고 `Rack.update`는 req.body 사용이라 **컬럼 충돌·동작 변화 없음**(확인 완료).
+
+## BUG-34: 대시보드 Chart.js를 외부 CDN(jsdelivr)에서 로드 (오프라인 공백)
+- 상태: **[수정 완료] 2026-10-06 (v2.3.0, 격리 스모크 PASS)** | 관련: app/views/dashboard.ejs:286, app/public/vendor/chart.js
+- 증상: 대시보드가 `https://cdn.jsdelivr.net/npm/chart.js@4`를 로드 — 인터넷 차단 사내망에서 차트가 비어 보일 수 있음(뷰 전체 유일 외부 CDN).
+- 수정: **Chart.js v4.5.1 UMD**를 `public/vendor/chart.js`로 번들(출처 `chart.js@4.5.1` npm, sha256 `ecc3cd1eeb8c34d2178e3f59fd63ec5a3d84358c11730af0b9958dc886d7652a`, MIT — `public/vendor/chart.js.LICENSE.md` 동봉). `dashboard.ejs:286` src를 `/vendor/chart.js`로 교체(express.static 루트 서빙). 외부 요청 0건.
 
 ---
 

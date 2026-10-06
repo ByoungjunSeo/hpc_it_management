@@ -130,7 +130,7 @@
              style="grid-row: <%= r %>; grid-column: <%= c %>;">
             <div class="rack-thumb-header">
                 <span class="drag-handle">&#x2630;</span>
-                <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } %><%= rack.name %>
+                <% if (rack.rack_type === 'immersion') { %>&#x1F4A7; <% } else if (rack.rack_type === 'dlc') { %>&#x2744; <% } %><%= rack.name %>
             </div>
             <div class="rack-thumb-body">
                 <div class="rack-usage-bar">
