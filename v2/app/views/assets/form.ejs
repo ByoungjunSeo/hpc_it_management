@@ -92,10 +92,24 @@
         </div>
     </div>
 
+    <!-- CDU-1i: CDU 설치 형태 토글 — 모드와 무관하게 항상 위치 정보 위에 고정 배치(cdu에서만 노출) -->
+    <div id="cduInstallSection" style="display:none;">
+        <div class="card-header mt-2"><h2>설치 형태</h2></div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>설치 형태</label>
+                <select id="cduInstallMode" class="form-control" onchange="onAssetCduModeChange()">
+                    <option value="standalone">독립형 (Room + 연결 액침탱크)</option>
+                    <option value="rack">랙 내장형 (랙 + U 배치)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
     <div class="card-header mt-2"><h2>위치 정보</h2></div>
 
-    <% if (asset && asset.parent_asset_id) { %>
-    <%# BUG-9: 블레이드 노드(자식)는 독립 물리 위치가 없다 — 위치 입력 숨김, 부모 참조 안내 %>
+    <% if (asset && asset.parent_asset_id && !['cdu','chiller'].includes(asset.asset_type)) { %>
+    <%# BUG-9: 블레이드 노드(자식)는 독립 물리 위치가 없다 — 위치 입력 숨김, 부모 참조 안내 (CDU-1i: cdu/chiller는 인프라 연결이라 제외) %>
     <div class="form-row"><div class="form-group" style="flex:1">
         <div style="padding:10px 12px; background:#fef9c3; border:1px solid #fde047; border-radius:4px; font-size:13px; color:#713f12;">
             이 자산은 <b>블레이드 노드</b>(부모 섀시에 속함)입니다. 물리 위치는 <b>부모 섀시</b>를 따르며 개별 위치(서버실·랙·U)를 지정할 수 없습니다. (BUG-9)
@@ -103,7 +117,7 @@
     </div></div>
     <% } %>
     <%# 위치 입력 컨테이너: 자식이면 숨김(요소는 DOM에 유지 — JS null 참조 방지) %>
-    <div <% if (asset && asset.parent_asset_id) { %>style="display:none" aria-hidden="true"<% } %>>
+    <div <% if (asset && asset.parent_asset_id && !['cdu','chiller'].includes(asset.asset_type)) { %>style="display:none" aria-hidden="true"<% } %>>
 
     <%
       // Determine current location type from asset's room
@@ -250,19 +264,6 @@
     </div>
 
     <!-- CDU-1h: CDU 설치 형태 토글 (cdu 전용) — 랙 내장형이면 랙/U, 독립형이면 연결 액침탱크 -->
-    <div id="cduInstallSection" style="display:none;">
-        <div class="card-header mt-2"><h2>설치 형태</h2></div>
-        <div class="form-row">
-            <div class="form-group">
-                <label>설치 형태</label>
-                <select id="cduInstallMode" class="form-control" onchange="onAssetCduModeChange()">
-                    <option value="standalone">독립형 (Room + 연결 액침탱크)</option>
-                    <option value="rack">랙 내장형 (랙 + U 배치)</option>
-                </select>
-            </div>
-        </div>
-    </div>
-
     <div id="infraLinkSection" style="display:none;">
         <div class="card-header mt-2"><h2>연결 액침탱크</h2></div>
         <div class="form-row">

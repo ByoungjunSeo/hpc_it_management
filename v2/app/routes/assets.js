@@ -1009,7 +1009,8 @@ router.post('/:id', requireMaintenance, async (req, res) => {
       req.body.node_index = beforeAsset.node_index;
     }
     // BUG-9: 자식 노드는 독립 위치를 가질 수 없다 — 위치 입력이 오면 무시하고 안내.
-    const isChildEdit = !!req.body.parent_asset_id;
+    // CDU-1i: cdu/chiller는 인프라(액침탱크) 연결이지 섀시 자식이 아니므로 블레이드 노드 취급에서 제외(개별 위치 보존).
+    const isChildEdit = !!req.body.parent_asset_id && !['cdu','chiller'].includes(req.body.asset_type);
     if (isChildEdit) {
       const attemptedLocation = req.body.room_id || req.body.rack_id || req.body.rack_unit_start;
       req.body.room_id = ''; req.body.rack_id = ''; req.body.rack_unit_start = '';

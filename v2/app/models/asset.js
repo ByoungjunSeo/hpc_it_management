@@ -255,7 +255,8 @@ const Asset = {
 
   async create(data) {
     // BUG-9: 자식 노드(parent_asset_id 있음)는 독립 물리 위치를 가질 수 없다 — 위치 필드 강제 제거.
-    const isChild = !!data.parent_asset_id;
+    // CDU-1i: cdu/chiller는 인프라(액침탱크) 연결이지 섀시 자식이 아니므로 위치 보존(제외).
+    const isChild = !!data.parent_asset_id && !['cdu','chiller'].includes(data.asset_type);
     const { rows } = await pool.query(`
       INSERT INTO assets (asset_number, management_number, asset_type, ownership, vendor_id,
         model_name, manufacturer, serial_number, room_id, rack_id, rack_unit_start, rack_unit_size,
@@ -279,7 +280,8 @@ const Asset = {
 
   async update(id, data) {
     // BUG-9: 자식 노드는 위치 필드를 쓸 수 없다 — parent_asset_id 있으면 위치 강제 NULL.
-    const isChild = !!data.parent_asset_id;
+    // CDU-1i: cdu/chiller는 인프라(액침탱크) 연결이지 섀시 자식이 아니므로 위치 보존(제외).
+    const isChild = !!data.parent_asset_id && !['cdu','chiller'].includes(data.asset_type);
     return pool.query(`
       UPDATE assets SET asset_number=$1, management_number=$2, asset_type=$3, ownership=$4, vendor_id=$5,
         model_name=$6, manufacturer=$7, serial_number=$8, room_id=$9, rack_id=$10, rack_unit_start=$11, rack_unit_size=$12,
