@@ -11,7 +11,7 @@ HPC/AIDC 장비실의 서버·모듈·IP·입출고를 웹에서 통합 관리�
 
 - `it-assets-dist-2.2.2.tar.gz` (전달 번들)
 - 앱 이미지 tar `it-assets-2.2.2.tar` (번들 내부, `docker load` 대상)
-  - sha256: `<빌드 후 기입>`
+  - sha256: `707f868fc9815aa50da000bd39bf94e4b2985e42c6d650667c9393a99e3e27ff`
   - 적재 전 `sha256sum it-assets-2.2.2.tar` 로 **반드시 대조**하세요(이미지 `it-assets:2.2.2`).
 
 tar 안에 앱/DB docker 이미지 2종(오프라인 설치용), 설치 문서(DEPLOY.md), compose 파일,
@@ -113,8 +113,9 @@ ORDER BY a.status, ip.ip_address;
   ```
 - **reserved(예약) IP는 포함하지 마세요**(의도적 홀드).
 
-> 참고: 본 시스템(컴퓨팅지원팀 운영본)은 BUG-19 사진 오귀속 10장과 BUG-25 반납분 IP 2건을 **이미 수동 보정 완료**했습니다.
-> 위 점검은 **다른 설치본**을 위한 것입니다.
+> 참고(운영본 현황): 본 시스템(컴퓨팅지원팀 운영본)은 BUG-19 사진 오귀속 10장, BUG-25 **반납(returned)분 IP 2건**을 수동 보정했습니다.
+> 다만 **BUG-24 유실 사진 4건(photos 58~61)과 BUG-25 비활성(inactive) 장비 점유 IP 25건은 운영본도 미보정**입니다.
+> 따라서 위 점검은 **운영본을 포함한 모든 설치본**에 적용됩니다.
 
 ## 7. 검증 범위 (중요)
 
@@ -132,4 +133,4 @@ ORDER BY a.status, ip.ip_address;
 - 재고 점검은 MVP 범위(대시보드 배지·추이 차트·PDF/Excel 보고서는 다음 릴리스).
 
 ## 9. 지원/문의
-- 컴퓨팅지원팀 sbj8388@tta.or.kr
+- 인프라검증팀 sbj8388@tta.or.kr
