@@ -182,7 +182,8 @@ async function resolveAssetConnection(asset) {
     password = creds[0].password;
   } else if (asset.ssh_user) {
     user = asset.ssh_user;
-    password = asset.ssh_password;
+    // v2.4.1: 레거시 asset.ssh_password는 신규 저장 안 함 — 없으면 env 기본값(SSH_DEFAULT_PASSWORD)으로 접속.
+    password = asset.ssh_password || appConfig.ssh.defaultPassword;
   }
 
   return { ip, user, password, port: asset.ssh_port || 22 };
@@ -219,13 +220,14 @@ async function getServerRoomAssets() {
     fixRowDates(asset, ['purchase_date', 'warranty_end'],
       ['purchase_date', 'warranty_end', 'created_at', 'updated_at']);
     asset.ips = await AssetIp.findByAsset(asset.id);
-    asset.credentials = await AssetCredential.findByAsset(asset.id);
+    // v2.4.1: 응답/뷰엔 마스킹본(password 미포함). 스캔 접속 복호화는 resolveAssetConnection(내부)에서만.
+    asset.credentials = await AssetCredential.findByAssetMasked(asset.id);
     asset.registered_modules = await ComputingModule.findByAsset(asset.id);
     asset.children = await Asset.findChildren(asset.id);
     // Enrich children too
     for (const child of asset.children) {
       child.ips = await AssetIp.findByAsset(child.id);
-      child.credentials = await AssetCredential.findByAsset(child.id);
+      child.credentials = await AssetCredential.findByAssetMasked(child.id);
       child.registered_modules = await ComputingModule.findByAsset(child.id);
     }
   }
@@ -1032,7 +1034,7 @@ router.post('/apply', requireMaintenance, async (req, res) => {
         asset_type: 'server',
         model_name: hostname || ip,
         ip_address: ip,
-        ssh_password: appConfig.ssh.defaultPassword,
+        // v2.4.1: ssh_password는 자산에 저장하지 않음(접속 시 env에서 읽음)
         status: 'active'
       });
       createdNew = true;
@@ -1045,7 +1047,7 @@ router.post('/apply', requireMaintenance, async (req, res) => {
           asset_type: 'server',
           model_name: hostname || ip,
           ip_address: ip,
-          ssh_password: appConfig.ssh.defaultPassword,
+          // v2.4.1: ssh_password는 자산에 저장하지 않음(접속 시 env에서 읽음)
           status: 'active'
         });
         createdNew = true;

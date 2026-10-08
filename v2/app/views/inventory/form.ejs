@@ -212,16 +212,15 @@
             try { credItems = JSON.parse(l.credentials_json); } catch(e) {}
           }
           if (credItems.length === 0) {
-            // Legacy fallback: parse "user / password" format
-            if (l.credential_root) { const p = l.credential_root.split('/'); credItems.push({ type: 'root', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
-            if (l.credential_etc1) { const p = l.credential_etc1.split('/'); credItems.push({ type: 'etc', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
-            if (l.credential_etc2) { const p = l.credential_etc2.split('/'); credItems.push({ type: 'etc', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
+            // Legacy fallback: parse "user / password" format (v2.4.1: 비번 미프리필 — has_password만)
+            if (l.credential_root) { const p = l.credential_root.split('/'); credItems.push({ type: 'root', username: (p[0]||'').trim(), has_password: !!(p[1]||'').trim() }); }
+            if (l.credential_etc1) { const p = l.credential_etc1.split('/'); credItems.push({ type: 'etc', username: (p[0]||'').trim(), has_password: !!(p[1]||'').trim() }); }
+            if (l.credential_etc2) { const p = l.credential_etc2.split('/'); credItems.push({ type: 'etc', username: (p[0]||'').trim(), has_password: !!(p[1]||'').trim() }); }
           }
-          // Handle old format {type, value} → {type, username, password}
+          // v2.4.1: 비밀번호는 폼에 프리필하지 않는다(이력 평문 제거와 짝). has_password만 표시.
           credItems = credItems.map(c => {
-            if (c.value && !c.username) {
-              const p = c.value.split('/'); return { type: c.type, username: (p[0]||'').trim(), password: (p[1]||'').trim() };
-            }
+            if (c.value && !c.username) { const p = c.value.split('/'); return { type: c.type, username: (p[0]||'').trim(), has_password: !!(p[1]||'').trim() }; }
+            if (typeof c.has_password === 'undefined') c.has_password = !!c.password;
             return c;
           });
         %>
@@ -247,7 +246,7 @@
                 <input type="text" name="cred_usernames[]" class="form-control" value="<%= cred.username || '' %>" placeholder="사용자">
             </div>
             <div class="form-group" style="flex:1; margin-bottom:8px;">
-                <input type="text" name="cred_passwords[]" class="form-control" value="<%= cred.password || '' %>" placeholder="비밀번호">
+                <input type="text" name="cred_passwords[]" class="form-control" value="" placeholder="<%= cred.has_password ? '기존 값 유지(변경 시에만 입력)' : '비밀번호' %>">
             </div>
             <div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">
                 <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('.inv-cred-row').remove(); updateCredHeader();">X</button>
@@ -1578,7 +1577,7 @@ function onAssetSelect(assetId) {
                     '<input type="text" name="cred_usernames[]" class="form-control" placeholder="사용자" value="' + (c.username || '').replace(/"/g, '&quot;') + '">' +
                     '</div>' +
                     '<div class="form-group" style="flex:1; margin-bottom:8px;">' +
-                    '<input type="text" name="cred_passwords[]" class="form-control" placeholder="비밀번호" value="' + (c.password || '').replace(/"/g, '&quot;') + '">' +
+                    '<input type="text" name="cred_passwords[]" class="form-control" value="" placeholder="' + (c.has_password ? '기존 값 유지(변경 시에만 입력)' : '비밀번호') + '">' +
                     '</div>' +
                     '<div class="form-group" style="flex:0 0 50px; margin-bottom:8px;">' +
                     '<button type="button" class="btn btn-sm btn-danger" onclick="this.closest(\'.inv-cred-row\').remove(); updateCredHeader();">X</button>' +

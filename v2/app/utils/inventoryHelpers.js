@@ -140,7 +140,9 @@ function mapCredsToCols(body) {
     const u = (uArr[i] || '').trim();
     const p = (pArr[i] || '').trim();
     if (t && (u || p)) {
-      items.push({ type: t, username: u, password: p });
+      // v2.4.1: 이력 스냅샷에는 비밀번호를 저장하지 않는다 — type·username·has_password만.
+      //   실제 비밀번호는 asset_credentials(암호화)에만 보관. 레거시 "user / pass" 쌍도 비번 제외.
+      items.push({ type: t, username: u, has_password: !!p });
     }
   }
 
@@ -151,7 +153,7 @@ function mapCredsToCols(body) {
 
   let etcIdx = 0;
   for (const item of items) {
-    const pair = item.username + ' / ' + item.password;
+    const pair = item.username; // v2.4.1: username만(비번 제외)
     if (item.type === 'root' && !result.credential_root) {
       result.credential_root = pair;
     } else {

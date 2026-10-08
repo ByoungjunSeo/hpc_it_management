@@ -185,17 +185,29 @@ function buildSnapshots(data) {
     const items = [];
     if (data.credential_root) {
       const p = data.credential_root.split('/');
-      items.push({ type: 'root', username: (p[0] || '').trim(), password: (p[1] || '').trim() });
+      items.push({ type: 'root', username: (p[0] || '').trim() });
     }
     if (data.credential_etc1) {
       const p = data.credential_etc1.split('/');
-      items.push({ type: 'etc', username: (p[0] || '').trim(), password: (p[1] || '').trim() });
+      items.push({ type: 'etc', username: (p[0] || '').trim() });
     }
     if (data.credential_etc2) {
       const p = data.credential_etc2.split('/');
-      items.push({ type: 'etc', username: (p[0] || '').trim(), password: (p[1] || '').trim() });
+      items.push({ type: 'etc', username: (p[0] || '').trim() });
     }
     if (items.length > 0) result.credentials_snapshot = items;
+  }
+
+  // v2.4.1: 어떤 경로로 들어오든 이력 스냅샷에서 비밀번호 제거 — password/value(user/pass) 키 비노출, has_password만.
+  if (Array.isArray(result.credentials_snapshot)) {
+    result.credentials_snapshot = result.credentials_snapshot.map(function (c) {
+      if (!c || typeof c !== 'object') return c;
+      const out = { type: c.type, username: c.username };
+      // 구형 {type,value:"user/pass"} → username만
+      if (!out.username && c.value) out.username = String(c.value).split('/')[0].trim();
+      out.has_password = !!(c.password || (c.value && String(c.value).split('/')[1]) || c.has_password);
+      return out;
+    });
   }
 
   return result;

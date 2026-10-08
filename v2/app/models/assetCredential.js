@@ -89,6 +89,43 @@ const AssetCredential = {
     }
   },
 
+  // v2.4.1: 사용등록 prefill 저장 — (type,username) 기준 upsert. password 빈칸이면 기존 암호화값 유지(덮어쓰기·삭제 금지).
+  //   폼에 없는 기존 자격증명은 삭제하지 않음(사용등록은 전체 편집기가 아님 — 전체 편집은 자산 수정의 syncForAsset).
+  async syncFromUsage(assetId, creds) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const c of creds) {
+        if (!c.username || !c.username.trim()) continue;
+        const ctype = c.credential_type || 'root';
+        const uname = c.username.trim();
+        const { rows: existing } = await client.query(
+          'SELECT id FROM asset_credentials WHERE asset_id=$1 AND credential_type=$2 AND username=$3 ORDER BY id LIMIT 1',
+          [assetId, ctype, uname]);
+        if (existing[0]) {
+          if (c.password && c.password.length) {
+            // 비번 입력 있음 → 갱신(암호화)
+            await client.query(
+              'UPDATE asset_credentials SET password_enc=$1, password=NULL, description=$2 WHERE id=$3',
+              [credCrypto.encrypt(c.password), c.description || null, existing[0].id]);
+          } // 빈칸 → 기존 유지(아무것도 안 함)
+        } else {
+          const enc = c.password && c.password.length ? credCrypto.encrypt(c.password) : null;
+          await client.query(
+            `INSERT INTO asset_credentials (asset_id, username, password_enc, credential_type, description)
+             VALUES ($1,$2,$3,$4,$5)`,
+            [assetId, uname, enc, ctype, c.description || null]);
+        }
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  },
+
   async bulkCreate(assetId, creds) {
     const client = await pool.connect();
     try {

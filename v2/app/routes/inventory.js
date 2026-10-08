@@ -594,8 +594,10 @@ router.get('/api/asset/:id', async (req, res) => {
   try {
     const asset = await Asset.findById(req.params.id);
     if (!asset) return res.status(404).json({ error: 'Not found' });
+    // v2.4.1: 응답에 비밀번호 미포함 — 마스킹본 + 레거시 ssh_password 제거(상세 API와 동일 원칙)
+    if (asset && 'ssh_password' in asset) asset.ssh_password = undefined;
     const ips = await AssetIp.findByAsset(req.params.id);
-    const credentials = await AssetCredential.findByAsset(req.params.id);
+    const credentials = await AssetCredential.findByAssetMasked(req.params.id);
 
     // Include parent chassis info if this is a node asset
     let parent = null;
@@ -1017,8 +1019,8 @@ router.post('/', requireMaintenance, async (req, res) => {
               assetCreds.push({ username, password, credential_type: credType, description: cType });
             }
             if (assetCreds.length > 0) {
-              await AssetCredential.deleteByAsset(asset.id);
-              await AssetCredential.bulkCreate(asset.id, assetCreds);
+              // v2.4.1: 빈 비번=기존 유지(prefill 후 빈칸 저장 시 비번 유실 방지). delete+bulkCreate 대체.
+              await AssetCredential.syncFromUsage(asset.id, assetCreds);
             }
           }
         } catch (syncErr) {
@@ -1296,9 +1298,9 @@ router.post('/:id', requireMaintenance, async (req, res) => {
             password: cpArr[i] || ''
           });
         }
-        await AssetCredential.deleteByAsset(asset.id);
+        // v2.4.1: 빈 비번=기존 유지(비파괴). delete+bulkCreate 대체.
         if (assetCreds.length > 0) {
-          await AssetCredential.bulkCreate(asset.id, assetCreds);
+          await AssetCredential.syncFromUsage(asset.id, assetCreds);
         }
       }
     }

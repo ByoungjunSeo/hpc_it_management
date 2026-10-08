@@ -111,13 +111,14 @@
         try { credList = JSON.parse(latest.credentials_json); } catch(e) {}
       }
       if (credList.length === 0) {
-        if (latest.credential_root) { const p = latest.credential_root.split('/'); credList.push({ type: 'root', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
-        if (latest.credential_etc1) { const p = latest.credential_etc1.split('/'); credList.push({ type: 'etc', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
-        if (latest.credential_etc2) { const p = latest.credential_etc2.split('/'); credList.push({ type: 'etc', username: (p[0]||'').trim(), password: (p[1]||'').trim() }); }
+        if (latest.credential_root) { const p = latest.credential_root.split('/'); credList.push({ type: 'root', username: (p[0]||'').trim(), has_password: !!(p[1]||'').trim() }); }
+        if (latest.credential_etc1) { const p = latest.credential_etc1.split('/'); credList.push({ type: 'etc', username: (p[0]||'').trim(), has_password: !!(p[1]||'').trim() }); }
+        if (latest.credential_etc2) { const p = latest.credential_etc2.split('/'); credList.push({ type: 'etc', username: (p[0]||'').trim(), has_password: !!(p[1]||'').trim() }); }
       }
-      // Handle old format {type, value} → {type, username, password}
+      // v2.4.1: 이력 화면은 비밀번호를 표시하지 않는다 — username + 등록여부(●●●●)만. 구형 {type,value} 포함.
       credList = credList.map(c => {
-        if (c.value && !c.username) { const p = c.value.split('/'); return { type: c.type, username: (p[0]||'').trim(), password: (p[1]||'').trim() }; }
+        if (c.value && !c.username) { const p = c.value.split('/'); return { type: c.type, username: (p[0]||'').trim(), has_password: !!(p[1]||'').trim() }; }
+        if (typeof c.has_password === 'undefined') c.has_password = !!c.password;
         return c;
       });
     %>
@@ -126,7 +127,7 @@
         <% credList.forEach(c => { %>
         <div class="form-group">
             <label><%= credTypeLabels[c.type] || c.type %> 계정</label>
-            <p><code><%= c.username || '' %></code> / <code><%= c.password || '' %></code></p>
+            <p><code><%= c.username || '' %></code> / <% if (c.has_password) { %><code>●●●●●●</code> <span style="color:#94a3b8;font-size:11px;">등록됨</span><% } else { %><span style="color:#94a3b8;">미등록</span><% } %></p>
         </div>
         <% }) %>
     </div>

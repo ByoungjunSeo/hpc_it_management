@@ -183,7 +183,7 @@ router.get('/:id/assets', async (req, res, next) => {
     for (const a of assets) {
       [a.ips, a.credentials, a.modules] = await Promise.all([
         AssetIp.findByAsset(a.id),
-        AssetCredential.findByAsset(a.id),
+        AssetCredential.findByAssetMasked(a.id), // v2.4.1: 뷰 데이터에 비밀번호 미포함
         ComputingModule.findByAsset(a.id)
       ]);
     }

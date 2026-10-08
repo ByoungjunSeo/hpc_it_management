@@ -336,8 +336,8 @@ router.get('/:id/json', async (req, res) => {
 });
 
 // BL-11 후속: [보기] 전용 — 단일 자격증명 복호화 값 반환 + 조회 이력 기록.
-// 권한은 기존 화면과 동일(requireLogin 전역). 값은 audit에 미기록.
-router.get('/:id/credential/:credId/reveal', async (req, res) => {
+// v2.4.1: viewer 차단 — requireMaintenance 이상만 복호화 조회 가능(감사 로그 유지).
+router.get('/:id/credential/:credId/reveal', requireMaintenance, async (req, res) => {
   try {
     const asset = await Asset.findById(req.params.id);
     if (!asset) return res.status(404).json({ error: 'Not found' });

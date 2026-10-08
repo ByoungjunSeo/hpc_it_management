@@ -3,13 +3,21 @@ const { formatTimestamp } = require('../utils/dateFix');
 
 // BL-11: 감사 로그 details에 자격증명성 값이 재유입되지 않도록 마스킹.
 // asset before/after 등이 ssh_password 컬럼을 포함하므로 저장 전 재귀 치환.
-const SENSITIVE_KEYS = new Set(['password', 'ssh_password', 'password_enc', 'bmc_password']);
+// v2.4.1: 비밀번호성 키 전수 마스킹. 명시 키 + 키 이름에 password/passwd 포함(폼 배열 cred_passwords[] 등) 모두 포괄.
+const SENSITIVE_KEYS = new Set([
+  'password', 'ssh_password', 'password_enc', 'bmc_password', 'sol_password',
+  'new_password', 'cred_passwords', 'cred_passwords[]', 'ssh_pass'
+]);
+function isSensitiveKey(k) {
+  const lk = String(k).toLowerCase();
+  return SENSITIVE_KEYS.has(k) || lk.includes('password') || lk.includes('passwd');
+}
 function maskSensitive(value) {
   if (Array.isArray(value)) return value.map(maskSensitive);
   if (value && typeof value === 'object') {
     const out = {};
     for (const k of Object.keys(value)) {
-      out[k] = SENSITIVE_KEYS.has(k)
+      out[k] = isSensitiveKey(k)
         ? (value[k] ? '***REDACTED***' : value[k])
         : maskSensitive(value[k]);
     }

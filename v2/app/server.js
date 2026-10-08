@@ -33,7 +33,7 @@ const cookieParser = require('cookie-parser');
 const appConfig = require('./config/app');
 const { pool, closeDb } = require('./config/database');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
-const { requireLogin } = require('./middleware/auth');
+const { requireLogin, requireMaintenance } = require('./middleware/auth');
 
 // Ensure photo upload directories exist
 const photoAssetsDir = path.join(__dirname, 'public', 'uploads', 'photos', 'assets');
@@ -116,7 +116,7 @@ app.use('/vendor-intake', require('./routes/vendorIntake'));
 // app.use('/excel', require('./routes/excelUpload'));
 // app.use('/power-panel', require('./routes/powerPanel'));
 // app.use('/network-layout', require('./routes/networkLayout'));
-app.use('/audit-log', require('./routes/auditLog'));
+app.use('/audit-log', requireMaintenance, require('./routes/auditLog')); // v2.4.1: 이력관리는 maintenance 이상(viewer 차단)
 app.use('/backups', require('./routes/backups')); // T4: 백업 관리(관리자 한정)
 // app.use('/gpu-monitoring', require('./routes/gpuMonitoring'));
 // app.use('/chat', require('./routes/chat'));
