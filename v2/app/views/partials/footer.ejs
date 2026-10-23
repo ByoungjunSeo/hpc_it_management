@@ -9,19 +9,43 @@
         var results = document.getElementById('globalSearchResults');
         if (!input || !results) return;
         var timer = null;
+        var flat = [];      // 렌더 순서대로의 결과 객체(키보드 네비용)
+        var selIdx = -1;    // B-4b 1-2: 하이라이트 항목 인덱스
+
+        // B-4b 1-1: 결과 항목 본문 클릭 동작 — /rooms에서 locateUrl 있으면 이동 없이 강조, 그 외는 이동/상세.
+        function activate(d) {
+            if (!d) return;
+            results.classList.remove('show');
+            if (d.locateUrl && location.pathname.indexOf('/rooms') === 0 && typeof window.locateAsset === 'function') {
+                window.locateAsset(d.id);           // 분할 패널 유지, 페이지 이동 없음
+            } else if (d.locateUrl) {
+                location.href = d.locateUrl;        // 다른 페이지 → /rooms?focus=id
+            } else {
+                location.href = d.url;              // 미배치 등 → 상세
+            }
+        }
+        function setSel(i) {
+            var items = results.querySelectorAll('.gsr-item');
+            if (!items.length) return;
+            if (i < 0) i = items.length - 1;
+            if (i >= items.length) i = 0;
+            selIdx = i;
+            items.forEach(function(el, k){ el.classList.toggle('gsr-active', k === selIdx); });
+            items[selIdx].scrollIntoView({ block: 'nearest' });
+        }
 
         input.addEventListener('input', function() {
             clearTimeout(timer);
             var q = this.value.trim();
-            if (q.length < 2) { results.classList.remove('show'); return; }
+            if (q.length < 2) { results.classList.remove('show'); flat = []; selIdx = -1; return; }
             timer = setTimeout(function() {
                 fetch('/api/search?q=' + encodeURIComponent(q))
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
+                        flat = []; selIdx = -1;
                         if (data.length === 0) {
                             results.innerHTML = '<div class="gsr-empty">검색 결과가 없습니다.</div>';
                         } else {
-                            // B-4: 구역([장비]/[IP]/[모듈 장착 장비])로 분리 + 모듈 요약 줄
                             var badgeMap = { asset: '장비', ip: 'IP', module: '모듈' };
                             function modSummary(d) {
                                 if (!d.matchedModules || !d.matchedModules.lines || !d.matchedModules.lines.length) return '';
@@ -33,12 +57,13 @@
                                 return '<div class="gsr-mod">' + parts.join(', ') + extra + '</div>';
                             }
                             function renderItem(d) {
+                                var idx = flat.length; flat.push(d);
                                 var badge = '<span class="gsr-badge ' + d.type + '">' + (badgeMap[d.type] || d.type) + '</span>';
                                 var loc = d.location ? (' &middot; ' + escH(d.location)) : '';
                                 var cur = d.currentLocation ? ('<div class="gsr-subtitle gsr-current">현재 위치: ' + escH(d.currentLocation) + '</div>') : '';
                                 var actions = '<a class="gsr-link" href="' + escH(d.url) + '">상세</a>' +
                                     (d.locateUrl ? ('<a class="gsr-link gsr-locate" href="' + escH(d.locateUrl) + '">랙 위치</a>') : '');
-                                return '<div class="gsr-item">' +
+                                return '<div class="gsr-item" data-idx="' + idx + '">' +
                                     '<div class="gsr-title">' + badge + escH(d.title) + '</div>' +
                                     '<div class="gsr-subtitle">' + escH(d.subtitle || '') + loc + '</div>' +
                                     cur + modSummary(d) +
@@ -49,6 +74,11 @@
                             var gI = data.filter(function(d){return d.matchType==='ip';});
                             var gM = data.filter(function(d){return d.matchType==='module';});
                             results.innerHTML = section('장비', gA) + section('IP', gI) + section('모듈 장착 장비 (' + gM.length + ')', gM);
+                            // 본문 클릭 → activate (액션 링크는 stopPropagation으로 독립 동작)
+                            results.querySelectorAll('.gsr-item').forEach(function(el){
+                                el.addEventListener('click', function(e){ if (e.target.closest('.gsr-link')) return; activate(flat[parseInt(el.dataset.idx, 10)]); });
+                                el.addEventListener('mouseenter', function(){ setSel(parseInt(el.dataset.idx, 10)); });
+                            });
                         }
                         results.classList.add('show');
                     });
@@ -65,8 +95,15 @@
             }
         });
 
+        // B-4b 1-2: ↑/↓ 이동, Enter 활성화, Esc 닫기
         input.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') { results.classList.remove('show'); input.blur(); }
+            if (e.key === 'Escape') { results.classList.remove('show'); input.blur(); return; }
+            if (!results.classList.contains('show')) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); setSel(selIdx + 1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); setSel(selIdx - 1); }
+            else if (e.key === 'Enter') {
+                if (selIdx >= 0 && flat[selIdx]) { e.preventDefault(); activate(flat[selIdx]); }
+            }
         });
 
         function escH(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }

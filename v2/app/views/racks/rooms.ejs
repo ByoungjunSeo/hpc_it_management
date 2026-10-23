@@ -281,7 +281,7 @@
         <button type="button" class="sr-panel-close" onclick="srSetPanel(false, true)" aria-label="닫기">&times;</button>
     </div>
     <div class="sr-panel-chips" id="srPanelChips"></div>
-    <input type="text" id="srPanelFilter" class="form-control sr-panel-filter" autocomplete="off" placeholder="필터 — 관리번호·모델·IP" oninput="srPanelRender()">
+    <input type="text" id="srPanelFilter" class="form-control sr-panel-filter" autocomplete="off" placeholder="필터 — 관리번호·모델·IP·모듈(예: H100)" oninput="srPanelFilterInput()">
     <div class="sr-panel-list" id="srPanelList"><p class="text-muted" style="padding:12px;">서버실을 선택하세요.</p></div>
 </div>
 <script>
@@ -773,38 +773,60 @@ function srMatchMove(delta) {
     locateAsset(srMatches[srMatchIdx]);
 }
 
+// 공용: matchedModules 요약 줄(업체 소유 배지 포함). 검색 드롭다운·장비 패널 공용(복제 방지).
+function srModLine(mm){
+    if (!mm || !mm.lines || !mm.lines.length) return '';
+    var parts = mm.lines.map(function(m){
+        var own = (m.owner === 'vendor') ? ' <span class="badge badge-warning">' + esc(m.owner_vendor_name || '업체') + '</span>' : '';
+        return esc((m.module_type||'').toUpperCase() + ' ' + (m.model || m.capacity || '') + ' ×' + m.count) + own;
+    });
+    return '<div class="sr-sr-mod">' + parts.join(', ') + (mm.extra ? (' 외 ' + mm.extra + '종') : '') + '</div>';
+}
+
 // 검색 드롭다운
 (function(){
     var input = document.getElementById('srSearchInput');
     var box = document.getElementById('srSearchResults');
     if (!input) return;
     var timer;
+    var flat = [], selIdx = -1;
+    // B-4b 1-1: /rooms 검색은 locateUrl 있으면 강조 이동, 없으면 상세 페이지.
+    function srActivate(d){
+        if (!d) return;
+        box.classList.remove('show');
+        srMatchIdx = srMatches.indexOf(d.id);
+        if (d.locateUrl) locateAsset(d.id);            // 1-4: DOM 미발견 시 locateAsset이 토스트 안내
+        else window.location.href = d.url;             // 미배치·사무실 등 → 상세
+    }
+    function setSel(i){
+        var items = box.querySelectorAll('.sr-sr-item');
+        if (!items.length) return;
+        if (i < 0) i = items.length - 1;
+        if (i >= items.length) i = 0;
+        selIdx = i;
+        items.forEach(function(el, k){ el.classList.toggle('sr-sr-active', k === selIdx); });
+        items[selIdx].scrollIntoView({ block: 'nearest' });
+    }
     input.addEventListener('input', function(){
         var q = this.value.trim();
         clearTimeout(timer);
         // B-4: 검색어 변경 시 [모두 표시] 강조 해제
         if (srAllActive) { document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); }); srAllActive = false; }
+        flat = []; selIdx = -1;
         if (q.length < 2) { box.innerHTML = ''; box.classList.remove('show'); return; }
         timer = setTimeout(function(){
             fetch('/api/search?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(data){
                 srLastResults = data;
                 srMatches = data.map(function(d){ return d.id; });
-                srMatchIdx = -1;
+                srMatchIdx = -1; flat = []; selIdx = -1;
                 var nav = document.getElementById('srMatchNav');
                 if (nav) { nav.style.display = data.length > 1 ? '' : 'none'; document.getElementById('srMatchLabel').textContent = data.length + '건'; }
                 if (!data.length) { box.innerHTML = '<div class="sr-sr-empty">검색 결과가 없습니다.</div>'; box.classList.add('show'); return; }
                 // B-4: 구역 + 모듈 요약 + [모두 표시]
-                function srModSummary(d){
-                    if (!d.matchedModules || !d.matchedModules.lines || !d.matchedModules.lines.length) return '';
-                    var parts = d.matchedModules.lines.map(function(m){
-                        var own = (m.owner === 'vendor') ? ' <span class="badge badge-warning">' + esc(m.owner_vendor_name || '업체') + '</span>' : '';
-                        return esc((m.module_type||'').toUpperCase() + ' ' + (m.model || m.capacity || '') + ' ×' + m.count) + own;
-                    });
-                    return '<div class="sr-sr-mod">' + parts.join(', ') + (d.matchedModules.extra ? (' 외 ' + d.matchedModules.extra + '종') : '') + '</div>';
-                }
                 function srItem(d){
+                    var idx = flat.length; flat.push(d);
                     var sub = esc(d.subtitle || '') + (d.location ? (' · ' + esc(d.location)) : '') + (d.currentLocation ? (' · 현재: ' + esc(d.currentLocation)) : '');
-                    return '<div class="sr-sr-item" data-id="' + d.id + '"><div class="sr-sr-title">' + esc(d.title) + '</div><div class="sr-sr-sub">' + sub + '</div>' + srModSummary(d) + '</div>';
+                    return '<div class="sr-sr-item" data-id="' + d.id + '" data-idx="' + idx + '"><div class="sr-sr-title">' + esc(d.title) + '</div><div class="sr-sr-sub">' + sub + '</div>' + srModLine(d.matchedModules) + '</div>';
                 }
                 function srSec(title, items){ return items.length ? ('<div class="sr-sr-head">' + esc(title) + '</div>' + items.map(srItem).join('')) : ''; }
                 var gA = data.filter(function(d){return d.matchType==='asset';}), gI = data.filter(function(d){return d.matchType==='ip';}), gM = data.filter(function(d){return d.matchType==='module';});
@@ -812,18 +834,21 @@ function srMatchMove(delta) {
                     srSec('장비', gA) + srSec('IP', gI) + srSec('모듈 장착 장비 (' + gM.length + ')', gM);
                 box.classList.add('show');
                 box.querySelectorAll('.sr-sr-item').forEach(function(el){
-                    el.addEventListener('click', function(){
-                        var id = parseInt(this.dataset.id);
-                        box.classList.remove('show');
-                        srMatchIdx = srMatches.indexOf(id);
-                        locateAsset(id);
-                    });
+                    el.addEventListener('click', function(){ srActivate(flat[parseInt(el.dataset.idx, 10)]); });
+                    el.addEventListener('mouseenter', function(){ setSel(parseInt(el.dataset.idx, 10)); });
                 });
             }).catch(function(){ box.innerHTML = '<div class="sr-sr-empty">검색 오류</div>'; box.classList.add('show'); });
         }, 250);
     });
     document.addEventListener('click', function(e){ if (!input.contains(e.target) && !box.contains(e.target)) box.classList.remove('show'); });
-    input.addEventListener('keydown', function(e){ if (e.key === 'Escape') box.classList.remove('show'); });
+    // B-4b 1-2: ↑/↓ 이동, Enter 활성화, Esc 닫기
+    input.addEventListener('keydown', function(e){
+        if (e.key === 'Escape') { box.classList.remove('show'); return; }
+        if (!box.classList.contains('show')) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); setSel(selIdx + 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); setSel(selIdx - 1); }
+        else if (e.key === 'Enter') { if (selIdx >= 0 && flat[selIdx]) { e.preventDefault(); srActivate(flat[selIdx]); } }
+    });
 })();
 
 // ?focus=<id> 진입 시 자동 이동
@@ -906,6 +931,13 @@ window.addEventListener('resize', function() {
     if (nowWide) { srSetPanel(srGetPref() !== 'hidden', false); }   // 넓어짐: 선호 hidden 아니면 열기
     else { srSetPanel(false, false); }                              // 좁아짐: 오버레이 → 닫기(본문 가림 방지)
 });
+// B-4b 2: 패널 필터 서버 연동 상태
+var srPanelServerActive = false;   // 2글자+ 서버 검색 모드
+var srPanelServerIds = null;       // 이 서버실 스코프 결과 id Set
+var srPanelScoped = [];            // 스코프 검색 결과 원본(패널 미등재 블레이드 노드 합성용)
+var srPanelServerMods = {};        // id → matchedModules
+var srPanelOther = 0;              // 다른 위치(전역-스코프) 매칭 수
+var srPanelFilterTimer = null;
 function srPanelReload() {
     var sel = document.getElementById('srPanelRoom');
     var rid = sel && sel.value ? sel.value : (SR_ROOMS[0] && SR_ROOMS[0].id);
@@ -914,15 +946,71 @@ function srPanelReload() {
     list.innerHTML = '<p class="text-muted" style="padding:12px;">로딩중…</p>';
     fetch('/rooms/' + rid + '/assets.json').then(function(r){ return r.json(); }).then(function(d){
         srPanelData = (d && d.assets) || [];
-        srPanelRenderChips();
-        srPanelRender();
+        // 2-2: 서버실 변경 시 활성 검색어가 있으면 재조회, 아니면 간이 필터로 렌더
+        var q = (document.getElementById('srPanelFilter').value || '').trim();
+        if (q.length >= 2) { srPanelServerSearch(q); }
+        else { srPanelServerActive = false; srPanelServerIds = null; srPanelRenderChips(); srPanelRender(); }
     }).catch(function(){ list.innerHTML = '<p style="color:#ef4444;padding:12px;">불러올 수 없습니다.</p>'; });
+}
+// 2-2 입력 핸들러: 1글자 이하는 간이(클라이언트) 필터, 2글자 이상은 디바운스 후 서버 검색.
+function srPanelFilterInput() {
+    var q = (document.getElementById('srPanelFilter').value || '').trim();
+    clearTimeout(srPanelFilterTimer);
+    if (q.length < 2) { srPanelServerActive = false; srPanelServerIds = null; srPanelRenderChips(); srPanelRender(); return; }
+    srPanelFilterTimer = setTimeout(function(){ srPanelServerSearch(q); }, 250);
+}
+// 2-1 서버 검색: 스코프(room_id) + 전역을 함께 받아 목록 필터 + "다른 위치 N건" 계산.
+function srPanelServerSearch(q) {
+    var sel = document.getElementById('srPanelRoom');
+    var rid = sel && sel.value ? sel.value : (SR_ROOMS[0] && SR_ROOMS[0].id);
+    function okJson(r){ if (!r.ok) throw new Error('http'); return r.json(); }
+    Promise.all([
+        fetch('/api/search?q=' + encodeURIComponent(q) + '&room_id=' + encodeURIComponent(rid)).then(okJson),
+        fetch('/api/search?q=' + encodeURIComponent(q)).then(okJson)
+    ]).then(function(arr){
+        var scoped = arr[0] || [], global = arr[1] || [];
+        srPanelScoped = scoped;
+        srPanelServerIds = {}; scoped.forEach(function(d){ srPanelServerIds[d.id] = true; });
+        srPanelServerMods = {}; scoped.forEach(function(d){ if (d.matchedModules) srPanelServerMods[d.id] = d.matchedModules; });
+        srPanelOther = global.filter(function(d){ return !srPanelServerIds[d.id]; }).length;
+        srPanelServerActive = true;
+        srPanelRenderChips(); srPanelRender();
+    }).catch(function(){
+        // 2-4: 오류 → 간이 클라이언트 필터로 폴백 + 안내
+        srPanelServerActive = false; srPanelServerIds = null;
+        srShowToast('검색 연결 실패 — 간이 필터로 표시합니다.');
+        srPanelRenderChips(); srPanelRender();
+    });
+}
+// 서버 결과(다른 위치 N건)로 상단 전역 검색 드롭다운 열기
+function srPanelShowGlobal() {
+    var q = (document.getElementById('srPanelFilter').value || '').trim();
+    var g = document.getElementById('globalSearch');
+    if (g) { g.value = q; g.dispatchEvent(new Event('input', { bubbles: true })); g.focus(); }
+}
+// 현재 표시 대상 base 행(서버 모드=스코프 결과 병합, 간이 모드=텍스트 필터). 유형 칩 적용 전.
+function srPanelVisibleRows() {
+    if (srPanelServerActive && srPanelServerIds) {
+        var byId = {}; srPanelData.forEach(function(a){ byId[a.id] = a; });
+        return srPanelScoped.map(function(d){
+            var a = byId[d.id];
+            if (a) { a.__mm = srPanelServerMods[d.id]; a.__loc = null; return a; }
+            // 2-4: 패널 미등재(블레이드 노드 등) → 검색 결과로 합성
+            return { id: d.id, asset_type: d.asset_type, management_number: (d.subtitle || '').split(' | ')[0] || null,
+                     asset_number: null, model_name: d.title || null, rack_id: null, rack_name: null, u_label: null,
+                     rep_ip: null, ownership: null, vendor_name: null, status: null, __loc: d.location || '', __mm: srPanelServerMods[d.id] };
+        });
+    }
+    var q = (document.getElementById('srPanelFilter').value || '').trim().toLowerCase();
+    if (!q) return srPanelData.slice();
+    return srPanelData.filter(function(a){ return [a.management_number, a.model_name, a.rep_ip, a.asset_number].some(function(v){ return v && String(v).toLowerCase().indexOf(q) !== -1; }); });
 }
 var srPanelTypeFilter = '';
 function srPanelRenderChips() {
+    var base = srPanelVisibleRows();   // 2-2: 칩 개수는 필터(서버/간이) 결과 기준
     var counts = {};
-    srPanelData.forEach(function(a){ counts[a.asset_type] = (counts[a.asset_type] || 0) + 1; });
-    var chips = '<span class="sr-chip' + (srPanelTypeFilter === '' ? ' active' : '') + '" onclick="srPanelSetType(\'\')">전체 ' + srPanelData.length + '</span>';
+    base.forEach(function(a){ counts[a.asset_type] = (counts[a.asset_type] || 0) + 1; });
+    var chips = '<span class="sr-chip' + (srPanelTypeFilter === '' ? ' active' : '') + '" onclick="srPanelSetType(\'\')">전체 ' + base.length + '</span>';
     Object.keys(counts).forEach(function(t){
         chips += '<span class="sr-chip' + (srPanelTypeFilter === t ? ' active' : '') + '" onclick="srPanelSetType(\'' + t + '\')">' + esc(SR_TYPE_LABELS[t] || t) + ' ' + counts[t] + '</span>';
     });
@@ -930,24 +1018,32 @@ function srPanelRenderChips() {
 }
 function srPanelSetType(t) { srPanelTypeFilter = t; srPanelRenderChips(); srPanelRender(); }
 function srPanelRender() {
-    var q = (document.getElementById('srPanelFilter').value || '').trim().toLowerCase();
     var list = document.getElementById('srPanelList');
-    var rows = srPanelData.filter(function(a){
-        if (srPanelTypeFilter && a.asset_type !== srPanelTypeFilter) return false;
-        if (!q) return true;
-        return [a.management_number, a.model_name, a.rep_ip, a.asset_number].some(function(v){ return v && String(v).toLowerCase().indexOf(q) !== -1; });
-    });
-    if (!rows.length) { list.innerHTML = '<p class="text-muted" style="padding:12px;">해당 장비가 없습니다.</p>'; return; }
+    var base = srPanelVisibleRows();
+    var rows = srPanelTypeFilter ? base.filter(function(a){ return a.asset_type === srPanelTypeFilter; }) : base;   // 2-2: 유형 칩은 서버 결과 위에 추가 적용
+    if (!rows.length) {
+        if (srPanelServerActive) {
+            var qesc = esc((document.getElementById('srPanelFilter').value || '').trim());
+            var other = srPanelOther > 0 ? ('<br><a href="#" class="sr-panel-other" onclick="srPanelShowGlobal();return false;">다른 위치 ' + srPanelOther + '건 보기</a>') : '';
+            list.innerHTML = '<p class="text-muted" style="padding:12px;">이 서버실에 \'' + qesc + '\' 장비 없음' + other + '</p>';
+        } else {
+            list.innerHTML = '<p class="text-muted" style="padding:12px;">해당 장비가 없습니다.</p>';
+        }
+        return;
+    }
     list.innerHTML = rows.map(function(a){
         var ownerBadge = (a.ownership === 'vendor')
             ? '<span class="badge badge-warning">' + esc(a.vendor_name || '업체') + '</span>'
-            : '<span class="badge badge-success">자사</span>';
-        var loc = a.rack_id ? (esc(a.rack_name || '') + (a.u_label ? (' ' + esc(a.u_label)) : '')) : '<span class="text-muted">랙 미배치</span>';
+            : (a.ownership ? '<span class="badge badge-success">자사</span>' : '');
+        var loc = a.__loc ? esc(a.__loc)
+                : (a.rack_id ? (esc(a.rack_name || '') + (a.u_label ? (' ' + esc(a.u_label)) : '')) : '<span class="text-muted">랙 미배치</span>');
+        var status = a.status ? (' · ' + esc(SR_STATUS_LABELS[a.status] || a.status)) : '';
         return '<div class="sr-row" data-id="' + a.id + '">' +
             '<div class="sr-row-main">' +
               '<span class="sr-row-type">' + esc(SR_TYPE_LABELS[a.asset_type] || a.asset_type) + '</span> ' +
               '<span class="sr-row-mgmt">' + esc(a.management_number || a.asset_number || ('#' + a.id)) + '</span> ' + ownerBadge +
-              '<div class="sr-row-sub">' + esc(a.model_name || '') + ' · ' + loc + (a.rep_ip ? (' · ' + esc(a.rep_ip)) : '') + ' · ' + esc(SR_STATUS_LABELS[a.status] || a.status || '') + '</div>' +
+              '<div class="sr-row-sub">' + esc(a.model_name || '') + ' · ' + loc + (a.rep_ip ? (' · ' + esc(a.rep_ip)) : '') + status + '</div>' +
+              srModLine(a.__mm) +
             '</div>' +
             '<button type="button" class="btn btn-xs btn-outline sr-row-info" onclick="openAssetPopup(' + a.id + ');event.stopPropagation();">정보</button>' +
             '</div>';

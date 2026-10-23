@@ -674,3 +674,6 @@ body .sr-conflict td { background: rgba(255,80,80,0.22); }
 /* B-4: 검색 구역 헤더 다크 */
 body .sr-sr-head, body .gsr-section { background: var(--tui-bg-raise); color: var(--tui-fg-dim); border-bottom-color: var(--tui-border); }
 body .sr-sr-mod, body .gsr-mod { color: var(--tui-fg-dim); }
+/* B-4b */
+body .gsr-item.gsr-active, body .sr-sr-item.sr-sr-active { background: var(--tui-bg-raise); }
+body .sr-panel-other { color: var(--tui-green); }

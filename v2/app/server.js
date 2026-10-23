@@ -129,31 +129,53 @@ app.get('/api/search', async (req, res) => {
     const like = '%' + q + '%';
     const results = [];
 
+    // B-4b: 선택 room_id → 해당 서버실 소속 자산으로 한정(랙 배치 + 블레이드는 부모 섀시 랙 기준 + 직접 room_id 미배치).
+    //   매칭 로직(아래 쿼리 WHERE)은 전역과 동일, room 소속 여부만 AND로 덧붙인다(로직 복제 없음).
+    let roomIds = null;
+    const roomId = parseInt(req.query.room_id, 10);
+    if (req.query.room_id != null && req.query.room_id !== '') {
+      if (!roomId) return res.json([]);   // 숫자 아님 → 빈 결과(오류 아님)
+      const { rows: rids } = await pool.query(`
+        SELECT a.id FROM assets a
+        LEFT JOIN racks r ON a.rack_id = r.id
+        LEFT JOIN assets p ON a.parent_asset_id = p.id
+        LEFT JOIN racks pr ON p.rack_id = pr.id
+        WHERE COALESCE(r.room_id, pr.room_id, a.room_id) = $1
+      `, [roomId]);
+      roomIds = rids.map(r => r.id);
+      if (!roomIds.length) return res.json([]);   // 없는/빈 서버실 → 빈 결과
+    }
+
     // [장비] 자산 이름/번호/시리얼/담당자/용도/제조사 + 레거시 ip (자격증명 컬럼 미포함). cap 15.
+    const assetParams = roomIds ? [like, roomIds] : [like];
     const { rows: assets } = await pool.query(`
       SELECT a.id, a.asset_number, a.management_number, a.model_name, a.asset_type, a.ip_address, a.assigned_user
       FROM assets a
-      WHERE a.asset_number ILIKE $1 OR a.management_number ILIKE $1 OR a.model_name ILIKE $1
+      WHERE (a.asset_number ILIKE $1 OR a.management_number ILIKE $1 OR a.model_name ILIKE $1
          OR a.ip_address ILIKE $1 OR a.assigned_user ILIKE $1 OR a.purpose ILIKE $1
-         OR a.serial_number ILIKE $1 OR a.manufacturer ILIKE $1
+         OR a.serial_number ILIKE $1 OR a.manufacturer ILIKE $1)
+      ${roomIds ? 'AND a.id = ANY($2::int[])' : ''}
       LIMIT 15
-    `, [like]);
+    `, assetParams);
     assets.forEach(a => {
-      results.push({ type: 'asset', matchType: 'asset', id: a.id,
+      results.push({ type: 'asset', matchType: 'asset', id: a.id, asset_type: a.asset_type,
         title: a.model_name || a.asset_number || a.asset_type,
         subtitle: [a.management_number, a.asset_number, a.ip_address, a.assigned_user].filter(Boolean).join(' | '),
         url: '/assets/' + a.id });
     });
 
     // [IP] asset_ips 전체(BMC/IB/data/OS 포함). 자산 미매칭분만. cap 10.
+    const ipParams = roomIds ? [like, roomIds] : [like];
     const { rows: ipRows } = await pool.query(`
       SELECT DISTINCT a.id, a.model_name, a.asset_number, a.management_number, a.asset_type, ai.ip_address
       FROM asset_ips ai JOIN assets a ON ai.asset_id = a.id
-      WHERE ai.ip_address ILIKE $1 OR ai.description ILIKE $1 LIMIT 10
-    `, [like]);
+      WHERE (ai.ip_address ILIKE $1 OR ai.description ILIKE $1)
+      ${roomIds ? 'AND a.id = ANY($2::int[])' : ''}
+      LIMIT 10
+    `, ipParams);
     ipRows.forEach(ip => {
       if (results.find(r => r.id === ip.id)) return;
-      results.push({ type: 'ip', matchType: 'ip', id: ip.id,
+      results.push({ type: 'ip', matchType: 'ip', id: ip.id, asset_type: ip.asset_type,
         title: ip.model_name || ip.management_number || ip.asset_type,
         subtitle: [ip.management_number, ip.ip_address].filter(Boolean).join(' | '),
         url: '/assets/' + ip.id });
@@ -170,6 +192,7 @@ app.get('/api/search', async (req, res) => {
     if (TYPEKW[ql]) { modWhere = 'cm.module_type = $1'; modParams = [TYPEKW[ql]]; }
     else if (/^\d+$/.test(normq)) { const NORMCAP = "regexp_replace(regexp_replace(regexp_replace(lower(coalesce(cm.capacity,'')),'gib','gb','g'),'tib','tb','g'),'\\s+','','g')"; modWhere = NORMCAP + " ~ ('(^|[^0-9])' || $1 || '([^0-9]|$)')"; modParams = [normq]; }
     else { modWhere = '(' + NORMF + " LIKE '%'||$1||'%' OR lower(cm.model) LIKE '%'||$2||'%' OR lower(cm.manufacturer) LIKE '%'||$2||'%')"; modParams = [normq, ql]; }
+    if (roomIds) { modParams.push(roomIds); modWhere = '(' + modWhere + ') AND cm.asset_id = ANY($' + modParams.length + '::int[])'; }
     const { rows: modRows } = await pool.query(
       `SELECT cm.asset_id, cm.module_type, cm.model, cm.manufacturer, cm.capacity, cm.count, cm.owner, cm.owner_vendor_id,
               v.vendor_name AS owner_vendor_name, a.model_name, a.management_number, a.asset_number, a.asset_type
@@ -193,11 +216,25 @@ app.get('/api/search', async (req, res) => {
       if (modAssetAdded >= 50) return;                               // 모듈 구역 cap 50
       modAssetAdded++;
       const first = modByAsset[aid][0];
-      results.push({ type: 'module', matchType: 'module', id: parseInt(aid, 10),
+      results.push({ type: 'module', matchType: 'module', id: parseInt(aid, 10), asset_type: first.asset_type,
         title: first.model_name || first.asset_number || first.asset_type,
         subtitle: [first.management_number, first.asset_number].filter(Boolean).join(' | '),
         url: '/assets/' + aid, matchedModules: summary });
     });
+
+    // B-4b #3: [장비] 구역 노이즈 완화 — 단어 경계 일치를 부분 일치보다 앞으로(안정 정렬, 제외는 안 함).
+    //   예) "a100" → A100(경계)이 PA1000/A1004NS(부분)보다 위. 모듈/IP 구역 순서는 불변.
+    if (!TYPEKW[ql] && !/^\d+$/.test(normq)) {
+      const esc = ql.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const boundary = new RegExp('(^|[^a-z0-9])' + esc + '([^a-z0-9]|$)', 'i');
+      const rankOf = r => (boundary.test(r.title || '') || boundary.test(r.subtitle || '')) ? 0 : 1;
+      const aSec = results.filter(r => r.matchType === 'asset');
+      if (aSec.length > 1) {
+        const rest = results.filter(r => r.matchType !== 'asset');
+        aSec.sort((x, y) => rankOf(x) - rankOf(y));   // Array.sort는 안정 정렬(Node) → 동순위 원순서 유지
+        results.length = 0; results.push(...aSec, ...rest);
+      }
+    }
 
     // UX-3(F3): 결과 자산들의 위치 일괄 조회 — 본인 랙 또는 부모 섀시(블레이드) 랙 기준.
     //   locateUrl = 랙 배치면 /rooms?focus=<id>, 아니면 null. location/currentLocation 문자열 부착.
@@ -208,6 +245,7 @@ app.get('/api/search', async (req, res) => {
                COALESCE(a.rack_id, p.rack_id) AS eff_rack_id,
                COALESCE(a.rack_unit_start, p.rack_unit_start) AS eff_u,
                COALESCE(sr.name, psr.name) AS room_name,
+               COALESCE(sr.location_type, psr.location_type) AS eff_room_type,
                COALESCE(r.name, pr.name) AS rack_name,
                dr.name AS direct_room_name
         FROM assets a
@@ -224,13 +262,15 @@ app.get('/api/search', async (req, res) => {
       locs.forEach(l => {
         const uLabel = l.eff_u ? ('U' + (Math.floor((l.eff_u - 1) / 3) + 1)) : '';
         const placed = !!l.eff_rack_id;
+        // B-4b 1-3: /rooms는 location_type='server_room'만 렌더 → 그 외(사무실 등) 랙 자산은 focus 이동이 실패하므로 locateUrl=null(상세로).
+        const locatable = placed && l.eff_room_type === 'server_room';
         locMap[l.id] = {
           placed,
           location: placed ? [l.room_name, l.rack_name].filter(Boolean).join(' > ') + (uLabel ? (' ' + uLabel) : '')
                            : (l.direct_room_name || ''),
           currentLocation: placed ? null
                            : ((l.direct_room_name ? (l.direct_room_name + ' ') : '') + '(' + (statusMap[l.status] || l.status || '-') + ')'),
-          locateUrl: placed ? ('/rooms?focus=' + l.id) : null,
+          locateUrl: locatable ? ('/rooms?focus=' + l.id) : null,
           status: l.status
         };
       });

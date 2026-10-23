@@ -1975,3 +1975,6 @@ body.rooms-panel-split main.container { margin-right:var(--sr-panel-w); max-widt
 .gsr-section { padding:4px 12px; font-size:11px; font-weight:700; color:var(--text-light); background:var(--bg); }
 .gsr-mod { font-size:11px; color:var(--text-light); margin-top:2px; }
 .gsr-mod-vendor, .sr-sr-mod .badge { font-size:10px; }
+/* B-4b: 키보드 네비 하이라이트 + 패널 '다른 위치' 링크 */
+.gsr-item.gsr-active, .sr-sr-item.sr-sr-active { background: rgba(59,130,246,0.12); }
+.sr-panel-other { color: #2563eb; font-size: 12px; text-decoration: underline; cursor: pointer; }
