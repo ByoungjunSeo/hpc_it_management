@@ -387,7 +387,7 @@ function openAssetPopup(assetId) {
     document.getElementById('adpTitle').textContent = '로딩중...';
     document.getElementById('adpContent').innerHTML = '<p class="text-muted">로딩중...</p>';
     document.getElementById('adpDetailLink').href = '/assets/' + assetId;
-    document.getElementById('adpEditLink').href = '/assets/' + assetId + '/edit';
+    document.getElementById('adpEditLink').href = '/assets/' + assetId + '/edit?returnTo=' + encodeURIComponent(location.pathname + location.search);
     adpCurrentTab = 'basic';
     document.querySelectorAll('.adp-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === 'basic'); });
     openModal('assetDetailPopup');
@@ -441,6 +441,7 @@ function renderAdpTab(data, tab) {
             tr('랙', a.rack_name) +
             tr('U위치', a.rack_unit_start ? 'U' + (Math.floor((a.rack_unit_start - 1) / 3) + 1) + ((a.rack_unit_size || 3) > 3 ? ' ~ U' + (Math.floor((a.rack_unit_start + (a.rack_unit_size || 3) - 2) / 3) + 1) : '') : '-') +
             '</table>';
+        if (srCanEdit()) html += srEditBar('basic');   // UX-2: 빠른 편집 토글
     } else if (tab === 'ip') {
         if (data.assetIps && data.assetIps.length > 0) {
             html = '<table class="adp-table"><tr><th>유형</th><th>인터페이스</th><th>속도</th><th>IP 주소</th><th>설명</th></tr>';
@@ -481,6 +482,7 @@ function renderAdpTab(data, tab) {
             tr('보증만료', a.warranty_end) +
             tr('비고', a.notes) +
             '</table>';
+        if (srCanEdit()) html += srEditBar('ops');   // UX-2: 빠른 편집 토글
     } else if (tab === 'modules') {
         if (data.modules && data.modules.length > 0) {
             var types = { cpu: 'CPU', memory: '메모리', disk: '디스크', network: 'NIC', raid: 'RAID', gpu: 'GPU' };
@@ -673,6 +675,8 @@ function adpDoPowerControl(assetId, action) {
 <script>
 // ===== UX-3(F3) 서버실 검색·위치강조 + UX-4(F4) 장비 목록 패널 =====
 var SR_ROOMS = <%- JSON.stringify(rooms.map(function(r){ return { id: r.id, name: r.name }; })) %>;
+var SR_ROLE = '<%= (typeof currentUser !== "undefined" && currentUser) ? currentUser.role : "" %>';  // UX-2: 편집 UI 게이팅
+function srCanEdit() { return SR_ROLE === 'admin' || SR_ROLE === 'maintenance'; }
 var srLastResults = [];
 var srMatches = [];
 var srMatchIdx = -1;
@@ -877,6 +881,74 @@ function srPanelRender() {
         el.addEventListener('click', function(){ locateAsset(parseInt(this.dataset.id)); });
     });
 }
+// ===== UX-2: 팝업 인라인 빠른 수정 =====
+function srCurrentAssetId() { return parseInt((document.getElementById('adpDetailLink').href.split('/assets/')[1] || '').split(/[\/?#]/)[0]); }
+function srEditBar(tab) { return '<div class="adp-edit-bar"><button type="button" class="btn btn-sm btn-outline" onclick="srEditTab(\'' + tab + '\')">&#9998; 편집</button></div>'; }
+// 탭별 화이트리스트 필드 정의
+var SR_EDIT_FIELDS = {
+    basic: [ { k:'manufacturer', label:'제조사' }, { k:'model_name', label:'모델명' }, { k:'serial_number', label:'시리얼' }, { k:'status', label:'상태', type:'status' } ],
+    ops:   [ { k:'assigned_user', label:'담당자' }, { k:'purpose', label:'용도' }, { k:'notes', label:'비고', type:'textarea' } ]
+};
+function srEditTab(tab) {
+    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    var a = data.asset;
+    var rows = SR_EDIT_FIELDS[tab].map(function(f){
+        var val = a[f.k] == null ? '' : String(a[f.k]);
+        var input;
+        if (f.type === 'status') {
+            // active↔maintenance만. 그 밖의 상태면 편집 불가 안내 + 필드 생략.
+            if (a.status !== 'active' && a.status !== 'maintenance') {
+                return '<tr><th>' + f.label + '</th><td><span class="text-muted">' + esc(statusLabel(a.status)) + ' — 인라인 변경 불가(수정 페이지 사용)</span></td></tr>';
+            }
+            input = '<select class="form-control sr-edit-input" data-k="status">' +
+                '<option value="active"' + (a.status==='active'?' selected':'') + '>운영중</option>' +
+                '<option value="maintenance"' + (a.status==='maintenance'?' selected':'') + '>점검중</option></select>';
+        } else if (f.type === 'textarea') {
+            input = '<textarea class="form-control sr-edit-input" data-k="' + f.k + '" rows="2">' + esc(val) + '</textarea>';
+        } else {
+            input = '<input type="text" class="form-control sr-edit-input" data-k="' + f.k + '" value="' + esc(val).replace(/"/g,'&quot;') + '">';
+        }
+        return '<tr><th>' + f.label + '</th><td>' + input + '</td></tr>';
+    }).join('');
+    var html = '<table class="adp-table adp-edit-form">' + rows + '</table>' +
+        '<div class="adp-edit-bar">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="srQuickSaveBtn" onclick="srQuickSave(\'' + tab + '\')">저장</button> ' +
+        '<button type="button" class="btn btn-sm btn-secondary" onclick="srQuickCancel(\'' + tab + '\')">취소</button>' +
+        '<span id="srQuickMsg" class="sr-edit-msg"></span></div>';
+    document.getElementById('adpContent').innerHTML = html;
+}
+function srQuickCancel(tab) { var id = srCurrentAssetId(); renderAdpTab(adpCache[id], tab); }
+function srQuickSave(tab) {
+    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    var body = { updated_at_token: data.asset.updated_at_token };
+    document.querySelectorAll('#adpContent .sr-edit-input').forEach(function(el){ body[el.dataset.k] = el.value; });
+    var btn = document.getElementById('srQuickSaveBtn'); var msg = document.getElementById('srQuickMsg');
+    if (btn) btn.disabled = true; if (msg) msg.textContent = '저장 중…';
+    fetch('/assets/' + id + '/quick', { method:'POST', headers:{ 'Content-Type':'application/json', 'Accept':'application/json' }, body: JSON.stringify(body) })
+        .then(function(r){ return r.json().then(function(j){ return { status:r.status, j:j }; }); })
+        .then(function(res){
+            if (res.status === 409) { if (msg) msg.textContent = ''; alert('다른 사용자가 먼저 수정했습니다. 최신 값으로 다시 불러옵니다.'); if (res.j.asset) adpCache[id].asset = res.j.asset; srQuickCancel(tab); return; }
+            if (res.status === 403) { if (btn) btn.disabled=false; if (msg) msg.textContent = '수정 권한이 없습니다.'; return; }
+            if (res.status !== 200) { if (btn) btn.disabled=false; if (msg) msg.textContent = (res.j && res.j.error) || '저장 실패'; return; }
+            // 성공
+            if (res.j.asset) adpCache[id].asset = res.j.asset;
+            srRefreshAssetViews(id);
+            srQuickCancel(tab);
+        })
+        .catch(function(){ if (btn) btn.disabled=false; if (msg) msg.textContent = '저장 오류'; });
+}
+// 저장 후 랙 셀 라벨·패널 행 즉시 갱신
+function srRefreshAssetViews(id) {
+    var a = adpCache[id] && adpCache[id].asset; if (!a) return;
+    var label = (a.model_name || typeLabel(a.asset_type)) + (a.management_number ? ' (' + a.management_number + ')' : '');
+    document.querySelectorAll('.clickable-unit[data-asset-id="' + id + '"] .mini-asset-name').forEach(function(sp){ sp.textContent = label; });
+    // 패널 데이터·행 갱신
+    if (srPanelData && srPanelData.length) {
+        var row = srPanelData.find(function(x){ return x.id === id; });
+        if (row) { row.model_name = a.model_name; row.status = a.status; srPanelRender(); }
+    }
+}
+
 // 열림 상태 복원
 (function(){ try { if (localStorage.getItem('srPanelOpen') === '1') srTogglePanel(true); } catch (e) {} })();
 </script>

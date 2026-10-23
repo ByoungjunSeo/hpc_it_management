@@ -40,6 +40,7 @@
                     <option value="">전체</option>
                     <option value="create" <%= filters.action === 'create' ? 'selected' : '' %>>생성</option>
                     <option value="update" <%= filters.action === 'update' ? 'selected' : '' %>>수정</option>
+                    <option value="asset_quick_update" <%= filters.action === 'asset_quick_update' ? 'selected' : '' %>>빠른수정</option>
                     <option value="delete" <%= filters.action === 'delete' ? 'selected' : '' %>>삭제</option>
                     <option value="login" <%= filters.action === 'login' ? 'selected' : '' %>>로그인</option>
                     <option value="scan" <%= filters.action === 'scan' ? 'selected' : '' %>>스캔</option>
@@ -87,7 +88,7 @@
                     <td data-sort="<%= log.username || '' %>"><strong><%= log.username || '-' %></strong></td>
                     <td data-sort="<%= log.action || '' %>">
                         <span class="badge badge-<%= log.action === 'create' ? 'success' : log.action === 'delete' ? 'danger' : log.action === 'update' ? 'warning' : 'info' %>">
-                            <%= log.action === 'create' ? '생성' : log.action === 'update' ? '수정' : log.action === 'delete' ? '삭제' : log.action === 'login' ? '로그인' : log.action === 'scan' ? '스캔' : log.action === 'backup' ? '백업' : log.action %>
+                            <%= log.action === 'create' ? '생성' : log.action === 'update' ? '수정' : log.action === 'asset_quick_update' ? '빠른수정' : log.action === 'delete' ? '삭제' : log.action === 'login' ? '로그인' : log.action === 'scan' ? '스캔' : log.action === 'backup' ? '백업' : log.action %>
                         </span>
                     </td>
                     <td data-sort="<%= log.target_type || '' %>"><%= log.target_type ? (appConfig.auditTargetTypeLabels[log.target_type] || log.target_type) : '-' %></td>

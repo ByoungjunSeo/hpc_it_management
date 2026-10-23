@@ -329,9 +329,62 @@ router.get('/:id/json', async (req, res) => {
     // BMC 웹 UI: BMC IP만 있으면 활성(자격증명 불요 — 웹 로그인은 사용자 직접). IP는 이미 팝업에 노출된 정보.
     const bmcIpRow = assetIps.find(i => i.ip_type === 'bmc');
     const bmcWebUrl = bmcIpRow ? ('https://' + bmcIpRow.ip_address) : null;
+    // UX-2: 낙관적 잠금용 마이크로초 토큰(표시용 updated_at과 별개). 동시수정 판별.
+    const { rows: [tk] } = await pool.query("SELECT round(extract(epoch from updated_at)*1000000)::bigint::text AS tok FROM assets WHERE id=$1", [asset.id]);
+    asset.updated_at_token = tk ? tk.tok : null;
     res.json({ asset, modules, assetIps, credentials, parent, children, sshAvailable, solAvailable, bmcWebUrl });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// UX-2(B-2): 팝업 인라인 빠른 수정 — 화이트리스트 필드만. 전체 폼 POST /:id 재사용 금지(누락 소거 위험).
+//   requireMaintenance(viewer 403). 본문에 실제 온 키만 UPDATE(누락≠소거). status는 active↔maintenance만.
+//   동시수정: updated_at 불일치 409. 변경 없으면 changed:false(UPDATE·audit 생략). 응답은 /json 동일 마스킹.
+const QUICK_ALLOWED = ['model_name', 'manufacturer', 'serial_number', 'assigned_user', 'purpose', 'notes', 'status'];
+async function quickToken(id) { const { rows: [t] } = await pool.query("SELECT round(extract(epoch from updated_at)*1000000)::bigint::text AS tok FROM assets WHERE id=$1", [id]); return t ? t.tok : null; }
+async function loadMasked(id) { const a = await Asset.findById(id); if (!a) return null; if ('ssh_password' in a) a.ssh_password = undefined; a.updated_at_token = await quickToken(id); return a; }
+router.post('/:id/quick', requireMaintenance, async (req, res) => {
+  try {
+    const before = await Asset.findById(req.params.id);
+    if (!before) return res.status(404).json({ error: '자산을 찾을 수 없습니다.' });
+    // 동시 수정 충돌: 마이크로초 토큰 비교(초 단위 updated_at은 동초 수정 구분 불가)
+    const curTok = await quickToken(req.params.id);
+    if (req.body.updated_at_token && String(req.body.updated_at_token) !== String(curTok)) {
+      return res.status(409).json({ error: '다른 사용자가 먼저 수정했습니다.', asset: await loadMasked(req.params.id) });
+    }
+    const fields = {}, ignored = [];
+    for (const k of Object.keys(req.body)) {
+      if (k === 'updated_at' || k === 'updated_at_token') continue;
+      if (!QUICK_ALLOWED.includes(k)) { ignored.push(k); continue; }
+      let v = req.body[k];
+      if (k === 'status') {
+        if (!['active', 'maintenance'].includes(v)) {
+          return res.status(400).json({ error: '인라인에서는 운영중↔점검중만 변경할 수 있습니다.' });
+        }
+        if (!['active', 'maintenance'].includes(before.status)) {
+          return res.status(400).json({ error: '현재 상태(' + before.status + ')는 인라인에서 변경할 수 없습니다. 수정 페이지를 사용하세요.' });
+        }
+      }
+      fields[k] = v;
+    }
+    // 실제 변경분만 추림(빈 문자열은 기존 폼 규칙대로 '' 그대로 저장)
+    const changes = {};
+    for (const k of Object.keys(fields)) {
+      const b = before[k] == null ? '' : String(before[k]);
+      const a = fields[k] == null ? '' : String(fields[k]);
+      if (b !== a) changes[k] = { before: before[k] ?? null, after: fields[k] };
+    }
+    if (Object.keys(changes).length === 0) {
+      return res.json({ changed: false, ignored, asset: await loadMasked(req.params.id) });
+    }
+    const applied = {}; Object.keys(changes).forEach(k => { applied[k] = fields[k]; });
+    await Asset.quickUpdate(req.params.id, applied);
+    await AuditLog.log(req, { action: 'asset_quick_update', targetType: 'asset', targetId: parseInt(req.params.id, 10),
+      targetLabel: before.management_number || before.asset_number || before.model_name, details: changes });
+    return res.json({ changed: true, ignored, asset: await loadMasked(req.params.id) });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 

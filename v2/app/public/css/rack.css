@@ -1957,3 +1957,9 @@ body.rooms-panel-split main.container { margin-right:var(--sr-panel-w); max-widt
 .gsr-link { font-size:11px; color:#2563eb; text-decoration:none; }
 .gsr-link:hover { text-decoration:underline; }
 .gsr-current { color:#b45309; }
+
+/* UX-2: 팝업 인라인 편집 */
+.adp-edit-bar { margin-top:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.adp-edit-msg, .sr-edit-msg { font-size:12px; color:var(--text-light); }
+.adp-edit-form th { white-space:nowrap; text-align:left; color:var(--text-light); }
+.sr-edit-input { width:100%; }

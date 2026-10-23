@@ -161,6 +161,18 @@ const Asset = {
     return rows;
   },
 
+  // UX-2(B-2): 팝업 인라인 수정 — 호출측에서 화이트리스트·검증 완료한 컬럼만 동적 UPDATE.
+  //   컬럼명은 라우트의 고정 화이트리스트에서만 오므로 인젝션 안전. updated_at=NOW() 자동.
+  async quickUpdate(id, fields) {
+    const cols = Object.keys(fields);
+    if (!cols.length) return;
+    const sets = cols.map((c, i) => `${c} = $${i + 1}`);
+    const vals = cols.map(c => fields[c]);
+    vals.push(id);
+    await pool.query(
+      `UPDATE assets SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${vals.length}`, vals);
+  },
+
   // CDU-2: 이 칠러가 공급 중인 CDU 목록(cooling_source 기반). 칠러 상세·삭제 가드용.
   async findByCoolingSource(chillerId) {
     const { rows } = await pool.query(`
