@@ -11,6 +11,7 @@
   var consumer = {
     contentEl: function (assetId) { return document.getElementById('asset-detail-content-' + assetId); },
     detailRow: function (assetId) { return document.getElementById('asset-detail-' + assetId); },
+    statusCell: function (assetId) { return document.getElementById('match-status-' + assetId); },  // B-5b: 목록 상태 셀(팝업=null)
     onApplied: function (assetId, result, data) {
       var regModCell = document.getElementById('registered-modules-' + assetId);
       if (regModCell) { regModCell.innerHTML = moduleSummaryHtml(data.discovered_modules).replace(/badge-info/g, 'badge-secondary'); }
@@ -476,8 +477,8 @@ function renderComparison(data, assetId) {
         html += '<div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">' + summary.join('') + '</div>';
     }
 
-    // Sync status badge with client-side comparison result
-    var statusCell = document.getElementById('match-status-' + assetId);
+    // Sync status badge with client-side comparison result (B-5b: consumer 리졸버로 스코프, 팝업=null→no-op)
+    var statusCell = consumer.statusCell(assetId);
     if (statusCell) {
         if (mismatchCount === 0 && missingCount === 0 && extraCount === 0) {
             statusCell.innerHTML = '<span class="badge badge-success" title="일치">&#x2705; 일치</span>';
@@ -687,11 +688,18 @@ function applyAsset(assetId) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             asset_id: assetId,
-            modules: modulesToSend
+            modules: modulesToSend,
+            expected_fingerprint: data.modules_fingerprint   // B-5b: 동시 적용 보호(스캔 시점 지문). undefined면 JSON에서 생략→기존 동작
         })
     })
-    .then(function(r) { return r.json(); })
+    .then(function(r) { var st = r.status; return r.json().then(function(j) { j.__httpStatus = st; return j; }); })
     .then(function(result) {
+        if (result.__httpStatus === 409) {
+            // B-5b: 다른 곳에서 먼저 적용됨 → 재고·모듈 변화 0. 소비자가 onConflict를 주면 그쪽만(중복 알림 방지).
+            if (consumer.onConflict) consumer.onConflict(assetId, result);
+            else alert('다른 곳에서 먼저 적용되어 모듈 구성이 변경되었습니다. 다시 스캔하세요.');
+            return;
+        }
         if (result.success) {
             // B-5a: 목록 셀 갱신을 consumer.onApplied로 위임(기본값=기존 동작과 동일)
             consumer.onApplied(assetId, result, data);
@@ -699,7 +707,7 @@ function applyAsset(assetId) {
             // Check for unmatched modules
             if (result.unmatched_modules && result.unmatched_modules.length > 0) {
                 showUnmatchedModulesModal(result.unmatched_modules, assetId, (scanResults[assetId] || {}).asset_number || '');
-            } else {
+            } else if (!consumer.silentSuccess) {
                 alert('모듈이 갱신되었습니다. (소유자 정보 및 이력 포함)');
             }
         } else {
@@ -1004,13 +1012,18 @@ function submitUnmatchedModules() {
     buildUnifiedRows: buildUnifiedRows,
     renderComparison: renderComparison,
     renderDiscoveredModuleTable: renderDiscoveredModuleTable,
-    // B-5b 진입점(이번 범위 미사용): rootEl/콜백을 consumer로 주입.
+    // B-5b 진입점(서버실 팝업): rootEl/콜백을 consumer로 주입. 목록 셀이 없으므로 detailRow는 더미,
+    //   statusCell은 null(no-op)로 스코프. onApplied/onConflict는 팝업이 제공.
     mount: function (rootEl, assetId, opts) {
       opts = opts || {};
+      var dummyRow = { style: {} };
       DiscoveryCore.configure({
         contentEl: function () { return rootEl; },
-        detailRow: function () { return opts.detailRow ? opts.detailRow : null; },
-        onApplied: function (id, result, data) { if (opts.onApplied) opts.onApplied(id, result, data); }
+        detailRow: function () { return opts.detailRow ? opts.detailRow : dummyRow; },
+        statusCell: function () { return null; },
+        silentSuccess: true,
+        onApplied: function (id, result, data) { if (opts.onApplied) opts.onApplied(id, result, data); },
+        onConflict: function (id, result) { if (opts.onConflict) opts.onConflict(id, result); }
       });
       return { scan: function () { return DiscoveryCore.scan(assetId); }, showDetail: function (f) { return showDetail(assetId, f); } };
     }

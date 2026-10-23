@@ -15,6 +15,21 @@ const AuditLog = require('../models/auditLog');
 const { pool } = require('../config/database');
 const { fixRowDates } = require('../utils/dateFix');
 const { connectAndDiscover, discoverRange } = require('../services/sshDiscovery');
+const crypto = require('crypto');
+
+// ── B-5b: 동시 적용 보호용 모듈 지문(읽기 전용) ──
+// 자산의 현재 computing_modules를 id 순 정렬·직렬화해 sha256. scan-asset 응답과 apply-asset
+// 사전검사가 같은 함수를 써 스캔~적용 사이 모듈 구성이 바뀌면 지문 불일치(409)로 감지한다.
+async function computeModulesFingerprint(assetId) {
+  const { rows } = await pool.query(
+    `SELECT id, module_type, model, manufacturer, capacity, count, specification, slot_info, owner, owner_vendor_id, is_onboard, updated_at
+     FROM computing_modules WHERE asset_id = $1 ORDER BY id`, [assetId]);
+  const ser = JSON.stringify(rows.map(function (r) {
+    return [r.id, r.module_type, r.model, r.manufacturer, r.capacity, r.count, r.specification,
+      r.slot_info, r.owner, r.owner_vendor_id, r.is_onboard, r.updated_at];
+  }));
+  return crypto.createHash('sha256').update(ser).digest('hex');
+}
 
 // ── Helper: generate vendor item_code like {업체명}-{유형한글}-{NNN} ──
 const TYPE_LABELS = {
@@ -332,6 +347,9 @@ router.post('/scan-asset', requireMaintenance, async (req, res) => {
     const vendors = await Vendor.findAll();
     const assetVendor = asset.vendor_id ? await Vendor.findById(asset.vendor_id) : null;
 
+    // B-5b: 적용 시 동시성 검사용 현재 모듈 지문(읽기 전용)
+    const modules_fingerprint = await computeModulesFingerprint(asset_id);
+
     res.json({
       asset_id,
       asset_number: asset.management_number || asset.asset_number,
@@ -348,7 +366,8 @@ router.post('/scan-asset', requireMaintenance, async (req, res) => {
       asset_ownership: asset.ownership || 'company',
       asset_vendor_id: asset.vendor_id || null,
       asset_vendor_name: assetVendor ? assetVendor.vendor_name : null,
-      vendors: vendors.map(v => ({ id: v.id, vendor_name: v.vendor_name }))
+      vendors: vendors.map(v => ({ id: v.id, vendor_name: v.vendor_name })),
+      modules_fingerprint
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -365,6 +384,15 @@ router.post('/apply-asset', requireMaintenance, async (req, res) => {
 
     const asset = await Asset.findById(asset_id);
     if (!asset) return res.status(404).json({ error: 'Asset not found' });
+
+    // B-5b: 동시 적용 보호 — expected_fingerprint가 오면 어떤 쓰기보다 먼저 현재 지문과 비교.
+    //   다르면 409(쓰기 0). 키가 없으면 기존 동작 그대로(하위 호환).
+    if (req.body.expected_fingerprint != null) {
+      const currentFp = await computeModulesFingerprint(asset_id);
+      if (currentFp !== req.body.expected_fingerprint) {
+        return res.status(409).json({ error: '다른 곳에서 먼저 적용되어 모듈 구성이 변경되었습니다. 다시 스캔하세요.', current_fingerprint: currentFp });
+      }
+    }
 
     const assetLabel = asset.management_number || asset.asset_number || String(asset_id);
     let unmatchedModules = [];

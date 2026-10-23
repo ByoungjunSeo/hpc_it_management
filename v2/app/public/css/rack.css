@@ -1978,3 +1978,7 @@ body.rooms-panel-split main.container { margin-right:var(--sr-panel-w); max-widt
 /* B-4b: 키보드 네비 하이라이트 + 패널 '다른 위치' 링크 */
 .gsr-item.gsr-active, .sr-sr-item.sr-sr-active { background: rgba(59,130,246,0.12); }
 .sr-panel-other { color: #2563eb; font-size: 12px; text-decoration: underline; cursor: pointer; }
+/* B-5b: 자산 매칭 탭 — 넓은 팝업 + 경고 배너 */
+.modal.adp-wide { max-width: min(1100px, 95vw) !important; }
+.sr-match-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+.sr-match-warn { padding:8px 12px; margin-bottom:8px; background:rgba(245,158,11,0.12); border:1px solid #f59e0b; border-radius:6px; font-size:12px; }

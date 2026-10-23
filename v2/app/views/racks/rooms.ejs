@@ -284,6 +284,7 @@
     <input type="text" id="srPanelFilter" class="form-control sr-panel-filter" autocomplete="off" placeholder="필터 — 관리번호·모델·IP·모듈(예: H100)" oninput="srPanelFilterInput()">
     <div class="sr-panel-list" id="srPanelList"><p class="text-muted" style="padding:12px;">서버실을 선택하세요.</p></div>
 </div>
+<script src="/js/discovery-core.js"></script><%# B-5b: 자산 매칭 공용 모듈(/discovery와 공유) %>
 <script>
 // B-1c 깜박임 방지: 패널이 파싱된 직후(첫 페인트 전) 선호값·화면폭으로 .open/.split 선적용.
 //   방식 근거: 패널 마크업에 open 기본 부여 → 흔한 경우(열림) 슬라이드 없이 즉시 표시,
@@ -314,6 +315,7 @@
             <button class="adp-tab" data-tab="access" onclick="switchAdpTab('access')">접속정보</button>
             <button class="adp-tab" data-tab="ops" onclick="switchAdpTab('ops')">운영정보</button>
             <button class="adp-tab" data-tab="modules" onclick="switchAdpTab('modules')">컴퓨팅 모듈</button>
+            <button class="adp-tab" data-tab="match" onclick="switchAdpTab('match')" id="adpMatchTab" style="display:none;">자산 매칭</button><%# B-5b %>
             <button class="adp-tab" data-tab="power" onclick="switchAdpTab('power')" id="adpPowerTab" style="display:none;">전원</button>
         </div>
         <div id="adpContent" style="padding:16px;overflow-y:auto;flex:1;">
@@ -406,6 +408,8 @@ function openAssetPopup(assetId) {
     document.getElementById('adpDetailLink').href = '/assets/' + assetId;
     document.getElementById('adpEditLink').href = '/assets/' + assetId + '/edit?returnTo=' + encodeURIComponent(location.pathname + location.search);
     adpCurrentTab = 'basic';
+    var modalEl0 = document.querySelector('#assetDetailPopup .modal');
+    if (modalEl0) modalEl0.classList.remove('adp-wide');   // B-5b: 기본 폭으로 복귀
     document.querySelectorAll('.adp-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === 'basic'); });
     openModal('assetDetailPopup');
 
@@ -430,11 +434,19 @@ function renderAdp(data) {
     if (powerTab) {
         powerTab.style.display = (powerTypes.indexOf(a.asset_type) !== -1 && hasBmc) ? '' : 'none';
     }
+    // B-5b: 자산 매칭 탭 — role(admin/maint) + 유형(server/storage) + 최상위(parent 없음)일 때만 노출.
+    var matchTab = document.getElementById('adpMatchTab');
+    if (matchTab) {
+        var canMatch = srCanEdit() && (a.asset_type === 'server' || a.asset_type === 'storage') && !a.parent_asset_id;
+        matchTab.style.display = canMatch ? '' : 'none';
+    }
     renderAdpTab(data, adpCurrentTab);
 }
 
 function switchAdpTab(tab) {
     adpCurrentTab = tab;
+    var modalEl = document.querySelector('#assetDetailPopup .modal');
+    if (modalEl) modalEl.classList.toggle('adp-wide', tab === 'match');   // B-5b: 매치 탭만 넓힘
     document.querySelectorAll('.adp-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
     var assetId = parseInt(document.getElementById('adpDetailLink').href.split('/assets/')[1]);
     if (adpCache[assetId]) renderAdpTab(adpCache[assetId], tab);
@@ -533,6 +545,8 @@ function renderAdpTab(data, tab) {
             '</div>';
         // Auto-check power status
         setTimeout(function() { adpCheckPower(assetId); }, 100);
+    } else if (tab === 'match') {
+        html = srMatchTabHtml(data);   // B-5b
     }
 
     document.getElementById('adpContent').innerHTML = html;
@@ -712,6 +726,87 @@ function srShowToast(msg) {
     clearTimeout(srToastTimer);
     srToastTimer = setTimeout(function(){ t.style.display = 'none'; }, 4000);
 }
+
+// ===== B-5b: 팝업 [자산 매칭] 탭 (discovery-core.js 재사용) =====
+// 접속 가능 IP 판정(서버 resolveAssetConnection 우선순위와 동일): os → 10.x mgmt → 비BMC/비mgmt → any → legacy
+function srMatchConnIp(data) {
+    var ips = data.assetIps || [];
+    var os = ips.find(function(i){ return i.ip_type === 'os'; });
+    var mg = ips.find(function(i){ return i.ip_type === 'management' && i.ip_address && i.ip_address.indexOf('10.') === 0; });
+    var nb = ips.find(function(i){ return i.ip_type !== 'bmc' && i.ip_type !== 'management'; });
+    var any = ips.find(function(i){ return i.ip_type === 'management'; }) || ips[0];
+    if (os) return os.ip_address;
+    if (mg) return mg.ip_address;
+    if (nb) return nb.ip_address;
+    if (any) return any.ip_address;
+    return (data.asset && data.asset.ip_address) || null;
+}
+function srMatchTabHtml(data) {
+    var id = data.asset.id;
+    var ip = srMatchConnIp(data);
+    if (!ip) {
+        return '<p class="text-muted">접속 가능한 IP가 없어 자산 매칭을 실행할 수 없습니다. (OS 또는 관리(10.x) IP 등록 후 가능)</p>';
+    }
+    return '<div class="sr-match-head">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="adpMatchScanBtn" onclick="srMatchScan(' + id + ')">스캔</button> ' +
+        '<span class="text-muted" style="font-size:12px;">대상 IP: ' + esc(ip) + ' · SSH 스캔(최대 15초)</span>' +
+        '</div>' +
+        '<div class="sr-match-warn">적용 시 등록 모듈이 실제 수집 결과로 교체되고 재고(storage) 수량이 변동됩니다. 적용 전 비교표를 확인하세요.</div>' +
+        '<div id="adpMatchBox" style="overflow-x:auto; margin-top:8px;"><p class="text-muted" style="font-size:13px;">[스캔]을 눌러 실제 장착 모듈을 수집·비교하세요.</p></div>';
+}
+var srMatchScanning = false;
+function srMatchScan(assetId) {
+    if (srMatchScanning) return;
+    var box = document.getElementById('adpMatchBox');
+    var btn = document.getElementById('adpMatchScanBtn');
+    srMatchScanning = true;
+    if (btn) { btn.disabled = true; btn.textContent = '스캔 중… (최대 15초)'; }
+    if (box) box.innerHTML = '<p class="text-muted" style="font-size:13px;">스캔 중… 최대 15초 소요됩니다.</p>';
+    var session = DiscoveryCore.mount(box, assetId, {
+        onApplied: function(id, result, d) { srMatchApplied(id, result, d); },
+        onConflict: function(id) { srMatchConflict(id); }
+    });
+    session.scan().then(function(d) {
+        srMatchScanning = false;
+        if (btn) { btn.disabled = false; btn.textContent = '다시 스캔'; }
+        if (!d || d.status !== 'success') {
+            var msg = (d && d.error) ? d.error : ((d && d.status) || '스캔 실패');
+            if (box) box.innerHTML = '<div class="alert alert-error" style="margin:0;">스캔 실패: ' + esc(msg) + '</div>';
+            return;
+        }
+        DiscoveryCore.showDetail(assetId, true);   // 비교표를 adpMatchBox에 렌더
+    }).catch(function() {
+        srMatchScanning = false;
+        if (btn) { btn.disabled = false; btn.textContent = '다시 스캔'; }
+        if (box) box.innerHTML = '<div class="alert alert-error" style="margin:0;">스캔 오류</div>';
+    });
+}
+function srMatchApplied(assetId, result, d) {
+    var box = document.getElementById('adpMatchBox');
+    if (box) box.innerHTML = '<div class="alert alert-success" style="margin:0;">적용 완료 — 재고·모듈이 갱신되었습니다. 다시 적용하려면 [다시 스캔]을 누르세요.</div>';
+    var btn = document.getElementById('adpMatchScanBtn'); if (btn) { btn.disabled = false; btn.textContent = '다시 스캔'; }
+    srShowToast('자산 매칭 적용 완료');
+    // 팝업 캐시 갱신 → 모듈 탭 최신화 + 장비 목록 패널 행 갱신
+    fetch('/assets/' + assetId + '/json').then(function(r){ return r.json(); }).then(function(j) {
+        adpCache[assetId] = j;
+        if (typeof srRefreshAssetViews === 'function') srRefreshAssetViews(assetId);
+        var panel = document.getElementById('srPanel');
+        if (panel && panel.classList.contains('open') && typeof srPanelReload === 'function') srPanelReload();
+    }).catch(function(){});
+}
+function srMatchConflict(assetId) {
+    var box = document.getElementById('adpMatchBox');
+    if (box) box.innerHTML = '<div class="alert alert-error" style="margin:0;">다른 곳에서 먼저 적용되어 모듈 구성이 변경되었습니다. [다시 스캔] 후 재시도하세요.</div>';
+    var btn = document.getElementById('adpMatchScanBtn'); if (btn) { btn.disabled = false; btn.textContent = '다시 스캔'; }
+}
+// B-5b: ESC 순서(capture) — 미매칭 모달 먼저, 그다음 팝업. 패널 ESC(분할 모드 무반응)보다 앞서 처리.
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    var um = document.getElementById('unmatchedModal');
+    if (um) { e.stopPropagation(); closeUnmatchedModal(); return; }
+    var popup = document.getElementById('assetDetailPopup');
+    if (popup && popup.classList.contains('active')) { e.stopPropagation(); closeModal('assetDetailPopup'); return; }
+}, true);
 
 // 공용: 자산 id → 서버실 화면에서 랙 셀로 스크롤 + 강조. DOM에 없으면(미배치) 안내.
 function locateAsset(assetId) {
