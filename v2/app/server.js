@@ -129,44 +129,74 @@ app.get('/api/search', async (req, res) => {
     const like = '%' + q + '%';
     const results = [];
 
-    // Search assets (자격증명 컬럼은 SELECT에서 제외 — 비밀번호 미노출)
-    // UX-3(F3): asset_ips 전체(BMC/IB/data/OS 포함) 매칭 + 레거시 a.ip_address 호환.
+    // [장비] 자산 이름/번호/시리얼/담당자/용도/제조사 + 레거시 ip (자격증명 컬럼 미포함). cap 15.
     const { rows: assets } = await pool.query(`
-      SELECT a.id, a.asset_number, a.management_number, a.model_name, a.asset_type, a.ip_address,
-             a.assigned_user, a.purpose
+      SELECT a.id, a.asset_number, a.management_number, a.model_name, a.asset_type, a.ip_address, a.assigned_user
       FROM assets a
       WHERE a.asset_number ILIKE $1 OR a.management_number ILIKE $1 OR a.model_name ILIKE $1
-         OR a.ip_address ILIKE $1
-         OR a.assigned_user ILIKE $1 OR a.purpose ILIKE $1 OR a.serial_number ILIKE $1
-         OR a.manufacturer ILIKE $1
-         OR EXISTS (SELECT 1 FROM asset_ips ai WHERE ai.asset_id = a.id AND (ai.ip_address ILIKE $1 OR ai.description ILIKE $1))
-      LIMIT 20
+         OR a.ip_address ILIKE $1 OR a.assigned_user ILIKE $1 OR a.purpose ILIKE $1
+         OR a.serial_number ILIKE $1 OR a.manufacturer ILIKE $1
+      LIMIT 15
     `, [like]);
     assets.forEach(a => {
-      results.push({
-        type: 'asset', id: a.id,
+      results.push({ type: 'asset', matchType: 'asset', id: a.id,
         title: a.model_name || a.asset_number || a.asset_type,
         subtitle: [a.management_number, a.asset_number, a.ip_address, a.assigned_user].filter(Boolean).join(' | '),
-        url: '/assets/' + a.id
-      });
+        url: '/assets/' + a.id });
     });
 
-    // Search computing modules (asset 미매칭분만 추가)
-    const { rows: mods } = await pool.query(`
-      SELECT cm.module_type, cm.model, cm.manufacturer, cm.capacity, a.id as asset_id
-      FROM computing_modules cm JOIN assets a ON cm.asset_id = a.id
-      WHERE cm.model ILIKE $1 OR cm.manufacturer ILIKE $1 OR cm.capacity ILIKE $1
-      LIMIT 10
+    // [IP] asset_ips 전체(BMC/IB/data/OS 포함). 자산 미매칭분만. cap 10.
+    const { rows: ipRows } = await pool.query(`
+      SELECT DISTINCT a.id, a.model_name, a.asset_number, a.management_number, a.asset_type, ai.ip_address
+      FROM asset_ips ai JOIN assets a ON ai.asset_id = a.id
+      WHERE ai.ip_address ILIKE $1 OR ai.description ILIKE $1 LIMIT 10
     `, [like]);
-    mods.forEach(m => {
-      if (!results.find(r => r.id === m.asset_id)) {
-        results.push({
-          type: 'module', id: m.asset_id,
-          title: m.module_type.toUpperCase() + ': ' + (m.model || m.manufacturer || ''),
-          subtitle: (m.capacity || ''),
-          url: '/assets/' + m.asset_id
-        });
-      }
+    ipRows.forEach(ip => {
+      if (results.find(r => r.id === ip.id)) return;
+      results.push({ type: 'ip', matchType: 'ip', id: ip.id,
+        title: ip.model_name || ip.management_number || ip.asset_type,
+        subtitle: [ip.management_number, ip.ip_address].filter(Boolean).join(' | '),
+        url: '/assets/' + ip.id });
+    });
+
+    // [모듈 장착 장비] B-4: 유형키워드/정규화/숫자경계 매칭 → 자산 단위 묶음 + matchedModules 요약
+    const ql = q.toLowerCase();
+    const TYPEKW = { gpu:'gpu', npu:'npu', cpu:'cpu', memory:'memory', '메모리':'memory', ram:'memory', dimm:'memory',
+      nic:'network', network:'network', '네트워크':'network', '랜카드':'network',
+      disk:'disk', '디스크':'disk', ssd:'disk', nvme:'disk', hdd:'disk', raid:'raid', psu:'psu', '파워':'psu' };
+    const normq = ql.replace(/\s+/g, '').replace(/gib/g, 'gb').replace(/tib/g, 'tb');
+    const NORMF = "regexp_replace(regexp_replace(regexp_replace(lower(coalesce(cm.model,'')||' '||coalesce(cm.capacity,'')||' '||coalesce(cm.manufacturer,'')||' '||coalesce(cm.specification,'')),'gib','gb','g'),'tib','tb','g'),'\\s+','','g')";
+    let modWhere, modParams;
+    if (TYPEKW[ql]) { modWhere = 'cm.module_type = $1'; modParams = [TYPEKW[ql]]; }
+    else if (/^\d+$/.test(normq)) { const NORMCAP = "regexp_replace(regexp_replace(regexp_replace(lower(coalesce(cm.capacity,'')),'gib','gb','g'),'tib','tb','g'),'\\s+','','g')"; modWhere = NORMCAP + " ~ ('(^|[^0-9])' || $1 || '([^0-9]|$)')"; modParams = [normq]; }
+    else { modWhere = '(' + NORMF + " LIKE '%'||$1||'%' OR lower(cm.model) LIKE '%'||$2||'%' OR lower(cm.manufacturer) LIKE '%'||$2||'%')"; modParams = [normq, ql]; }
+    const { rows: modRows } = await pool.query(
+      `SELECT cm.asset_id, cm.module_type, cm.model, cm.manufacturer, cm.capacity, cm.count, cm.owner, cm.owner_vendor_id,
+              v.vendor_name AS owner_vendor_name, a.model_name, a.management_number, a.asset_number, a.asset_type
+       FROM computing_modules cm JOIN assets a ON cm.asset_id = a.id LEFT JOIN vendor_info v ON cm.owner_vendor_id = v.id
+       WHERE ${modWhere} ORDER BY cm.asset_id, cm.module_type`, modParams);
+    const modByAsset = {};
+    modRows.forEach(m => { (modByAsset[m.asset_id] = modByAsset[m.asset_id] || []).push(m); });
+    function summarize(mods) {
+      const map = {};
+      mods.forEach(m => { const k = m.module_type + '|' + (m.model || '') + '|' + (m.capacity || '') + '|' + m.owner;
+        if (!map[k]) map[k] = { module_type: m.module_type, model: m.model || '', capacity: m.capacity || '', owner: m.owner, owner_vendor_name: m.owner_vendor_name, count: 0 };
+        map[k].count += (m.count || 1); });
+      const arr = Object.values(map);
+      return { lines: arr.slice(0, 3), extra: Math.max(0, arr.length - 3) };
+    }
+    let modAssetAdded = 0;
+    Object.keys(modByAsset).forEach(aid => {
+      const summary = summarize(modByAsset[aid]);
+      const existing = results.find(r => r.id == aid);
+      if (existing) { existing.matchedModules = summary; return; }   // 이미 결과에 있어도 요약 부착
+      if (modAssetAdded >= 50) return;                               // 모듈 구역 cap 50
+      modAssetAdded++;
+      const first = modByAsset[aid][0];
+      results.push({ type: 'module', matchType: 'module', id: parseInt(aid, 10),
+        title: first.model_name || first.asset_number || first.asset_type,
+        subtitle: [first.management_number, first.asset_number].filter(Boolean).join(' | '),
+        url: '/assets/' + aid, matchedModules: summary });
     });
 
     // UX-3(F3): 결과 자산들의 위치 일괄 조회 — 본인 랙 또는 부모 섀시(블레이드) 랙 기준.
@@ -212,7 +242,7 @@ app.get('/api/search', async (req, res) => {
       });
     }
 
-    res.json(results.slice(0, 20));
+    res.json(results.slice(0, 80));   // 구역별 cap(장비15/IP10/모듈50) 이후 안전 상한
   } catch (err) {
     console.error('[/api/search] Error:', err.message);
     res.json([]);

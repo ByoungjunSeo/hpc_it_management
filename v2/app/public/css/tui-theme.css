@@ -670,3 +670,7 @@ body .sr-sr-title { color: var(--tui-fg); }
 body .sr-sr-sub, body .sr-sr-empty { color: var(--tui-fg-dim); }
 /* 토스트 */
 body .sr-toast { background: var(--tui-bg-raise); color: var(--tui-fg); border: 1px solid var(--tui-border-bright); box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
+body .sr-conflict td { background: rgba(255,80,80,0.22); }
+/* B-4: 검색 구역 헤더 다크 */
+body .sr-sr-head, body .gsr-section { background: var(--tui-bg-raise); color: var(--tui-fg-dim); border-bottom-color: var(--tui-border); }
+body .sr-sr-mod, body .gsr-mod { color: var(--tui-fg-dim); }

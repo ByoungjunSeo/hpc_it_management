@@ -471,6 +471,7 @@ function renderAdpTab(data, tab) {
         } else {
             html = '<p class="text-muted">등록된 IP 정보가 없습니다.</p>';
         }
+        if (srCanEdit()) html += srEditBar('ip');   // B-2b
     } else if (tab === 'access') {
         if (data.credentials && data.credentials.length > 0) {
             html = '<table class="adp-table"><tr><th>유형</th><th>사용자</th><th>비밀번호</th><th>설명</th></tr>';
@@ -491,6 +492,7 @@ function renderAdpTab(data, tab) {
         } else {
             html = '<p class="text-muted">등록된 접속 정보가 없습니다.</p>';
         }
+        if (srCanEdit()) html += srEditBar('access');   // B-2b
     } else if (tab === 'ops') {
         html = '<table class="adp-table">' +
             tr('담당자', a.assigned_user) +
@@ -748,6 +750,22 @@ function locateAsset(assetId) {
 }
 
 // 다중 매칭 이동
+var srAllActive = false;
+// B-4: [모두 표시] — 현재 결과 중 이 페이지 랙에 있는 장비 전부 동시 강조(토글). 미배치 수 안내.
+function srShowAll() {
+    if (srAllActive) { document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); }); srAllActive = false; srShowToast('강조 해제'); return; }
+    document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); });
+    var onPage = 0, off = 0, firstRack = null;
+    (srLastResults || []).forEach(function(d){
+        var cells = document.querySelectorAll('.clickable-unit[data-asset-id="' + d.id + '"]');
+        if (cells.length) { onPage++; cells.forEach(function(c){ c.classList.add('sr-highlight'); }); if (!firstRack) firstRack = cells[0].closest('.wide-rack'); }
+        else off++;
+    });
+    if (firstRack) firstRack.scrollIntoView({ inline: 'center', block: 'center', behavior: 'smooth' });
+    clearTimeout(srHlTimer);   // 모두표시는 자동 해제하지 않음(재클릭/검색변경 시 해제)
+    srAllActive = onPage > 0;
+    srShowToast('강조 ' + onPage + '대' + (off ? (' / 랙 미배치 ' + off + '대') : ''));
+}
 function srMatchMove(delta) {
     if (!srMatches.length) return;
     srMatchIdx = (srMatchIdx + delta + srMatches.length) % srMatches.length;
@@ -764,6 +782,8 @@ function srMatchMove(delta) {
     input.addEventListener('input', function(){
         var q = this.value.trim();
         clearTimeout(timer);
+        // B-4: 검색어 변경 시 [모두 표시] 강조 해제
+        if (srAllActive) { document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); }); srAllActive = false; }
         if (q.length < 2) { box.innerHTML = ''; box.classList.remove('show'); return; }
         timer = setTimeout(function(){
             fetch('/api/search?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(data){
@@ -773,10 +793,23 @@ function srMatchMove(delta) {
                 var nav = document.getElementById('srMatchNav');
                 if (nav) { nav.style.display = data.length > 1 ? '' : 'none'; document.getElementById('srMatchLabel').textContent = data.length + '건'; }
                 if (!data.length) { box.innerHTML = '<div class="sr-sr-empty">검색 결과가 없습니다.</div>'; box.classList.add('show'); return; }
-                box.innerHTML = data.map(function(d){
+                // B-4: 구역 + 모듈 요약 + [모두 표시]
+                function srModSummary(d){
+                    if (!d.matchedModules || !d.matchedModules.lines || !d.matchedModules.lines.length) return '';
+                    var parts = d.matchedModules.lines.map(function(m){
+                        var own = (m.owner === 'vendor') ? ' <span class="badge badge-warning">' + esc(m.owner_vendor_name || '업체') + '</span>' : '';
+                        return esc((m.module_type||'').toUpperCase() + ' ' + (m.model || m.capacity || '') + ' ×' + m.count) + own;
+                    });
+                    return '<div class="sr-sr-mod">' + parts.join(', ') + (d.matchedModules.extra ? (' 외 ' + d.matchedModules.extra + '종') : '') + '</div>';
+                }
+                function srItem(d){
                     var sub = esc(d.subtitle || '') + (d.location ? (' · ' + esc(d.location)) : '') + (d.currentLocation ? (' · 현재: ' + esc(d.currentLocation)) : '');
-                    return '<div class="sr-sr-item" data-id="' + d.id + '"><div class="sr-sr-title">' + esc(d.title) + '</div><div class="sr-sr-sub">' + sub + '</div></div>';
-                }).join('');
+                    return '<div class="sr-sr-item" data-id="' + d.id + '"><div class="sr-sr-title">' + esc(d.title) + '</div><div class="sr-sr-sub">' + sub + '</div>' + srModSummary(d) + '</div>';
+                }
+                function srSec(title, items){ return items.length ? ('<div class="sr-sr-head">' + esc(title) + '</div>' + items.map(srItem).join('')) : ''; }
+                var gA = data.filter(function(d){return d.matchType==='asset';}), gI = data.filter(function(d){return d.matchType==='ip';}), gM = data.filter(function(d){return d.matchType==='module';});
+                box.innerHTML = '<div class="sr-sr-allbar"><button type="button" class="btn btn-xs btn-outline" onclick="srShowAll()">모두 표시</button></div>' +
+                    srSec('장비', gA) + srSec('IP', gI) + srSec('모듈 장착 장비 (' + gM.length + ')', gM);
                 box.classList.add('show');
                 box.querySelectorAll('.sr-sr-item').forEach(function(el){
                     el.addEventListener('click', function(){
@@ -931,7 +964,11 @@ var SR_EDIT_FIELDS = {
     basic: [ { k:'manufacturer', label:'제조사' }, { k:'model_name', label:'모델명' }, { k:'serial_number', label:'시리얼' }, { k:'status', label:'상태', type:'status' } ],
     ops:   [ { k:'assigned_user', label:'담당자' }, { k:'purpose', label:'용도' }, { k:'notes', label:'비고', type:'textarea' } ]
 };
+var SR_IP_TYPES = [['management','Management'],['bmc','BMC'],['ib','InfiniBand'],['data','Data'],['os','OS'],['other','기타']];
+var SR_CRED_TYPES = [['root','Root'],['user','User'],['bmc','BMC']];
 function srEditTab(tab) {
+    if (tab === 'ip') return srEditIpTab();
+    if (tab === 'access') return srEditCredTab();
     var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
     var a = data.asset;
     var rows = SR_EDIT_FIELDS[tab].map(function(f){
@@ -979,6 +1016,131 @@ function srQuickSave(tab) {
         })
         .catch(function(){ if (btn) btn.disabled=false; if (msg) msg.textContent = '저장 오류'; });
 }
+// ---- B-2b: IP 탭 행 편집 ----
+function srIpTypeSelect(sel) { return '<select class="form-control sr-ip-type">' + SR_IP_TYPES.map(function(t){ return '<option value="'+t[0]+'"'+(sel===t[0]?' selected':'')+'>'+t[1]+'</option>'; }).join('') + '</select>'; }
+function srIpRow(ip) {
+    ip = ip || {};
+    return '<tr class="sr-ip-row">' +
+        '<td>' + srIpTypeSelect(ip.ip_type || 'management') + '</td>' +
+        '<td><input type="text" class="form-control sr-ip-iface" value="' + esc(ip.interface_type||'').replace(/"/g,'&quot;') + '" placeholder="iface"></td>' +
+        '<td><input type="text" class="form-control sr-ip-speed" value="' + esc(ip.speed||'').replace(/"/g,'&quot;') + '" placeholder="속도"></td>' +
+        '<td><input type="text" class="form-control sr-ip-addr" value="' + esc(ip.ip_address||'').replace(/"/g,'&quot;') + '" placeholder="10.100.x.x"></td>' +
+        '<td><input type="text" class="form-control sr-ip-desc" value="' + esc(ip.description||'').replace(/"/g,'&quot;') + '"></td>' +
+        '<td><button type="button" class="btn btn-xs btn-danger" onclick="this.closest(\'tr\').remove()">삭제</button></td></tr>';
+}
+function srEditIpTab() {
+    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    var ips = data.assetIps || [];
+    var rowsHtml = ips.map(srIpRow).join('');
+    var html = '<table class="adp-table adp-edit-form"><tr><th>유형</th><th>인터페이스</th><th>속도</th><th>IP</th><th>설명</th><th></th></tr>' +
+        '<tbody id="srIpRows">' + rowsHtml + '</tbody></table>' +
+        '<div class="adp-edit-bar"><button type="button" class="btn btn-xs btn-outline" onclick="document.getElementById(\'srIpRows\').insertAdjacentHTML(\'beforeend\', srIpRow())">+ 행 추가</button></div>' +
+        '<div class="adp-edit-bar">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="srQuickSaveBtn" onclick="srSaveIps()">저장</button> ' +
+        '<button type="button" class="btn btn-sm btn-secondary" onclick="srQuickCancel(\'ip\')">취소</button>' +
+        '<span id="srQuickMsg" class="sr-edit-msg"></span></div>';
+    document.getElementById('adpContent').innerHTML = html;
+}
+function srSaveIps() {
+    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    var ips = [];
+    document.querySelectorAll('#srIpRows .sr-ip-row').forEach(function(tr){
+        var addr = tr.querySelector('.sr-ip-addr').value.trim();
+        if (!addr) return;
+        ips.push({ ip_address: addr, ip_type: tr.querySelector('.sr-ip-type').value, interface_type: tr.querySelector('.sr-ip-iface').value.trim(), speed: tr.querySelector('.sr-ip-speed').value.trim(), description: tr.querySelector('.sr-ip-desc').value.trim() });
+    });
+    var btn = document.getElementById('srQuickSaveBtn'); var msg = document.getElementById('srQuickMsg');
+    if (btn) btn.disabled = true; if (msg) msg.textContent = '저장 중…';
+    fetch('/assets/' + id + '/quick-ips', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify({ ips: ips, updated_at_token: data.asset.updated_at_token }) })
+        .then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; }); })
+        .then(function(res){
+            if (res.status === 409) {
+                if (res.j.conflicts) {
+                    if (msg) msg.textContent = '';
+                    document.querySelectorAll('#srIpRows .sr-ip-row').forEach(function(tr){
+                        var addr = tr.querySelector('.sr-ip-addr').value.trim();
+                        var c = res.j.conflicts.find(function(x){ return x.ip_address === addr; });
+                        if (c) { tr.classList.add('sr-conflict'); tr.title = c.reason + (c.management_number ? (' ('+c.management_number+')') : ''); }
+                    });
+                    if (btn) btn.disabled = false;
+                    if (msg) msg.textContent = '충돌: ' + res.j.conflicts.map(function(c){return c.ip_address;}).join(', ');
+                } else { if (msg) msg.textContent=''; alert('다른 사용자가 먼저 수정했습니다. 최신값으로 다시 불러옵니다.'); srRefreshFromAvail(id, res.j); srQuickCancel('ip'); }
+                return;
+            }
+            if (res.status === 403) { if (btn) btn.disabled=false; if (msg) msg.textContent='수정 권한이 없습니다.'; return; }
+            if (res.status !== 200) { if (btn) btn.disabled=false; if (msg) msg.textContent=(res.j&&res.j.error)||'저장 실패'; return; }
+            srRefreshFromAvail(id, res.j);
+            if (res.j.warnings && res.j.warnings.length) alert('경고:\n' + res.j.warnings.join('\n'));
+            srQuickCancel('ip');
+        })
+        .catch(function(){ if (btn) btn.disabled=false; if (msg) msg.textContent='저장 오류'; });
+}
+// ---- B-2b: 접속정보 탭 행 편집 ----
+function srCredTypeSelect(sel) { return '<select class="form-control sr-cred-type">' + SR_CRED_TYPES.map(function(t){ return '<option value="'+t[0]+'"'+(sel===t[0]?' selected':'')+'>'+t[1]+'</option>'; }).join('') + '</select>'; }
+function srCredRow(c) {
+    c = c || {};
+    return '<tr class="sr-cred-row" data-id="' + (c.id || '') + '">' +
+        '<td>' + srCredTypeSelect(c.credential_type || 'root') + '</td>' +
+        '<td><input type="text" class="form-control sr-cred-user" value="' + esc(c.username||'').replace(/"/g,'&quot;') + '" placeholder="사용자명(필수)"></td>' +
+        '<td><input type="text" class="form-control sr-cred-pw" value="" placeholder="' + (c.has_password ? '변경 시에만 입력' : '비밀번호') + '" autocomplete="new-password"></td>' +
+        '<td><input type="text" class="form-control sr-cred-desc" value="' + esc(c.description||'').replace(/"/g,'&quot;') + '"></td>' +
+        '<td><button type="button" class="btn btn-xs btn-danger" onclick="srCredDeleteRow(this)">삭제</button></td></tr>';
+}
+var srCredDeleted = [];
+function srCredDeleteRow(btn) {
+    var tr = btn.closest('tr'); var cid = tr.dataset.id;
+    if (cid) { if (!confirm('이 접속정보를 삭제하시겠습니까?')) return; srCredDeleted.push(parseInt(cid,10)); }
+    tr.remove();
+}
+function srEditCredTab() {
+    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    srCredDeleted = [];
+    var creds = data.credentials || [];
+    var rowsHtml = creds.map(srCredRow).join('');
+    var html = '<table class="adp-table adp-edit-form"><tr><th>유형</th><th>사용자명</th><th>비밀번호</th><th>설명</th><th></th></tr>' +
+        '<tbody id="srCredRows">' + rowsHtml + '</tbody></table>' +
+        '<div class="adp-edit-bar"><button type="button" class="btn btn-xs btn-outline" onclick="document.getElementById(\'srCredRows\').insertAdjacentHTML(\'beforeend\', srCredRow())">+ 행 추가</button></div>' +
+        '<div class="adp-edit-bar"><button type="button" class="btn btn-sm btn-primary" id="srQuickSaveBtn" onclick="srSaveCreds()">저장</button> ' +
+        '<button type="button" class="btn btn-sm btn-secondary" onclick="srQuickCancel(\'access\')">취소</button>' +
+        '<span id="srQuickMsg" class="sr-edit-msg"></span></div>';
+    document.getElementById('adpContent').innerHTML = html;
+}
+function srSaveCreds() {
+    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    var creds = [];
+    document.querySelectorAll('#srCredRows .sr-cred-row').forEach(function(tr){
+        creds.push({ id: tr.dataset.id ? parseInt(tr.dataset.id,10) : null, credential_type: tr.querySelector('.sr-cred-type').value, username: tr.querySelector('.sr-cred-user').value.trim(), password: tr.querySelector('.sr-cred-pw').value, description: tr.querySelector('.sr-cred-desc').value.trim() });
+    });
+    var btn = document.getElementById('srQuickSaveBtn'); var msg = document.getElementById('srQuickMsg');
+    if (btn) btn.disabled = true; if (msg) msg.textContent = '저장 중…';
+    fetch('/assets/' + id + '/quick-credentials', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify({ credentials: creds, deleted_ids: srCredDeleted, updated_at_token: data.asset.updated_at_token }) })
+        .then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; }); })
+        .then(function(res){
+            if (res.status === 409) { if (msg) msg.textContent=''; alert('다른 사용자가 먼저 수정했습니다. 최신값으로 다시 불러옵니다.'); srRefreshFromAvail(id, res.j); srQuickCancel('access'); return; }
+            if (res.status === 403) { if (btn) btn.disabled=false; if (msg) msg.textContent='수정 권한이 없습니다.'; return; }
+            if (res.status !== 200) { if (btn) btn.disabled=false; if (msg) msg.textContent=(res.j&&res.j.error)||'저장 실패'; return; }
+            srRefreshFromAvail(id, res.j);
+            srQuickCancel('access');
+        })
+        .catch(function(){ if (btn) btn.disabled=false; if (msg) msg.textContent='저장 오류'; });
+}
+// 응답의 가용성·IP·자격증명·토큰으로 adpCache 갱신 + 전원/SSH/SOL/BMC 버튼 재계산
+function srRefreshFromAvail(id, j) {
+    var c = adpCache[id]; if (!c) return;
+    if (j.assetIps) c.assetIps = j.assetIps;
+    if (j.credentials) c.credentials = j.credentials;
+    if (j.updated_at_token) c.asset.updated_at_token = j.updated_at_token;
+    if (typeof j.sshAvailable !== 'undefined') c.sshAvailable = j.sshAvailable;
+    if (typeof j.solAvailable !== 'undefined') c.solAvailable = j.solAvailable;
+    if (typeof j.bmcWebUrl !== 'undefined') c.bmcWebUrl = j.bmcWebUrl;
+    if (typeof renderAdp === 'function') renderAdp(c);   // 전원 탭 노출 등 재계산
+    // 장비 목록 패널 대표 IP 갱신
+    if (srPanelData && srPanelData.length && j.assetIps) {
+        var row = srPanelData.find(function(x){ return x.id === id; });
+        if (row) { var rep = j.assetIps.find(function(i){return i.ip_type==='os';})||j.assetIps.find(function(i){return i.ip_type==='management';})||j.assetIps.find(function(i){return i.ip_type!=='bmc';})||j.assetIps[0]; row.rep_ip = rep?rep.ip_address:null; srPanelRender(); }
+    }
+}
+
 // 저장 후 랙 셀 라벨·패널 행 즉시 갱신
 function srRefreshAssetViews(id) {
     var a = adpCache[id] && adpCache[id].asset; if (!a) return;

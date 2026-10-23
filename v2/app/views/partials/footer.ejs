@@ -21,10 +21,19 @@
                         if (data.length === 0) {
                             results.innerHTML = '<div class="gsr-empty">검색 결과가 없습니다.</div>';
                         } else {
+                            // B-4: 구역([장비]/[IP]/[모듈 장착 장비])로 분리 + 모듈 요약 줄
                             var badgeMap = { asset: '장비', ip: 'IP', module: '모듈' };
-                            results.innerHTML = data.map(function(d) {
+                            function modSummary(d) {
+                                if (!d.matchedModules || !d.matchedModules.lines || !d.matchedModules.lines.length) return '';
+                                var parts = d.matchedModules.lines.map(function(m) {
+                                    var own = (m.owner === 'vendor') ? ' <span class="gsr-mod-vendor">' + escH(m.owner_vendor_name || '업체') + '</span>' : '';
+                                    return escH((m.module_type || '').toUpperCase() + ' ' + (m.model || m.capacity || '') + ' ×' + m.count) + own;
+                                });
+                                var extra = d.matchedModules.extra ? (' 외 ' + d.matchedModules.extra + '종') : '';
+                                return '<div class="gsr-mod">' + parts.join(', ') + extra + '</div>';
+                            }
+                            function renderItem(d) {
                                 var badge = '<span class="gsr-badge ' + d.type + '">' + (badgeMap[d.type] || d.type) + '</span>';
-                                // UX-3(F3): 중첩 <a> 금지 → div 컨테이너 + [상세]/[랙 위치] 링크. 미배치는 현재 위치 안내.
                                 var loc = d.location ? (' &middot; ' + escH(d.location)) : '';
                                 var cur = d.currentLocation ? ('<div class="gsr-subtitle gsr-current">현재 위치: ' + escH(d.currentLocation) + '</div>') : '';
                                 var actions = '<a class="gsr-link" href="' + escH(d.url) + '">상세</a>' +
@@ -32,10 +41,14 @@
                                 return '<div class="gsr-item">' +
                                     '<div class="gsr-title">' + badge + escH(d.title) + '</div>' +
                                     '<div class="gsr-subtitle">' + escH(d.subtitle || '') + loc + '</div>' +
-                                    cur +
-                                    '<div class="gsr-actions">' + actions + '</div>' +
-                                    '</div>';
-                            }).join('');
+                                    cur + modSummary(d) +
+                                    '<div class="gsr-actions">' + actions + '</div></div>';
+                            }
+                            function section(title, items) { return items.length ? ('<div class="gsr-section">' + escH(title) + '</div>' + items.map(renderItem).join('')) : ''; }
+                            var gA = data.filter(function(d){return d.matchType==='asset';});
+                            var gI = data.filter(function(d){return d.matchType==='ip';});
+                            var gM = data.filter(function(d){return d.matchType==='module';});
+                            results.innerHTML = section('장비', gA) + section('IP', gI) + section('모듈 장착 장비 (' + gM.length + ')', gM);
                         }
                         results.classList.add('show');
                     });

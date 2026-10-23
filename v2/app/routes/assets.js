@@ -7,6 +7,7 @@ const Vendor = require('../models/vendor');
 const AssetIp = require('../models/assetIp');
 const AssetCredential = require('../models/assetCredential');
 const IpAddress = require('../models/ipAddress');
+const credCrypto = require('../utils/credentialCrypto'); // B-2b: quick-credentials 암호화
 const Subnet = require('../models/subnet');
 const appConfig = require('../config/app');
 const { requireMaintenance, requireAdmin } = require('../middleware/auth');
@@ -385,6 +386,153 @@ router.post('/:id/quick', requireMaintenance, async (req, res) => {
     return res.json({ changed: true, ignored, asset: await loadMasked(req.params.id) });
   } catch (err) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// B-2b: IP/자격증명 가용성 재계산(/json과 동일 기준). 비밀번호 값 미포함.
+async function assetAvailability(id) {
+  const ips = await AssetIp.findByAsset(id);
+  const creds = await AssetCredential.findByAssetMasked(id);
+  const sshAvailable = creds.some(c => !sshTerminal.SSH_EXCLUDED_TYPES.includes(c.credential_type) && c.has_password);
+  const solAvailable = ips.some(i => i.ip_type === 'bmc') && creds.some(c => c.credential_type === 'bmc' && c.has_password);
+  const bmcIp = ips.find(i => i.ip_type === 'bmc');
+  return { assetIps: ips, credentials: creds, sshAvailable, solAvailable, bmcWebUrl: bmcIp ? ('https://' + bmcIp.ip_address) : null };
+}
+const IP_TYPES = ['management', 'bmc', 'ib', 'data', 'os', 'other'];
+const CRED_TYPES = ['root', 'user', 'bmc'];
+function isIPv4(s) { if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) return false; return s.split('.').every(o => { var n = parseInt(o, 10); return n >= 0 && n <= 255 && String(n) === o; }); }
+
+// B-2b: 팝업 IP 탭 인라인 저장 — 단일 트랜잭션으로 asset_ips 교체 + 풀 해제/배정 + 충돌검사.
+router.post('/:id/quick-ips', requireMaintenance, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const client = await pool.connect();
+  try {
+    const before = await Asset.findById(id);
+    if (!before) { client.release(); return res.status(404).json({ error: '자산을 찾을 수 없습니다.' }); }
+    const curTok = await quickToken(id);
+    if (req.body.updated_at_token && String(req.body.updated_at_token) !== String(curTok)) {
+      client.release(); return res.status(409).json({ error: '다른 사용자가 먼저 수정했습니다.', ...(await assetAvailability(id)), updated_at_token: curTok });
+    }
+    const list = Array.isArray(req.body.ips) ? req.body.ips : [];
+    const beforeIps = await AssetIp.findByAsset(id);
+    // 검증
+    const norm = [];
+    const seen = new Set();
+    for (const raw of list) {
+      const ip = (raw.ip_address || '').trim();
+      if (!ip) continue;
+      if (!isIPv4(ip)) { client.release(); return res.status(400).json({ error: 'IPv4 형식이 아닙니다: ' + ip }); }
+      if (seen.has(ip)) { client.release(); return res.status(400).json({ error: '목록에 중복 IP: ' + ip }); }
+      seen.add(ip);
+      const t = IP_TYPES.includes(raw.ip_type) ? raw.ip_type : 'management';
+      norm.push({ ip_address: ip, ip_type: t, interface_type: (raw.interface_type || '').trim(), speed: (raw.speed || '').trim(), description: (raw.description || '').trim() });
+    }
+    const ipArr = norm.map(n => n.ip_address);
+    // 충돌검사
+    const conflicts = [];
+    if (ipArr.length) {
+      const { rows: otherA } = await client.query(
+        "SELECT ai.ip_address, a.management_number, a.status FROM asset_ips ai JOIN assets a ON ai.asset_id=a.id WHERE ai.asset_id<>$1 AND ai.ip_address = ANY($2)", [id, ipArr]);
+      otherA.forEach(r => conflicts.push({ ip_address: r.ip_address, reason: '다른 장비 사용 중', management_number: r.management_number, status: r.status }));
+      const { rows: pool2 } = await client.query(
+        "SELECT ip_address, allocation_type, asset_id FROM ip_addresses WHERE ip_address = ANY($1) AND ((allocation_type='assigned' AND (asset_id IS NULL OR asset_id<>$2)) OR allocation_type='reserved')", [ipArr, id]);
+      pool2.forEach(r => conflicts.push({ ip_address: r.ip_address, reason: r.allocation_type === 'reserved' ? '예약(reserved) IP' : '풀에서 다른 장비 배정' }));
+    }
+    if (conflicts.length) { client.release(); return res.status(409).json({ error: 'IP 충돌', conflicts }); }
+    // 풀 밖 IP → warnings
+    let warnings = [];
+    if (ipArr.length) {
+      const { rows: inPool } = await client.query("SELECT ip_address FROM ip_addresses WHERE ip_address = ANY($1)", [ipArr]);
+      const poolSet = new Set(inPool.map(r => r.ip_address));
+      warnings = ipArr.filter(ip => !poolSet.has(ip)).map(ip => ip + ' 는 IP 풀에 없어 풀 배정은 생략됩니다.');
+    }
+    // 단일 트랜잭션: asset_ips 교체 + 풀 해제/배정 + 토큰 갱신
+    await client.query('BEGIN');
+    await client.query('DELETE FROM asset_ips WHERE asset_id=$1', [id]);
+    for (const n of norm) {
+      await client.query('INSERT INTO asset_ips (asset_id, ip_address, ip_type, interface_type, speed, description) VALUES ($1,$2,$3,$4,$5,$6)',
+        [id, n.ip_address, n.ip_type, n.interface_type || null, n.speed || null, n.description || null]);
+    }
+    await client.query("UPDATE ip_addresses SET allocation_type='available', asset_id=NULL, assigned_to=NULL, updated_at=NOW() WHERE asset_id=$1 AND allocation_type='assigned'", [id]);
+    for (const ip of ipArr) {
+      await client.query("UPDATE ip_addresses SET allocation_type='assigned', asset_id=$1, updated_at=NOW() WHERE ip_address=$2 AND allocation_type<>'reserved'", [id, ip]);
+    }
+    if (req.body.__fail_inject__) throw new Error('injected failure (test)');
+    await client.query('UPDATE assets SET updated_at=NOW() WHERE id=$1', [id]);
+    await client.query('COMMIT');
+    await AuditLog.log(req, { action: 'asset_quick_ips', targetType: 'asset', targetId: id,
+      targetLabel: before.management_number || before.asset_number || before.model_name,
+      details: { before: beforeIps.map(i => ({ ip_address: i.ip_address, ip_type: i.ip_type })), after: norm.map(i => ({ ip_address: i.ip_address, ip_type: i.ip_type })) } });
+    const avail = await assetAvailability(id);
+    return res.json({ ok: true, warnings, ...avail, updated_at_token: await quickToken(id) });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (e) {}
+    return res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// B-2b: 팝업 접속정보 탭 인라인 저장 — 명시 deleted_ids, username 필수(조용한 삭제 금지), 비번 빈값=유지.
+router.post('/:id/quick-credentials', requireMaintenance, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const client = await pool.connect();
+  try {
+    const before = await Asset.findById(id);
+    if (!before) { client.release(); return res.status(404).json({ error: '자산을 찾을 수 없습니다.' }); }
+    const curTok = await quickToken(id);
+    if (req.body.updated_at_token && String(req.body.updated_at_token) !== String(curTok)) {
+      client.release(); return res.status(409).json({ error: '다른 사용자가 먼저 수정했습니다.', ...(await assetAvailability(id)), updated_at_token: curTok });
+    }
+    const list = Array.isArray(req.body.credentials) ? req.body.credentials : [];
+    const deletedIds = (Array.isArray(req.body.deleted_ids) ? req.body.deleted_ids : []).map(x => parseInt(x, 10)).filter(Boolean);
+    // 검증
+    for (const c of list) {
+      if (!c.username || !String(c.username).trim()) { client.release(); return res.status(400).json({ error: '사용자명은 필수입니다(삭제는 삭제 버튼으로).' }); }
+      if (!CRED_TYPES.includes(c.credential_type)) { client.release(); return res.status(400).json({ error: '허용되지 않은 유형: ' + c.credential_type }); }
+    }
+    const { rows: existing } = await client.query('SELECT id FROM asset_credentials WHERE asset_id=$1', [id]);
+    const existIds = new Set(existing.map(r => r.id));
+    const listIds = new Set(list.filter(c => c.id).map(c => parseInt(c.id, 10)));
+    const delSet = new Set(deletedIds);
+    for (const eid of existIds) {
+      if (!listIds.has(eid) && !delSet.has(eid)) { client.release(); return res.status(400).json({ error: '목록 불일치: 기존 자격증명 id ' + eid + '가 목록·삭제목록 어디에도 없습니다.' }); }
+    }
+    const auditRows = [];
+    await client.query('BEGIN');
+    for (const eid of delSet) {
+      if (existIds.has(eid)) { await client.query('DELETE FROM asset_credentials WHERE id=$1 AND asset_id=$2', [eid, id]); auditRows.push({ id: eid, deleted: true }); }
+    }
+    for (const c of list) {
+      const uname = String(c.username).trim();
+      const ctype = c.credential_type;
+      const desc = (c.description || '').trim() || null;
+      const pwGiven = c.password != null && String(c.password).length > 0;
+      if (c.id && existIds.has(parseInt(c.id, 10))) {
+        if (pwGiven) {
+          await client.query('UPDATE asset_credentials SET username=$1, credential_type=$2, description=$3, password_enc=$4, password=NULL WHERE id=$5 AND asset_id=$6',
+            [uname, ctype, desc, credCrypto.encrypt(String(c.password)), parseInt(c.id, 10), id]);
+        } else {
+          await client.query('UPDATE asset_credentials SET username=$1, credential_type=$2, description=$3 WHERE id=$4 AND asset_id=$5', [uname, ctype, desc, parseInt(c.id, 10), id]);
+        }
+        auditRows.push({ id: parseInt(c.id, 10), credential_type: ctype, username: uname, password_changed: pwGiven });
+      } else {
+        await client.query('INSERT INTO asset_credentials (asset_id, username, password_enc, credential_type, description) VALUES ($1,$2,$3,$4,$5)',
+          [id, uname, pwGiven ? credCrypto.encrypt(String(c.password)) : null, ctype, desc]);
+        auditRows.push({ credential_type: ctype, username: uname, password_changed: pwGiven, created: true });
+      }
+    }
+    await client.query('UPDATE assets SET updated_at=NOW() WHERE id=$1', [id]);
+    await client.query('COMMIT');
+    await AuditLog.log(req, { action: 'asset_quick_credentials', targetType: 'asset', targetId: id,
+      targetLabel: before.management_number || before.asset_number || before.model_name, details: { rows: auditRows } });
+    const avail = await assetAvailability(id);
+    return res.json({ ok: true, credentials: avail.credentials, sshAvailable: avail.sshAvailable, solAvailable: avail.solAvailable, updated_at_token: await quickToken(id) });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (e) {}
+    return res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
