@@ -647,3 +647,26 @@ body .inv-rack-empty:hover, body .asset-rack-empty:hover {
     outline: 1px solid var(--tui-green);
     outline-offset: -1px;
 }
+
+/* ===== v2.5.0 B-1b: 서버실 장비 패널·검색 다크 오버라이드 (var(--tui-*)) ===== */
+body .sr-panel { background: var(--tui-bg); border-left-color: var(--tui-border); }
+body .sr-panel-head, body .sr-panel-chips { background: var(--tui-bg-raise); border-bottom-color: var(--tui-border); }
+body .sr-panel-close { color: var(--tui-fg-dim); }
+body .sr-panel-room, body .sr-panel-filter { background: var(--tui-bg-raise); color: var(--tui-fg); border: 1px solid var(--tui-border); }
+body .sr-panel-room option { background: var(--tui-bg); color: var(--tui-fg); }
+body .sr-panel-filter::placeholder { color: var(--tui-fg-dim); }
+body .sr-row { border-bottom-color: var(--tui-border); }
+body .sr-row:hover { background: var(--tui-bg-raise); }
+body .sr-row-mgmt { color: var(--tui-fg); }
+body .sr-row-type, body .sr-row-sub { color: var(--tui-fg-dim); }
+/* 유형 칩: 비활성=테두리만, 활성=액센트 배경+어두운 글자 */
+body .sr-chip { background: transparent; border: 1px solid var(--tui-border); color: var(--tui-fg-dim); }
+body .sr-chip.active { background: var(--tui-green); border-color: var(--tui-green); color: #0d110d; }
+/* 검색 드롭다운 */
+body .sr-search-results { background: var(--tui-bg); border-color: var(--tui-border); }
+body .sr-sr-item { border-bottom-color: var(--tui-border); }
+body .sr-sr-item:hover { background: var(--tui-bg-raise); }
+body .sr-sr-title { color: var(--tui-fg); }
+body .sr-sr-sub, body .sr-sr-empty { color: var(--tui-fg-dim); }
+/* 토스트 */
+body .sr-toast { background: var(--tui-bg-raise); color: var(--tui-fg); border: 1px solid var(--tui-border-bright); box-shadow: 0 6px 24px rgba(0,0,0,0.5); }

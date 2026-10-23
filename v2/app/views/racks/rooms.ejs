@@ -781,13 +781,19 @@ function srMatchMove(delta) {
 
 // ---- UX-4 장비 목록 패널 ----
 var srPanelData = [];
+var srPanelMode = 'split';
+var srJustDragged = false;
+// 랙 드래그 종료 직후의 유령 클릭이 패널을 닫지 않도록 가드(드래그 코드 비수정)
+document.addEventListener('dragend', function(){ srJustDragged = true; setTimeout(function(){ srJustDragged = false; }, 300); }, true);
+
 function srTogglePanel(force) {
     var panel = document.getElementById('srPanel');
     var open = (typeof force === 'boolean') ? force : !panel.classList.contains('open');
     panel.classList.toggle('open', open);
+    srPanelMode = (window.innerWidth >= 1100) ? 'split' : 'overlay';  // 넓은 화면=분할, 좁으면 오버레이 폴백
+    document.body.classList.toggle('rooms-panel-split', open);        // 본문 폭 축소(CSS, 좁은 화면은 media로 무효)
     try { localStorage.setItem('srPanelOpen', open ? '1' : '0'); } catch (e) {}
     if (open && !srPanelData.length) {
-        // 서버실 select 초기화 + 첫 서버실 로드
         var sel = document.getElementById('srPanelRoom');
         if (sel && !sel.options.length) {
             sel.innerHTML = SR_ROOMS.map(function(r){ return '<option value="' + r.id + '">' + esc(r.name) + '</option>'; }).join('');
@@ -795,6 +801,32 @@ function srTogglePanel(force) {
         if (SR_ROOMS.length) srPanelReload();
     }
 }
+
+// 바깥 클릭으로 닫기 — 장비 셀/팝업/검색/인터랙티브 요소/드래그는 예외
+document.addEventListener('click', function(e) {
+    var panel = document.getElementById('srPanel');
+    if (!panel || !panel.classList.contains('open')) return;
+    if (panel.contains(e.target)) return;      // 패널 내부
+    if (srJustDragged) return;                 // 드래그 종료 직후
+    // 공통 유지: 검색/툴바·팝업/모달·모든 인터랙티브 요소
+    if (e.target.closest('.sr-toolbar, #srSearchResults, .modal-overlay, .modal, a, button, input, select, textarea, label')) return;
+    if (srPanelMode === 'split') {
+        // 분할 보기: 장비 셀·랙 영역 클릭(→팝업 확인)은 유지. 진짜 빈 영역만 닫힘.
+        if (e.target.closest('.clickable-unit, .wide-rack, .wide-rack-draggable')) return;
+    }
+    srTogglePanel(false);
+});
+// ESC — 팝업이 열려 있으면 팝업 우선(양보), 아니면 패널 닫기
+document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    var panel = document.getElementById('srPanel');
+    if (!panel || !panel.classList.contains('open')) return;
+    if (document.querySelector('.modal-overlay.active')) return;
+    srTogglePanel(false);
+});
+window.addEventListener('resize', function() {
+    if (document.getElementById('srPanel').classList.contains('open')) srPanelMode = (window.innerWidth >= 1100) ? 'split' : 'overlay';
+});
 function srPanelReload() {
     var sel = document.getElementById('srPanelRoom');
     var rid = sel && sel.value ? sel.value : (SR_ROOMS[0] && SR_ROOMS[0].id);
