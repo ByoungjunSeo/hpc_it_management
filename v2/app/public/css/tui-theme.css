@@ -679,3 +679,5 @@ body .gsr-item.gsr-active, body .sr-sr-item.sr-sr-active { background: var(--tui
 body .sr-panel-other { color: var(--tui-green); }
 /* B-5b */
 body .sr-match-warn { background: var(--tui-bg-raise); border-color: var(--tui-border); color: var(--tui-fg); }
+/* B-5c */
+body .sr-panel-hidden { border-top-color: var(--tui-border); color: var(--tui-fg-dim); }

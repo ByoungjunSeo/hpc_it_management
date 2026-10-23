@@ -281,6 +281,7 @@
         <button type="button" class="sr-panel-close" onclick="srSetPanel(false, true)" aria-label="닫기">&times;</button>
     </div>
     <div class="sr-panel-chips" id="srPanelChips"></div>
+    <div class="sr-panel-chips sr-panel-status-chips" id="srPanelStatusChips"></div><%# B-5c: 상태 필터 칩 %>
     <input type="text" id="srPanelFilter" class="form-control sr-panel-filter" autocomplete="off" placeholder="필터 — 관리번호·모델·IP·모듈(예: H100)" oninput="srPanelFilterInput()">
     <div class="sr-panel-list" id="srPanelList"><p class="text-muted" style="padding:12px;">서버실을 선택하세요.</p></div>
 </div>
@@ -1083,46 +1084,94 @@ function srPanelShowGlobal() {
     var g = document.getElementById('globalSearch');
     if (g) { g.value = q; g.dispatchEvent(new Event('input', { bubbles: true })); g.focus(); }
 }
-// 현재 표시 대상 base 행(서버 모드=스코프 결과 병합, 간이 모드=텍스트 필터). 유형 칩 적용 전.
-function srPanelVisibleRows() {
+// 현재 표시 대상 base 행(서버 모드=스코프 결과 병합, 간이 모드=텍스트 필터). 유형/상태 칩 적용 전.
+function srPanelBaseRows() {
     if (srPanelServerActive && srPanelServerIds) {
         var byId = {}; srPanelData.forEach(function(a){ byId[a.id] = a; });
         return srPanelScoped.map(function(d){
             var a = byId[d.id];
             if (a) { a.__mm = srPanelServerMods[d.id]; a.__loc = null; return a; }
-            // 2-4: 패널 미등재(블레이드 노드 등) → 검색 결과로 합성
+            // 2-4: 패널 미등재(블레이드 노드 등) → 검색 결과로 합성(status는 결과 자산 자신 값)
             return { id: d.id, asset_type: d.asset_type, management_number: (d.subtitle || '').split(' | ')[0] || null,
                      asset_number: null, model_name: d.title || null, rack_id: null, rack_name: null, u_label: null,
-                     rep_ip: null, ownership: null, vendor_name: null, status: null, __loc: d.location || '', __mm: srPanelServerMods[d.id] };
+                     rep_ip: null, ownership: null, vendor_name: null, status: d.status || null, __loc: d.location || '', __mm: srPanelServerMods[d.id] };
         });
     }
     var q = (document.getElementById('srPanelFilter').value || '').trim().toLowerCase();
     if (!q) return srPanelData.slice();
     return srPanelData.filter(function(a){ return [a.management_number, a.model_name, a.rep_ip, a.asset_number].some(function(v){ return v && String(v).toLowerCase().indexOf(q) !== -1; }); });
 }
+// B-5c: 상태 필터
+var SR_STATUS_ORDER = ['active', 'maintenance', 'inactive', 'returned', 'decommissioned'];
+var SR_PANEL_STATUS_KEY = 'rooms.panel.status';
+function srPanelStatusDefault() { return { active: true, maintenance: true, inactive: true, returned: false, decommissioned: false, other: true }; }
+function srPanelLoadStatus() {
+    try {
+        var raw = localStorage.getItem(SR_PANEL_STATUS_KEY);
+        if (!raw) return srPanelStatusDefault();
+        var p = JSON.parse(raw);
+        if (!p || typeof p !== 'object') return srPanelStatusDefault();
+        var d = srPanelStatusDefault();
+        Object.keys(d).forEach(function(k){ if (typeof p[k] === 'boolean') d[k] = p[k]; });
+        return d;
+    } catch (e) { return srPanelStatusDefault(); }
+}
+function srPanelSaveStatus() { try { localStorage.setItem(SR_PANEL_STATUS_KEY, JSON.stringify(srPanelStatusFilter)); } catch (e) {} }
+var srPanelStatusFilter = srPanelLoadStatus();
+function srStatusKey(a) { return (SR_STATUS_ORDER.indexOf(a.status) !== -1) ? a.status : 'other'; }
+function srStatusAllowed(a) { return srPanelStatusFilter[srStatusKey(a)] !== false; }
+function srPanelToggleStatus(k) { srPanelStatusFilter[k] = !srPanelStatusFilter[k]; srPanelSaveStatus(); srPanelRenderChips(); srPanelRender(); }
+function srPanelShowHidden() {
+    SR_STATUS_ORDER.concat(['other']).forEach(function(k){ if (srPanelStatusFilter[k] === false) srPanelStatusFilter[k] = true; });
+    srPanelSaveStatus(); srPanelRenderChips(); srPanelRender();
+}
 var srPanelTypeFilter = '';
 function srPanelRenderChips() {
-    var base = srPanelVisibleRows();   // 2-2: 칩 개수는 필터(서버/간이) 결과 기준
+    var base = srPanelBaseRows();                       // 텍스트/서버 필터 후
+    // 상태 칩: base 기준 집계(고정 5종 + 목록 밖 값 있으면 '기타')
+    var sCounts = {};
+    base.forEach(function(a){ var k = srStatusKey(a); sCounts[k] = (sCounts[k] || 0) + 1; });
+    var sChips = '';
+    SR_STATUS_ORDER.forEach(function(k){
+        sChips += '<span class="sr-chip sr-status-chip' + (srPanelStatusFilter[k] !== false ? ' active' : '') + '" onclick="srPanelToggleStatus(\'' + k + '\')">' + esc(SR_STATUS_LABELS[k]) + ' ' + (sCounts[k] || 0) + '</span>';
+    });
+    if (sCounts.other) {
+        sChips += '<span class="sr-chip sr-status-chip' + (srPanelStatusFilter.other !== false ? ' active' : '') + '" onclick="srPanelToggleStatus(\'other\')">기타 ' + sCounts.other + '</span>';
+    }
+    document.getElementById('srPanelStatusChips').innerHTML = sChips;
+    // 유형 칩: 상태 필터 적용 후 기준 재집계
+    var sr = base.filter(srStatusAllowed);
     var counts = {};
-    base.forEach(function(a){ counts[a.asset_type] = (counts[a.asset_type] || 0) + 1; });
-    var chips = '<span class="sr-chip' + (srPanelTypeFilter === '' ? ' active' : '') + '" onclick="srPanelSetType(\'\')">전체 ' + base.length + '</span>';
+    sr.forEach(function(a){ counts[a.asset_type] = (counts[a.asset_type] || 0) + 1; });
+    var chips = '<span class="sr-chip' + (srPanelTypeFilter === '' ? ' active' : '') + '" onclick="srPanelSetType(\'\')">전체 ' + sr.length + '</span>';
     Object.keys(counts).forEach(function(t){
         chips += '<span class="sr-chip' + (srPanelTypeFilter === t ? ' active' : '') + '" onclick="srPanelSetType(\'' + t + '\')">' + esc(SR_TYPE_LABELS[t] || t) + ' ' + counts[t] + '</span>';
     });
     document.getElementById('srPanelChips').innerHTML = chips;
 }
 function srPanelSetType(t) { srPanelTypeFilter = t; srPanelRenderChips(); srPanelRender(); }
+function srPanelHiddenNotice(base) {
+    // 상태 필터로 숨겨진 base 행 집계 → "반납 N건·폐기 M건 숨김 [보기]"
+    var hidden = {};
+    base.forEach(function(a){ if (!srStatusAllowed(a)) { var k = srStatusKey(a); hidden[k] = (hidden[k] || 0) + 1; } });
+    var parts = [];
+    SR_STATUS_ORDER.concat(['other']).forEach(function(k){ if (hidden[k]) parts.push((k === 'other' ? '기타' : SR_STATUS_LABELS[k]) + ' ' + hidden[k] + '건'); });
+    if (!parts.length) return '';
+    return '<div class="sr-panel-hidden text-muted">' + parts.join('·') + ' 숨김 <a href="#" class="sr-panel-other" onclick="srPanelShowHidden();return false;">보기</a></div>';
+}
 function srPanelRender() {
     var list = document.getElementById('srPanelList');
-    var base = srPanelVisibleRows();
-    var rows = srPanelTypeFilter ? base.filter(function(a){ return a.asset_type === srPanelTypeFilter; }) : base;   // 2-2: 유형 칩은 서버 결과 위에 추가 적용
+    var base = srPanelBaseRows();
+    var statusRows = base.filter(srStatusAllowed);                        // B-5c: 상태 필터
+    var rows = srPanelTypeFilter ? statusRows.filter(function(a){ return a.asset_type === srPanelTypeFilter; }) : statusRows;
+    var notice = srPanelHiddenNotice(base);
     if (!rows.length) {
         if (srPanelServerActive) {
             var qesc = esc((document.getElementById('srPanelFilter').value || '').trim());
             var other = srPanelOther > 0 ? ('<br><a href="#" class="sr-panel-other" onclick="srPanelShowGlobal();return false;">다른 위치 ' + srPanelOther + '건 보기</a>') : '';
-            list.innerHTML = '<p class="text-muted" style="padding:12px;">이 서버실에 \'' + qesc + '\' 장비 없음' + other + '</p>';
+            list.innerHTML = '<p class="text-muted" style="padding:12px;">이 서버실에 \'' + qesc + '\' 장비 없음' + other + '</p>' + notice;
         } else {
-            list.innerHTML = '<p class="text-muted" style="padding:12px;">해당 장비가 없습니다.</p>';
+            list.innerHTML = '<p class="text-muted" style="padding:12px;">해당 장비가 없습니다.</p>' + notice;
         }
         return;
     }
@@ -1142,7 +1191,7 @@ function srPanelRender() {
             '</div>' +
             '<button type="button" class="btn btn-xs btn-outline sr-row-info" onclick="openAssetPopup(' + a.id + ');event.stopPropagation();">정보</button>' +
             '</div>';
-    }).join('');
+    }).join('') + notice;   // B-5c: 상태로 숨긴 건수 안내
     list.querySelectorAll('.sr-row').forEach(function(el){
         el.addEventListener('click', function(){ locateAsset(parseInt(this.dataset.id)); });
     });

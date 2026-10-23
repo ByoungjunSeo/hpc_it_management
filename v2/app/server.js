@@ -279,6 +279,7 @@ app.get('/api/search', async (req, res) => {
         r.location = m.location || '';
         r.locateUrl = m.locateUrl || null;
         r.currentLocation = m.currentLocation || null;
+        r.status = m.status || null;   // B-5c: 결과 자산 자신의 status(패널 상태 필터용; locs는 a.status=자신 값)
       });
     }
 
