@@ -320,6 +320,17 @@ router.get('/:id/json', async (req, res) => {
     const credentials = await AssetCredential.findByAssetMasked(asset.id);
     const parent = asset.parent_asset_id ? await Asset.findById(asset.parent_asset_id) : null;
     const children = await Asset.findChildren(asset.id);
+    // B-6: 섀시 [노드] 탭 목록용 — 각 자식의 대표 IP 보강(읽기 전용, 기존 키 불변).
+    //   우선순위는 패널/스캔과 동일(os → 10.x mgmt → 비BMC → any). 자격증명은 싣지 않음.
+    for (const ch of children) {
+      if ('ssh_password' in ch) ch.ssh_password = undefined;   // 메인 자산과 동일하게 레거시 평문 키 제거
+      const cips = await AssetIp.findByAsset(ch.id);
+      const rep = cips.find(i => i.ip_type === 'os')
+        || cips.find(i => i.ip_type === 'management' && i.ip_address && i.ip_address.startsWith('10.'))
+        || cips.find(i => i.ip_type !== 'bmc' && i.ip_type !== 'management')
+        || cips.find(i => i.ip_type === 'management') || cips[0] || null;
+      ch.rep_ip = rep ? rep.ip_address : null;
+    }
     // BL-11 후속: 응답에 자격증명 평문 미포함. 레거시 asset.ssh_password도 제거([보기] API로만).
     if (asset && 'ssh_password' in asset) { asset.ssh_password = undefined; }
     // T2 랙 팝업: SSH 진입점 활성 판정용 불리언(자격증명 상세는 싣지 않음).

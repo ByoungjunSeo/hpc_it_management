@@ -681,3 +681,6 @@ body .sr-panel-other { color: var(--tui-green); }
 body .sr-match-warn { background: var(--tui-bg-raise); border-color: var(--tui-border); color: var(--tui-fg); }
 /* B-5c */
 body .sr-panel-hidden { border-top-color: var(--tui-border); color: var(--tui-fg-dim); }
+/* B-6 */
+body .sr-chassis-link { color: var(--tui-green); }
+body .sr-node-row:hover td { background: var(--tui-bg-raise); }

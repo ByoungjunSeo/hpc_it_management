@@ -1987,3 +1987,7 @@ body.rooms-panel-split main.container { margin-right:var(--sr-panel-w); max-widt
 .sr-status-chip { opacity: 0.5; }
 .sr-status-chip.active { opacity: 1; }
 .sr-panel-hidden { padding: 8px 12px; font-size: 12px; border-top: 1px dashed var(--border, #e2e8f0); }
+/* B-6: 섀시 노드 탭 */
+.sr-chassis-link { color:#2563eb; text-decoration:none; }
+.sr-chassis-link:hover { text-decoration:underline; }
+.sr-node-row:hover td { background: rgba(59,130,246,0.06); }
