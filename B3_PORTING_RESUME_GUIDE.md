@@ -1,7 +1,21 @@
 # B-3 이후 애플리케이션 이식 — 재개 가이드
 
-> 작성일: 2026-06-26 / 최종 현행화: 2026-10-06 (CDU-2 칠러→CDU 냉각 연결)
+> 작성일: 2026-06-26 / 최종 현행화: 2026-10-24 (v2.5.0 서버실 UX)
 > 작성 목적: 서버 종료 전 맥락 보존. 재개 시 이 문서 + git log부터 확인.
+
+> ★ **v2.5.0 서버실 UX (2026-10-24, 격리 HTTP·핸들러 검증 PASS · 운영 인수 대기 · DDL 없음)** — v2.4.1 이후 커밋된 서버실 사용성 묶음을 릴리스.
+> - **UX-1 (B-1/1b/1c)**: 서버실 화면 내 검색·위치 강조(`locateAsset`), **[모두 표시]**(현재 결과 중 이 화면 랙 자산 일괄 강조·미배치 수 안내), **장비 목록 패널**(분할/오버레이, 기본 열림, 선호키 `rooms.panel.pref`로 숨김 상태 기억, 바깥클릭·ESC는 오버레이에서만).
+> - **UX-2/B-2/B-2b**: 자산 팝업 탭 인라인 **빠른수정** — 기본·운영 정보(`/quick`), IP(`/quick-ips`), 접속정보(`/quick-credentials`). 팝업 모듈 탭 소유(자사/업체) 표시.
+> - **B-4/B-4b**: 컴퓨팅 모듈 통합검색(모델·용량·유형 키워드·숫자=용량경계), 결과 **구역화**([장비]/[IP]/[모듈 장착 장비]) + `matchedModules` 요약, 결과 클릭 시 위치 이동(/rooms면 locateAsset·타화면이면 focus 이동·미배치면 상세), 키보드 ↑↓/Enter/Esc, 장비 목록 패널 필터의 **서버실 스코프 모듈 검색**(room_id).
+> - **엔드포인트(4종)**: `GET /rooms/:id/assets.json`(패널 데이터) · `POST /assets/:id/quick`·`/quick-ips`·`/quick-credentials`(빠른수정) · `GET /api/search`(선택 `room_id` 스코프 · `locateUrl`[server_room 랙만, 사무실/미배치=null] · `matchedModules` · 결과행 `asset_type`).
+> - **확립 규칙(이후 신규 UI·엔드포인트 공통)**:
+>   · **색은 tui 토큰만** — `var(--tui-*)` 또는 `tui-theme.css` body 접두 오버라이드(하드코딩 색 금지, B-1b 교훈). 출력은 전부 `esc()`.
+>   · **쓰기는 화이트리스트 전용 엔드포인트** — quick* 는 필드 화이트리스트로만 반영, **누락 ≠ 소거**(IP는 전량 교체지만 접속정보 삭제는 `deleted_ids` 명시, 비번 빈칸=기존 유지).
+>   · **마이크로초 토큰 409** — `updated_at` 초 정밀도로는 동시 수정 감지 불가 → `round(epoch*1e6)` 토큰으로 낙관적 동시성(quick/quick-ips/quick-credentials가 토큰 공유).
+>   · **status 인라인 변경은 active↔maintenance만** — 근거는 `rack.js`의 제외 목록(그 외 상태 전이는 전체 폼에서만).
+>   · 검색 응답 SELECT에 **자격증명 컬럼 미포함**, 평문·`password_enc` 비노출(v2.4.1 원칙).
+> - **알려진 미수정**: [[BUG-38]](랙 색 표시, 결정 대기) · [[BUG-39]](수정 폼 IP 무확인 재배정 — 빠른수정은 회피 구현, 수정 폼은 범위 밖).
+> - **남은 일**: 커밋(문서·버전 1건 + 기능 커밋들은 기수행), 번들 재조립 sha 기입, 운영 재기동(이미지 교체만, DDL 없음).
 
 > ★ **CDU-2 칠러 → CDU 1:N 냉각 연결 (2026-10-06, 격리 + 운영 덤프 리허설 PASS · 운영 적용/인수 대기 · v2.4.0 · 미커밋)**
 > - **설계**: `assets.cooling_source_asset_id INTEGER NULL REFERENCES assets(id) ON DELETE SET NULL`(CDU→칠러). 칠러 1 : CDU N.

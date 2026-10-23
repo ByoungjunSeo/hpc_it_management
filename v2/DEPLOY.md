@@ -29,7 +29,7 @@
 > 사내/공개 미러로 교체(main·updates만, security는 스킵)합니다. 미지정 시 기본값은 원본
 > deb.debian.org(회귀 0).
 > ```
-> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.4.1 .
+> docker build --build-arg APT_MIRROR=http://mirror.kakao.com/debian -t it-assets:2.5.0 .
 > ```
 > 실검증 이력: 2.0.1 이미지는 사무 PC(윈도우)에서 사무망의 deb.debian.org 도메인 차단으로
 > kakao 미러(http, security 제외)를 경유해 빌드·전달했고, 서버 격리 스택에서 정품 검증(amd64,
@@ -253,6 +253,11 @@ DB **스키마 변경이 포함된 릴리스**는 마이그레이션 SQL과 적�
 > - **systemd(호스트)**: `NODE_PATH=<repo>/v2/app/node_modules`로 `node db/migrations/2026-10-09_1_v241_credentials_plaintext.js [--dry-run]`(스크립트가 `v2/.env` dotenv 로드). 재시작은 `sudo systemctl restart it-assets-v2`(이미지 교체 불필요).
 > - 감사 로그 치환 `db/ops/v241_audit_mask_20261009.js`는 **관리자 승인 후**, 번들에 미포함(저장소에만).
 > 확인: `...verify.sql` → `eul_rows_with_plaintext=0 / legacy_plaintext_password_rows=0 / audit_plaintext=0`. 상세는 `RELEASE_NOTICE_2.4.1.md`.
+>
+> **2.4.x → 2.5.0: DDL·마이그레이션 없음 — 이미지 교체 + 재기동만.** 서버실 UX 묶음(팝업 모듈 소유 표시·검색/위치 강조·장비 목록 패널·팝업 빠른수정·모듈 검색). 스키마 변경 0건, 신규 환경변수 없음.
+> - **compose**: `docker load -i it-assets-2.5.0.tar` → `.env`에 `APP_IMAGE=it-assets:2.5.0` → `docker compose -f docker-compose.prod.yml up -d`.
+> - **systemd(호스트)**: 새 코드 반영 후 `sudo systemctl restart it-assets-v2`(이미지 교체·APP_IMAGE 변경 불필요).
+> - 롤백: 이전 이미지 태그로 되돌려 재기동하면 됨(데이터·스키마 불변이라 downgrade 안전). 상세는 `RELEASE_NOTICE_2.5.0.md`.
 
 ---
 
@@ -281,7 +286,7 @@ docker compose -f docker-compose.prod.yml up -d
 | 증상 | 원인 / 조치 |
 |------|------------|
 | `ERR_SSL_PROTOCOL_ERROR` | 브라우저가 주소를 https로 자동 승격 — 주소를 지우고 `http://` 부터 명시 입력(자동완성 주의, 시크릿 창 활용) |
-| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.4.1`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
+| `failed to read dockerfile` / `app Pulling` | 로드된 이미지 태그가 compose 기대(`it-assets:2.5.0`)와 다름 — 태그 확인 후 `.env`에 `APP_IMAGE=<태그>` 지정 |
 | 앱 컨테이너가 바로 종료 | **먼저 `docker compose -f docker-compose.prod.yml logs app` 로 원인 확인** — ① DB 이미지 누락(오프라인): `docker images`에 `postgres:16-alpine` 있는지 + db healthy 확인 ② 아래 (a)~(c) 메시지별 대응 |
 | (a) `exec … : no such file or directory` (엔트리포인트) | **셸 스크립트 CRLF**(Windows에서 clone/편집). `.sh`·`docker-entrypoint.sh`는 LF여야 함 — `.gitattributes`(eol=lf)로 재발 방지, 이미 CRLF면 `sed -i 's/\r$//' scripts/*.sh docker-entrypoint.sh` 후 재빌드 |
 | (b) `[session-secret] 오류 …` (기동 로그) | `.env` 필수값 미설정 — **SESSION_SECRET·CREDENTIAL_ENCRYPTION_KEY를 32자 이상 무작위**로(`openssl rand -hex 32`). POSTGRES_PASSWORD·INITIAL_ADMIN_PASSWORD도 CHANGE_ME 교체 |
