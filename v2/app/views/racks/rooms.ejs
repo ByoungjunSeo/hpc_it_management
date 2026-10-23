@@ -38,7 +38,7 @@
         <span id="srMatchLabel"></span>
         <button type="button" class="btn btn-sm btn-outline" onclick="srMatchMove(1)">▶</button>
     </div>
-    <button type="button" class="btn btn-sm btn-outline" onclick="srTogglePanel()" style="margin-left:auto;">&#9776; 장비 목록</button>
+    <button type="button" id="srPanelToggleBtn" class="btn btn-sm btn-outline" onclick="srTogglePanel()" style="margin-left:auto;">&#9776; 장비 목록 보이기</button>
 </div>
 <div id="srToast" class="sr-toast" style="display:none;"></div>
 
@@ -272,17 +272,34 @@
     </div>
 </div>
 
-<!-- UX-4: 장비 목록 슬라이드 패널 -->
-<div id="srPanel" class="sr-panel">
+<!-- UX-4/B-1c: 장비 목록 슬라이드 패널 (기본 열림 — 조기 스크립트가 선호·화면폭으로 보정) -->
+<div id="srPanel" class="sr-panel open">
     <div class="sr-panel-head">
         <strong>장비 목록</strong>
         <select id="srPanelRoom" class="form-control sr-panel-room" onchange="srPanelReload()"></select>
-        <button type="button" class="sr-panel-close" onclick="srTogglePanel(false)" aria-label="닫기">&times;</button>
+        <button type="button" class="btn btn-xs btn-outline sr-panel-hide" onclick="srSetPanel(false, true)">숨기기</button>
+        <button type="button" class="sr-panel-close" onclick="srSetPanel(false, true)" aria-label="닫기">&times;</button>
     </div>
     <div class="sr-panel-chips" id="srPanelChips"></div>
     <input type="text" id="srPanelFilter" class="form-control sr-panel-filter" autocomplete="off" placeholder="필터 — 관리번호·모델·IP" oninput="srPanelRender()">
     <div class="sr-panel-list" id="srPanelList"><p class="text-muted" style="padding:12px;">서버실을 선택하세요.</p></div>
 </div>
+<script>
+// B-1c 깜박임 방지: 패널이 파싱된 직후(첫 페인트 전) 선호값·화면폭으로 .open/.split 선적용.
+//   방식 근거: 패널 마크업에 open 기본 부여 → 흔한 경우(열림) 슬라이드 없이 즉시 표시,
+//   hidden/좁은화면이면 여기서 즉시 open 제거 → 역슬라이드/본문 reflow 깜박임 없음.
+(function(){
+    var pref = null;
+    try {
+        pref = localStorage.getItem('rooms.panel.pref');
+        if (pref === null) { var old = localStorage.getItem('srPanelOpen'); if (old !== null) { pref = (old === '1') ? 'shown' : 'hidden'; localStorage.setItem('rooms.panel.pref', pref); localStorage.removeItem('srPanelOpen'); } }
+    } catch (e) { pref = null; }
+    var open = (window.innerWidth >= 1100) && (pref !== 'hidden');  // 오버레이(<1100)는 선호 무관 기본 닫힘
+    var panel = document.getElementById('srPanel');
+    if (open) { document.body.classList.add('rooms-panel-split'); }
+    else if (panel) { panel.classList.remove('open'); }
+})();
+</script>
 
 <!-- Asset Detail Popup -->
 <div class="modal-overlay" id="assetDetailPopup">
@@ -790,46 +807,71 @@ var srJustDragged = false;
 // 랙 드래그 종료 직후의 유령 클릭이 패널을 닫지 않도록 가드(드래그 코드 비수정)
 document.addEventListener('dragend', function(){ srJustDragged = true; setTimeout(function(){ srJustDragged = false; }, 300); }, true);
 
+// B-1c: 선호값 키 하나로 통합(rooms.panel.pref = 'shown'|'hidden'). 구 키(srPanelOpen)는 이전 후 무시.
+var SR_PREF_KEY = 'rooms.panel.pref';
+function srGetPref() {
+    try {
+        var p = localStorage.getItem(SR_PREF_KEY);
+        if (p === null) { var old = localStorage.getItem('srPanelOpen'); if (old !== null) { p = (old === '1') ? 'shown' : 'hidden'; localStorage.setItem(SR_PREF_KEY, p); localStorage.removeItem('srPanelOpen'); } }
+        return p;
+    } catch (e) { return null; }
+}
+function srSetPref(v) { try { localStorage.setItem(SR_PREF_KEY, v); } catch (e) {} }
+function srIsWide() { return window.innerWidth >= 1100; }
+function srUpdateToggleLabel(open) {
+    var b = document.getElementById('srPanelToggleBtn');
+    if (b) b.innerHTML = open ? '✖ 장비 목록 숨기기' : '☰ 장비 목록 보이기';
+}
+// 패널 상태 설정. persist=true면 사용자 명시 동작으로 선호값 저장(오버레이 자동닫기 등은 persist=false).
+function srSetPanel(open, persist) {
+    var panel = document.getElementById('srPanel');
+    if (!panel) return;
+    srPanelMode = srIsWide() ? 'split' : 'overlay';
+    panel.classList.toggle('open', open);
+    document.body.classList.toggle('rooms-panel-split', open);
+    if (persist) srSetPref(open ? 'shown' : 'hidden');
+    srUpdateToggleLabel(open);
+    if (open) srInitPanelData();
+}
+// 툴바 버튼: 토글(사용자 명시 → 선호 저장). 분할/오버레이 공통.
 function srTogglePanel(force) {
     var panel = document.getElementById('srPanel');
     var open = (typeof force === 'boolean') ? force : !panel.classList.contains('open');
-    panel.classList.toggle('open', open);
-    srPanelMode = (window.innerWidth >= 1100) ? 'split' : 'overlay';  // 넓은 화면=분할, 좁으면 오버레이 폴백
-    document.body.classList.toggle('rooms-panel-split', open);        // 본문 폭 축소(CSS, 좁은 화면은 media로 무효)
-    try { localStorage.setItem('srPanelOpen', open ? '1' : '0'); } catch (e) {}
-    if (open && !srPanelData.length) {
-        var sel = document.getElementById('srPanelRoom');
-        if (sel && !sel.options.length) {
-            sel.innerHTML = SR_ROOMS.map(function(r){ return '<option value="' + r.id + '">' + esc(r.name) + '</option>'; }).join('');
-        }
-        if (SR_ROOMS.length) srPanelReload();
-    }
+    srSetPanel(open, true);
+}
+function srInitPanelData() {
+    var sel = document.getElementById('srPanelRoom');
+    if (sel && !sel.options.length) sel.innerHTML = SR_ROOMS.map(function(r){ return '<option value="' + r.id + '">' + esc(r.name) + '</option>'; }).join('');
+    if (SR_ROOMS.length && !srPanelData.length) srPanelReload();
 }
 
-// 바깥 클릭으로 닫기 — 장비 셀/팝업/검색/인터랙티브 요소/드래그는 예외
+// 바깥 클릭 — 오버레이 모드에서만 닫힘(분할 모드는 상시 고정, 오조작 방지). 선호값 불변.
 document.addEventListener('click', function(e) {
     var panel = document.getElementById('srPanel');
     if (!panel || !panel.classList.contains('open')) return;
-    if (panel.contains(e.target)) return;      // 패널 내부
-    if (srJustDragged) return;                 // 드래그 종료 직후
-    // 공통 유지: 검색/툴바·팝업/모달·모든 인터랙티브 요소
+    if (srPanelMode !== 'overlay') return;     // 분할 모드: 바깥 클릭으로 닫지 않음
+    if (panel.contains(e.target)) return;
+    if (srJustDragged) return;
     if (e.target.closest('.sr-toolbar, #srSearchResults, .modal-overlay, .modal, a, button, input, select, textarea, label')) return;
-    if (srPanelMode === 'split') {
-        // 분할 보기: 장비 셀·랙 영역 클릭(→팝업 확인)은 유지. 진짜 빈 영역만 닫힘.
-        if (e.target.closest('.clickable-unit, .wide-rack, .wide-rack-draggable')) return;
-    }
-    srTogglePanel(false);
+    srSetPanel(false, false);                  // 오버레이 자동닫기 → 선호 저장 안 함
 });
-// ESC — 팝업이 열려 있으면 팝업 우선(양보), 아니면 패널 닫기
+// ESC — 오버레이 모드에서만(분할은 팝업 ESC와 혼동 방지로 무시). 팝업 열려 있으면 양보.
 document.addEventListener('keydown', function(e) {
     if (e.key !== 'Escape') return;
     var panel = document.getElementById('srPanel');
     if (!panel || !panel.classList.contains('open')) return;
+    if (srPanelMode !== 'overlay') return;
     if (document.querySelector('.modal-overlay.active')) return;
-    srTogglePanel(false);
+    srSetPanel(false, false);
 });
+// 창 크기 변경: 분할↔오버레이 전환 시 규칙 재적용(선호 불변).
 window.addEventListener('resize', function() {
-    if (document.getElementById('srPanel').classList.contains('open')) srPanelMode = (window.innerWidth >= 1100) ? 'split' : 'overlay';
+    var wasWide = (srPanelMode === 'split');
+    var nowWide = srIsWide();
+    if (wasWide === nowWide) { srPanelMode = nowWide ? 'split' : 'overlay'; return; }
+    srPanelMode = nowWide ? 'split' : 'overlay';
+    if (nowWide) { srSetPanel(srGetPref() !== 'hidden', false); }   // 넓어짐: 선호 hidden 아니면 열기
+    else { srSetPanel(false, false); }                              // 좁아짐: 오버레이 → 닫기(본문 가림 방지)
 });
 function srPanelReload() {
     var sel = document.getElementById('srPanelRoom');
@@ -949,8 +991,14 @@ function srRefreshAssetViews(id) {
     }
 }
 
-// 열림 상태 복원
-(function(){ try { if (localStorage.getItem('srPanelOpen') === '1') srTogglePanel(true); } catch (e) {} })();
+// B-1c: 조기 인라인 스크립트가 .open/.split을 이미 선적용 → 여기선 라벨·데이터만 초기화(깜박임 방지)
+(function(){
+    var panel = document.getElementById('srPanel');
+    var open = !!(panel && panel.classList.contains('open'));
+    srPanelMode = srIsWide() ? 'split' : 'overlay';
+    srUpdateToggleLabel(open);
+    if (open) srInitPanelData();
+})();
 </script>
 
 <%- include('../partials/footer', { extraJs: null }) %>
