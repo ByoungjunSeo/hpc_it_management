@@ -1,7 +1,15 @@
 # B-3 이후 애플리케이션 이식 — 재개 가이드
 
-> 작성일: 2026-06-26 / 최종 현행화: 2026-10-24 (v2.5.0 서버실 UX)
+> 작성일: 2026-06-26 / 최종 현행화: 2026-10-24 (v2.6.0 자산 매칭 팝업)
 > 작성 목적: 서버 종료 전 맥락 보존. 재개 시 이 문서 + git log부터 확인.
+
+> ★ **v2.6.0 자산 매칭 팝업 (2026-10-24, 격리 검증 PASS · DDL 없음)** — /discovery 단일 장비 매칭 로직을 공용화해 서버실 팝업에서 실행 + 동시 적용 보호 + 패널 상태 필터.
+> - **discovery-core.js**(B-5a 추출): 단일 장비 흐름(scan→비교→소유/분할→apply→미매칭 link/register) 공용 모듈. 공개 API `DiscoveryCore.configure/scan/mount/showDetail/applyAsset/results`. mount(rootEl, assetId, {onApplied,onConflict,detailRow}) — consumer 리졸버로 DOM 주입(기본값=/discovery 전역 id라 /discovery 동작 불변). consumer 옵션: `contentEl·detailRow·statusCell`(팝업 null)·`silentSuccess`(팝업 true)·`onApplied`·`onConflict`. 전역 노출 이름 30개(escapeHtml/showDetail/applyAsset/… — onclick·페이지 호환). **데드 코드**: renderDiscoveredModuleTable·renderModuleTable(호출처 없음).
+> - **모듈 지문(B-5b 동시성)**: scan-asset 응답 `modules_fingerprint`(computing_modules id순 **JSON.stringify(고정 12필드 배열)** + sha256, 읽기전용). apply-asset은 본문 `expected_fingerprint`가 오면 **어떤 쓰기보다 먼저** 현재 지문과 비교, 다르면 **409**(current_fingerprint 반환, 쓰기 0); 키 없으면 기존 동작(하위호환). /discovery·팝업 공통(scan 응답 지문을 apply에 그대로 실음). link/register-inventory는 무변경.
+> - **팝업 [자산 매칭] 탭**(rooms.ejs): 노출=유지보수↑ ∧ server/storage ∧ 최상위(parent 없음) ∧ 접속 IP(os→10.x mgmt→비BMC→any→legacy). adp-wide 폭, 미매칭 모달 ESC 순서(모달→팝업, capture). onApplied=/assets/:id/json 재조회→adpCache·모듈탭·패널 reload·토스트.
+> - **패널 상태 필터(B-5c)**: 상태 칩(운영중/점검중/비활성/반납/폐기 + 목록 밖 '기타'), **기본 반납·폐기 숨김**, localStorage `rooms.panel.status`(try/catch, 손상·없음→기본). 유형 칩 개수는 상태 필터 후 재집계. "반납 N·폐기 M 숨김 [보기]". /api/search 결과에 **status(자산 자신 값)** 1줄 추가(server.js 보강 루프) — 블레이드는 노드 자신 status.
+> - **확립 규칙**: ① 로직 추출은 **payload 동치 하네스**(before/after 동일 mock DOM, fetch 요청열·본문·렌더 HTML diff 0)로 검증. ② 공용 JS는 **전역 이름 충돌 점검**(노출명 vs rooms/footer/main) 선행. ③ 자산 매칭 실장비 인수 순서: **백업 → 스캔만 → 1대 적용 → 재고·이력 확인**.
+> - **남은 일**: 커밋(①해당없음/②=server.js+rooms.ejs+CSS/③=문서·버전 3커밋), 번들 재조립 sha 기입, 운영 재기동(이미지 교체, DDL 없음).
 
 > ★ **v2.5.0 서버실 UX (2026-10-24, 격리 HTTP·핸들러 검증 PASS · 운영 인수 대기 · DDL 없음)** — v2.4.1 이후 커밋된 서버실 사용성 묶음을 릴리스.
 > - **UX-1 (B-1/1b/1c)**: 서버실 화면 내 검색·위치 강조(`locateAsset`), **[모두 표시]**(현재 결과 중 이 화면 랙 자산 일괄 강조·미배치 수 안내), **장비 목록 패널**(분할/오버레이, 기본 열림, 선호키 `rooms.panel.pref`로 숨김 상태 기억, 바깥클릭·ESC는 오버레이에서만).
