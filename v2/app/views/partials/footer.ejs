@@ -24,10 +24,17 @@
                             var badgeMap = { asset: '장비', ip: 'IP', module: '모듈' };
                             results.innerHTML = data.map(function(d) {
                                 var badge = '<span class="gsr-badge ' + d.type + '">' + (badgeMap[d.type] || d.type) + '</span>';
-                                return '<a class="gsr-item" href="' + d.url + '">' +
+                                // UX-3(F3): 중첩 <a> 금지 → div 컨테이너 + [상세]/[랙 위치] 링크. 미배치는 현재 위치 안내.
+                                var loc = d.location ? (' &middot; ' + escH(d.location)) : '';
+                                var cur = d.currentLocation ? ('<div class="gsr-subtitle gsr-current">현재 위치: ' + escH(d.currentLocation) + '</div>') : '';
+                                var actions = '<a class="gsr-link" href="' + escH(d.url) + '">상세</a>' +
+                                    (d.locateUrl ? ('<a class="gsr-link gsr-locate" href="' + escH(d.locateUrl) + '">랙 위치</a>') : '');
+                                return '<div class="gsr-item">' +
                                     '<div class="gsr-title">' + badge + escH(d.title) + '</div>' +
-                                    '<div class="gsr-subtitle">' + escH(d.subtitle || '') + (d.location ? ' &middot; ' + escH(d.location) : '') + '</div>' +
-                                    '</a>';
+                                    '<div class="gsr-subtitle">' + escH(d.subtitle || '') + loc + '</div>' +
+                                    cur +
+                                    '<div class="gsr-actions">' + actions + '</div>' +
+                                    '</div>';
                             }).join('');
                         }
                         results.classList.add('show');

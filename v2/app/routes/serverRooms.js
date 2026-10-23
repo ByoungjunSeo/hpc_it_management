@@ -172,6 +172,33 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // Room asset list
+// UX-4(F4): 슬라이드 패널용 경량 JSON — 자격증명·모듈 상세 미포함. (/:id/assets HTML과 경로 다름)
+router.get('/:id/assets.json', async (req, res) => {
+  try {
+    const room = await ServerRoom.findById(req.params.id);
+    if (!room) return res.status(404).json({ error: '서버실을 찾을 수 없습니다.' });
+    const assets = await Asset.findAll({ room_id: req.params.id });
+    const out = [];
+    for (const a of assets) {
+      const ips = await AssetIp.findByAsset(a.id);
+      const rep = ips.find(i => i.ip_type === 'os') || ips.find(i => i.ip_type === 'management') || ips.find(i => i.ip_type !== 'bmc') || ips[0] || null;
+      const u = a.rack_unit_start ? ('U' + (Math.floor((a.rack_unit_start - 1) / 3) + 1)) : null;
+      out.push({
+        id: a.id, asset_type: a.asset_type,
+        management_number: a.management_number || null, asset_number: a.asset_number || null,
+        model_name: a.model_name || null,
+        rack_id: a.rack_id || null, rack_name: a.rack_name || null, u_label: u,
+        rep_ip: rep ? rep.ip_address : null,
+        ownership: a.ownership, vendor_name: a.vendor_name || null,
+        status: a.status
+      });
+    }
+    res.json({ room: { id: room.id, name: room.name }, assets: out });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/:id/assets', async (req, res, next) => {
   try {
     const room = await ServerRoom.findById(req.params.id);

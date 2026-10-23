@@ -1908,3 +1908,46 @@ h1 .rack-type-badge.dlc {
     background: #f1f5f9;
     color: #1e293b;
 }
+
+/* ===== v2.5.0 B-1: 서버실 검색·강조·장비 패널 (UX-3/UX-4) ===== */
+.sr-toolbar { display:flex; align-items:center; gap:10px; margin:10px 0; flex-wrap:wrap; }
+.sr-search { position:relative; flex:1; min-width:240px; max-width:520px; }
+.sr-search-results { position:absolute; top:100%; left:0; right:0; z-index:50; background:#fff; border:1px solid var(--border); border-radius:6px; margin-top:4px; max-height:360px; overflow-y:auto; box-shadow:0 6px 20px rgba(0,0,0,0.12); display:none; }
+.sr-search-results.show { display:block; }
+.sr-sr-item { padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border); }
+.sr-sr-item:hover { background:#f1f5f9; }
+.sr-sr-title { font-weight:600; font-size:13px; }
+.sr-sr-sub { font-size:11px; color:var(--text-light); margin-top:2px; }
+.sr-sr-empty { padding:10px 12px; color:var(--text-light); font-size:12px; }
+.sr-match-nav { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-light); }
+.sr-toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:1200; background:#1e293b; color:#fff; padding:10px 18px; border-radius:8px; font-size:13px; box-shadow:0 6px 24px rgba(0,0,0,0.3); max-width:90vw; }
+
+/* 랙 셀 위치 강조 */
+.mini-u-asset.sr-highlight { outline:3px solid #f59e0b !important; outline-offset:-1px; animation:srBlink 0.7s ease-in-out 0s 5; position:relative; z-index:3; }
+@keyframes srBlink { 0%,100% { box-shadow:0 0 0 0 rgba(245,158,11,0.0); } 50% { box-shadow:0 0 0 4px rgba(245,158,11,0.6); } }
+
+/* 장비 목록 슬라이드 패널 */
+.sr-panel { position:fixed; top:0; right:0; height:100vh; width:380px; max-width:92vw; background:#fff; border-left:1px solid var(--border); box-shadow:-6px 0 24px rgba(0,0,0,0.15); transform:translateX(100%); transition:transform 0.22s ease; z-index:1100; display:flex; flex-direction:column; }
+.sr-panel.open { transform:translateX(0); }
+.sr-panel-head { display:flex; align-items:center; gap:8px; padding:12px; border-bottom:1px solid var(--border); }
+.sr-panel-room { flex:1; min-width:0; }
+.sr-panel-close { margin-left:auto; background:none; border:none; font-size:22px; line-height:1; cursor:pointer; color:var(--text-light); }
+.sr-panel-chips { display:flex; flex-wrap:wrap; gap:4px; padding:8px 12px; border-bottom:1px solid var(--border); }
+.sr-chip { font-size:11px; padding:2px 8px; border-radius:10px; background:#e2e8f0; color:#334155; cursor:pointer; }
+.sr-chip.active { background:#2563eb; color:#fff; }
+.sr-panel-filter { margin:8px 12px; width:auto; }
+.sr-panel-list { flex:1; overflow-y:auto; padding:4px 8px 16px; }
+.sr-row { display:flex; align-items:center; gap:8px; padding:8px 8px; border-bottom:1px solid var(--border); cursor:pointer; }
+.sr-row:hover { background:#f1f5f9; }
+.sr-row-main { flex:1; min-width:0; }
+.sr-row-type { font-size:11px; color:var(--text-light); }
+.sr-row-mgmt { font-weight:600; font-size:13px; }
+.sr-row-sub { font-size:11px; color:var(--text-light); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sr-row-info { flex:0 0 auto; }
+.btn-xs { padding:2px 8px; font-size:11px; }
+
+/* 전역 검색 결과(중첩 a 제거형) 액션 링크 */
+.gsr-actions { display:flex; gap:10px; margin-top:4px; }
+.gsr-link { font-size:11px; color:#2563eb; text-decoration:none; }
+.gsr-link:hover { text-decoration:underline; }
+.gsr-current { color:#b45309; }

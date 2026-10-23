@@ -27,6 +27,21 @@
     </span>
 </div>
 
+<!-- UX-3/UX-4: 서버실 검색 + 장비 목록 패널 토글 -->
+<div class="sr-toolbar">
+    <div class="sr-search">
+        <input type="text" id="srSearchInput" class="form-control" autocomplete="off" placeholder="자산 검색 — 관리번호·자산번호·모델·시리얼·IP·담당자·용도">
+        <div id="srSearchResults" class="sr-search-results"></div>
+    </div>
+    <div id="srMatchNav" class="sr-match-nav" style="display:none;">
+        <button type="button" class="btn btn-sm btn-outline" onclick="srMatchMove(-1)">◀</button>
+        <span id="srMatchLabel"></span>
+        <button type="button" class="btn btn-sm btn-outline" onclick="srMatchMove(1)">▶</button>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline" onclick="srTogglePanel()" style="margin-left:auto;">&#9776; 장비 목록</button>
+</div>
+<div id="srToast" class="sr-toast" style="display:none;"></div>
+
 <% if (rooms.length === 0) { %>
 <div class="card text-center">
     <p class="text-muted">등록된 서버실이 없습니다. 서버실을 추가해주세요.</p>
@@ -257,6 +272,18 @@
     </div>
 </div>
 
+<!-- UX-4: 장비 목록 슬라이드 패널 -->
+<div id="srPanel" class="sr-panel">
+    <div class="sr-panel-head">
+        <strong>장비 목록</strong>
+        <select id="srPanelRoom" class="form-control sr-panel-room" onchange="srPanelReload()"></select>
+        <button type="button" class="sr-panel-close" onclick="srTogglePanel(false)" aria-label="닫기">&times;</button>
+    </div>
+    <div class="sr-panel-chips" id="srPanelChips"></div>
+    <input type="text" id="srPanelFilter" class="form-control sr-panel-filter" autocomplete="off" placeholder="필터 — 관리번호·모델·IP" oninput="srPanelRender()">
+    <div class="sr-panel-list" id="srPanelList"><p class="text-muted" style="padding:12px;">서버실을 선택하세요.</p></div>
+</div>
+
 <!-- Asset Detail Popup -->
 <div class="modal-overlay" id="assetDetailPopup">
     <div class="modal" style="max-width:700px;max-height:85vh;display:flex;flex-direction:column;">
@@ -457,9 +484,13 @@ function renderAdpTab(data, tab) {
     } else if (tab === 'modules') {
         if (data.modules && data.modules.length > 0) {
             var types = { cpu: 'CPU', memory: '메모리', disk: '디스크', network: 'NIC', raid: 'RAID', gpu: 'GPU' };
-            html = '<table class="adp-table"><tr><th>유형</th><th>모델</th><th>제조사</th><th>용량</th><th>수량</th><th>슬롯</th></tr>';
+            html = '<table class="adp-table"><tr><th>유형</th><th>모델</th><th>제조사</th><th>용량</th><th>수량</th><th>슬롯</th><th>소유</th></tr>';
             data.modules.forEach(function(m) {
-                html += '<tr><td><span class="badge">' + (types[m.module_type] || m.module_type) + '</span></td><td>' + esc(m.model || '') + '</td><td>' + esc(m.manufacturer || '') + '</td><td>' + esc(m.capacity || '') + '</td><td>' + (m.count || 1) + '</td><td>' + esc(m.slot_info || '') + '</td></tr>';
+                // UX-1(F1): 모듈 소유 표시 — 상세(detail.ejs)와 동일. vendor=업체명 배지, 그 외(NULL 포함)=자사.
+                var ownerBadge = (m.owner === 'vendor')
+                    ? '<span class="badge badge-warning">' + esc(m.owner_vendor_name || '업체') + '</span>'
+                    : '<span class="badge badge-success">자사</span>';
+                html += '<tr><td><span class="badge">' + (types[m.module_type] || m.module_type) + '</span></td><td>' + esc(m.model || '') + '</td><td>' + esc(m.manufacturer || '') + '</td><td>' + esc(m.capacity || '') + '</td><td>' + (m.count || 1) + '</td><td>' + esc(m.slot_info || '') + '</td><td>' + ownerBadge + '</td></tr>';
             });
             html += '</table>';
         } else {
@@ -637,6 +668,185 @@ function adpDoPowerControl(assetId, action) {
         if (msgEl) { msgEl.textContent = '서버 통신 오류'; msgEl.style.color = '#ef4444'; }
     });
 }
+</script>
+
+<script>
+// ===== UX-3(F3) 서버실 검색·위치강조 + UX-4(F4) 장비 목록 패널 =====
+var SR_ROOMS = <%- JSON.stringify(rooms.map(function(r){ return { id: r.id, name: r.name }; })) %>;
+var srLastResults = [];
+var srMatches = [];
+var srMatchIdx = -1;
+var srHlTimer = null;
+var srToastTimer = null;
+var SR_TYPE_LABELS = { server:'서버', switch:'스위치', kvm:'KVM', pdu:'PDU', ups:'UPS', storage:'스토리지', immersion_tank:'액침탱크', cdu:'CDU', chiller:'칠러', other:'기타' };
+var SR_STATUS_LABELS = { active:'운영중', inactive:'비활성', maintenance:'점검중', decommissioned:'폐기', returned:'반납' };
+
+function srShowToast(msg) {
+    var t = document.getElementById('srToast');
+    if (!t) return;
+    t.textContent = msg;
+    t.style.display = '';
+    clearTimeout(srToastTimer);
+    srToastTimer = setTimeout(function(){ t.style.display = 'none'; }, 4000);
+}
+
+// 공용: 자산 id → 서버실 화면에서 랙 셀로 스크롤 + 강조. DOM에 없으면(미배치) 안내.
+function locateAsset(assetId) {
+    assetId = parseInt(assetId);
+    document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); });
+    var cells = document.querySelectorAll('.clickable-unit[data-asset-id="' + assetId + '"]');
+    if (cells.length) {
+        var rack = cells[0].closest('.wide-rack');
+        if (rack) rack.scrollIntoView({ inline: 'center', block: 'center', behavior: 'smooth' });
+        cells.forEach(function(c){ c.classList.add('sr-highlight'); });
+        clearTimeout(srHlTimer);
+        srHlTimer = setTimeout(function(){ document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); }); }, 4000);
+        return true;
+    }
+    // DOM 미발견 → 블레이드 노드(부모 섀시 셀로 안내) 또는 진짜 미배치(상태 안내)
+    fetch('/assets/' + assetId + '/json').then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+        if (!d || !d.asset) { srShowToast('이 서버실 화면에서 위치를 찾을 수 없습니다.'); return; }
+        var pid = d.asset.parent_asset_id;
+        if (pid) {
+            var pcells = document.querySelectorAll('.clickable-unit[data-asset-id="' + pid + '"]');
+            if (pcells.length) {
+                var prack = pcells[0].closest('.wide-rack');
+                if (prack) prack.scrollIntoView({ inline: 'center', block: 'center', behavior: 'smooth' });
+                pcells.forEach(function(c){ c.classList.add('sr-highlight'); });
+                clearTimeout(srHlTimer);
+                srHlTimer = setTimeout(function(){ document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); }); }, 4000);
+                var pname = d.parent ? (d.parent.management_number || d.parent.model_name || ('#' + pid)) : ('#' + pid);
+                srShowToast('블레이드 노드 — 부모 섀시(' + pname + ') 위치에 표시했습니다.');
+                return;
+            }
+        }
+        var st = SR_STATUS_LABELS[d.asset.status] || d.asset.status || '-';
+        srShowToast('랙에 배치되지 않은 자산입니다 (상태: ' + st + ').');
+    }).catch(function(){ srShowToast('이 서버실 화면에서 위치를 찾을 수 없습니다.'); });
+    return false;
+}
+
+// 다중 매칭 이동
+function srMatchMove(delta) {
+    if (!srMatches.length) return;
+    srMatchIdx = (srMatchIdx + delta + srMatches.length) % srMatches.length;
+    document.getElementById('srMatchLabel').textContent = (srMatchIdx + 1) + '/' + srMatches.length;
+    locateAsset(srMatches[srMatchIdx]);
+}
+
+// 검색 드롭다운
+(function(){
+    var input = document.getElementById('srSearchInput');
+    var box = document.getElementById('srSearchResults');
+    if (!input) return;
+    var timer;
+    input.addEventListener('input', function(){
+        var q = this.value.trim();
+        clearTimeout(timer);
+        if (q.length < 2) { box.innerHTML = ''; box.classList.remove('show'); return; }
+        timer = setTimeout(function(){
+            fetch('/api/search?q=' + encodeURIComponent(q)).then(function(r){ return r.json(); }).then(function(data){
+                srLastResults = data;
+                srMatches = data.map(function(d){ return d.id; });
+                srMatchIdx = -1;
+                var nav = document.getElementById('srMatchNav');
+                if (nav) { nav.style.display = data.length > 1 ? '' : 'none'; document.getElementById('srMatchLabel').textContent = data.length + '건'; }
+                if (!data.length) { box.innerHTML = '<div class="sr-sr-empty">검색 결과가 없습니다.</div>'; box.classList.add('show'); return; }
+                box.innerHTML = data.map(function(d){
+                    var sub = esc(d.subtitle || '') + (d.location ? (' · ' + esc(d.location)) : '') + (d.currentLocation ? (' · 현재: ' + esc(d.currentLocation)) : '');
+                    return '<div class="sr-sr-item" data-id="' + d.id + '"><div class="sr-sr-title">' + esc(d.title) + '</div><div class="sr-sr-sub">' + sub + '</div></div>';
+                }).join('');
+                box.classList.add('show');
+                box.querySelectorAll('.sr-sr-item').forEach(function(el){
+                    el.addEventListener('click', function(){
+                        var id = parseInt(this.dataset.id);
+                        box.classList.remove('show');
+                        srMatchIdx = srMatches.indexOf(id);
+                        locateAsset(id);
+                    });
+                });
+            }).catch(function(){ box.innerHTML = '<div class="sr-sr-empty">검색 오류</div>'; box.classList.add('show'); });
+        }, 250);
+    });
+    document.addEventListener('click', function(e){ if (!input.contains(e.target) && !box.contains(e.target)) box.classList.remove('show'); });
+    input.addEventListener('keydown', function(e){ if (e.key === 'Escape') box.classList.remove('show'); });
+})();
+
+// ?focus=<id> 진입 시 자동 이동
+(function(){
+    var p = new URLSearchParams(location.search);
+    var f = p.get('focus');
+    if (f && parseInt(f)) setTimeout(function(){ locateAsset(parseInt(f)); }, 350);
+})();
+
+// ---- UX-4 장비 목록 패널 ----
+var srPanelData = [];
+function srTogglePanel(force) {
+    var panel = document.getElementById('srPanel');
+    var open = (typeof force === 'boolean') ? force : !panel.classList.contains('open');
+    panel.classList.toggle('open', open);
+    try { localStorage.setItem('srPanelOpen', open ? '1' : '0'); } catch (e) {}
+    if (open && !srPanelData.length) {
+        // 서버실 select 초기화 + 첫 서버실 로드
+        var sel = document.getElementById('srPanelRoom');
+        if (sel && !sel.options.length) {
+            sel.innerHTML = SR_ROOMS.map(function(r){ return '<option value="' + r.id + '">' + esc(r.name) + '</option>'; }).join('');
+        }
+        if (SR_ROOMS.length) srPanelReload();
+    }
+}
+function srPanelReload() {
+    var sel = document.getElementById('srPanelRoom');
+    var rid = sel && sel.value ? sel.value : (SR_ROOMS[0] && SR_ROOMS[0].id);
+    if (!rid) return;
+    var list = document.getElementById('srPanelList');
+    list.innerHTML = '<p class="text-muted" style="padding:12px;">로딩중…</p>';
+    fetch('/rooms/' + rid + '/assets.json').then(function(r){ return r.json(); }).then(function(d){
+        srPanelData = (d && d.assets) || [];
+        srPanelRenderChips();
+        srPanelRender();
+    }).catch(function(){ list.innerHTML = '<p style="color:#ef4444;padding:12px;">불러올 수 없습니다.</p>'; });
+}
+var srPanelTypeFilter = '';
+function srPanelRenderChips() {
+    var counts = {};
+    srPanelData.forEach(function(a){ counts[a.asset_type] = (counts[a.asset_type] || 0) + 1; });
+    var chips = '<span class="sr-chip' + (srPanelTypeFilter === '' ? ' active' : '') + '" onclick="srPanelSetType(\'\')">전체 ' + srPanelData.length + '</span>';
+    Object.keys(counts).forEach(function(t){
+        chips += '<span class="sr-chip' + (srPanelTypeFilter === t ? ' active' : '') + '" onclick="srPanelSetType(\'' + t + '\')">' + esc(SR_TYPE_LABELS[t] || t) + ' ' + counts[t] + '</span>';
+    });
+    document.getElementById('srPanelChips').innerHTML = chips;
+}
+function srPanelSetType(t) { srPanelTypeFilter = t; srPanelRenderChips(); srPanelRender(); }
+function srPanelRender() {
+    var q = (document.getElementById('srPanelFilter').value || '').trim().toLowerCase();
+    var list = document.getElementById('srPanelList');
+    var rows = srPanelData.filter(function(a){
+        if (srPanelTypeFilter && a.asset_type !== srPanelTypeFilter) return false;
+        if (!q) return true;
+        return [a.management_number, a.model_name, a.rep_ip, a.asset_number].some(function(v){ return v && String(v).toLowerCase().indexOf(q) !== -1; });
+    });
+    if (!rows.length) { list.innerHTML = '<p class="text-muted" style="padding:12px;">해당 장비가 없습니다.</p>'; return; }
+    list.innerHTML = rows.map(function(a){
+        var ownerBadge = (a.ownership === 'vendor')
+            ? '<span class="badge badge-warning">' + esc(a.vendor_name || '업체') + '</span>'
+            : '<span class="badge badge-success">자사</span>';
+        var loc = a.rack_id ? (esc(a.rack_name || '') + (a.u_label ? (' ' + esc(a.u_label)) : '')) : '<span class="text-muted">랙 미배치</span>';
+        return '<div class="sr-row" data-id="' + a.id + '">' +
+            '<div class="sr-row-main">' +
+              '<span class="sr-row-type">' + esc(SR_TYPE_LABELS[a.asset_type] || a.asset_type) + '</span> ' +
+              '<span class="sr-row-mgmt">' + esc(a.management_number || a.asset_number || ('#' + a.id)) + '</span> ' + ownerBadge +
+              '<div class="sr-row-sub">' + esc(a.model_name || '') + ' · ' + loc + (a.rep_ip ? (' · ' + esc(a.rep_ip)) : '') + ' · ' + esc(SR_STATUS_LABELS[a.status] || a.status || '') + '</div>' +
+            '</div>' +
+            '<button type="button" class="btn btn-xs btn-outline sr-row-info" onclick="openAssetPopup(' + a.id + ');event.stopPropagation();">정보</button>' +
+            '</div>';
+    }).join('');
+    list.querySelectorAll('.sr-row').forEach(function(el){
+        el.addEventListener('click', function(){ locateAsset(parseInt(this.dataset.id)); });
+    });
+}
+// 열림 상태 복원
+(function(){ try { if (localStorage.getItem('srPanelOpen') === '1') srTogglePanel(true); } catch (e) {} })();
 </script>
 
 <%- include('../partials/footer', { extraJs: null }) %>
