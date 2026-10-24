@@ -15,6 +15,7 @@ const AuditLog = require('../models/auditLog');
 const { pool } = require('../config/database');
 const { fixRowDates } = require('../utils/dateFix');
 const { connectAndDiscover, discoverRange } = require('../services/sshDiscovery');
+const fieldCheck = require('../services/fieldCheck');   // v2.9 3a: 스캔 결과 → 현장 확인(field) 형식
 const crypto = require('crypto');
 
 // ── B-5b: 동시 적용 보호용 모듈 지문(읽기 전용) ──
@@ -355,6 +356,10 @@ router.post('/scan-asset', requireMaintenance, async (req, res) => {
 
     // B-5b: 적용 시 동시성 검사용 현재 모듈 지문(읽기 전용)
     const modules_fingerprint = await computeModulesFingerprint(asset_id);
+    // v2.9 3a: 카드 품번·포트 수·GPU 메모리 → itam-field-check 형식(표시·내보내기용, 적용 본문·재고와 무관)
+    const field = comparison ? fieldCheck.buildFieldDoc(fieldCheck.scanToFieldItems(comparison, {
+      modelsMatch, asset: asset.management_number || asset.asset_number || null, observed_at: new Date().toISOString()
+    }), 'scan') : null;
 
     res.json({
       asset_id,
@@ -377,7 +382,8 @@ router.post('/scan-asset', requireMaintenance, async (req, res) => {
       asset_vendor_id: asset.vendor_id || null,
       asset_vendor_name: assetVendor ? assetVendor.vendor_name : null,
       vendors: vendors.map(v => ({ id: v.id, vendor_name: v.vendor_name })),
-      modules_fingerprint
+      modules_fingerprint,
+      field
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

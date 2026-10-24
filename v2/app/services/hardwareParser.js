@@ -252,10 +252,11 @@ function parseNetwork(output) {
   const cards = {};
   entries.forEach(e => {
     const key = e.busDevice + '|' + e.model;
-    if (!cards[key]) cards[key] = { model: e.model, ports: 0 };
+    if (!cards[key]) cards[key] = { model: e.model, ports: 0, busDevice: e.busDevice };
     cards[key].ports++;
   });
   const consolidated = {};
+  const groupBds = {};   // v2.9 3a: 묶음별 카드 bus:device(카드 정보 짝맞춤용 — 결과 키에는 넣지 않음)
   Object.values(cards).forEach(card => {
     const speed = detectNetworkSpeed(card.model);
     const key = card.model + '|' + card.ports;
@@ -270,14 +271,75 @@ function parseNetwork(output) {
         specification: card.ports + '포트' + (speed ? ' ' + speed : '')
       };
     }
+    (groupBds[key] = groupBds[key] || []).push(card.busDevice);
+  });
+  // v2.9 3a: 선택 키 추가(기존 키 불변) — ports(같은 카드 function 수), 카드 VPD(품번·제품명·시리얼 앞 4자)
+  const vpd = parseCardVpd(output);
+  Object.keys(consolidated).forEach(key => {
+    consolidated[key].ports = Number(key.split('|').pop()) || null;
+    attachCardInfo(consolidated[key], groupBds[key].map(bd => vpd[bd]).filter(Boolean));
   });
 
   return Object.values(consolidated);
 }
 
+// ── v2.9 3a: 카드 VPD / GPU 조회 해석 ──
+const maskSn = (v) => { const t = String(v || '').replace(/…$/, '').trim(); return t ? t.slice(0, 4) + '…' : null; };
+// ===CARD:<도메인:버스:장치.기능>=== 블록 → { '<도메인:버스:장치>': { pci_id, product_name, part_number, serial_masked, subsystem } }
+function parseCardVpd(output) {
+  const section = parseSection(output, 'CARDVPD');
+  const map = {};
+  if (!section) return map;
+  section.split(/^===CARD:/m).slice(1).forEach(block => {
+    const slot = (block.match(/^([0-9a-fA-F:.]+)===/) || [])[1];
+    if (!slot) return;
+    const bd = slot.toLowerCase().replace(/\.[0-7]$/, '');
+    const ids = block.match(/\[([0-9a-f]{4}):([0-9a-f]{4})\](?:\s*\(rev [0-9a-f]+\))?\s*$/im);
+    const get = (re) => { const m = block.match(re); return m ? m[1].trim() : null; };
+    const info = {
+      pci_id: ids ? ids[1].toLowerCase() + ':' + ids[2].toLowerCase() : null,
+      product_name: get(/Product Name:\s*(.+)/),
+      part_number: get(/\[PN\][^:]*:\s*(.+)/),
+      serial_masked: maskSn(get(/\[SN\][^:]*:\s*(.+)/)),
+      subsystem: get(/Subsystem:\s*(.+)/)
+    };
+    if (info.part_number && /^(N\/A|NA|0+|\s*)$/i.test(info.part_number)) info.part_number = null;
+    map[bd] = info;
+  });
+  return map;
+}
+// 같은 묶음 카드들의 정보 → 선택 키(값이 하나로 모이면 단수 키, 갈리면 복수 키)
+function attachCardInfo(mod, infos) {
+  if (!infos.length) return;
+  const uniq = (k) => Array.from(new Set(infos.map(x => x[k]).filter(Boolean)));
+  const pn = uniq('part_number'), name = uniq('product_name'), sn = infos.map(x => x.serial_masked).filter(Boolean), pid = uniq('pci_id');
+  if (pn.length === 1) mod.card_part_number = pn[0]; else if (pn.length > 1) mod.card_part_numbers = pn;
+  if (name.length === 1) mod.card_product_name = name[0]; else if (name.length > 1) mod.card_product_names = name;
+  if (sn.length) mod.card_serials_masked = sn;
+  if (pid.length === 1) mod.pci_id = pid[0];
+}
+// nvidia-smi --query-gpu=name,memory.total,pci.bus_id,pci.device_id 결과 → [{ name, memory_gb, bus, device_id }]
+const GPU_SIZES = [2, 4, 6, 8, 10, 11, 12, 16, 20, 24, 32, 40, 48, 64, 80, 94, 96, 120, 141, 180, 192];
+function parseGpuQuery(output) {
+  const section = parseSection(output, 'GPUQ');
+  if (!section) return [];
+  const rows = [];
+  section.split('\n').forEach(line => {
+    const p = line.split(',').map(x => x.trim());
+    if (p.length < 4 || !/MiB/i.test(p[1])) return;
+    const gib = parseFloat(p[1]) / 1024;
+    const best = GPU_SIZES.reduce((b, n) => (Math.abs(n - gib) / n < Math.abs(b - gib) / b ? n : b), GPU_SIZES[0]);
+    const bus = (p[2].match(/([0-9a-f]{2}:[0-9a-f]{2}\.[0-7])$/i) || [])[1];
+    const dev = (p[3].match(/^0x([0-9a-f]{4})([0-9a-f]{4})$/i) || []);
+    rows.push({ name: p[0], memory_gb: Math.abs(best - gib) / best <= 0.08 ? best : Math.round(gib), bus: bus ? bus.toLowerCase() : null, device_id: dev[1] ? dev[1].toLowerCase() : null });
+  });
+  return rows;
+}
+
 function parseRaid(output) {
   const section = parseSection(output, 'RAID');
   if (!section) return [];
+  const vpd = parseCardVpd(output);   // v2.9 3a
 
   const modules = [];
   const lines = section.split('\n').filter(l => l.trim());
@@ -314,11 +376,10 @@ function parseRaid(output) {
     if (!model) return; // Skip RAID entries with empty model names
     // Skip Intel VMD — chipset-integrated NVMe manager, not a real RAID card
     if (/Volume Management Device/i.test(model)) return;
-    modules.push({
-      module_type: 'raid',
-      model: model,
-      count: 1
-    });
+    const mod = { module_type: 'raid', model: model, count: 1 };
+    const addr = (baseLine.match(/RAID:\s*([0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2})\.[0-7]/) || [])[1];   // v2.9 3a
+    if (addr && vpd[addr.toLowerCase()]) attachCardInfo(mod, [vpd[addr.toLowerCase()]]);
+    modules.push(mod);
   });
 
   return modules;
@@ -852,13 +913,10 @@ function parseGpu(output) {
     if (match) {
       const model = match[1].trim();
       const manufacturer = /NVIDIA/i.test(model) ? 'NVIDIA' : /AMD|ATI|Radeon/i.test(model) ? 'AMD' : '';
-      modules.push({
-        module_type: 'gpu',
-        model,
-        manufacturer,
-        capacity: detectGpuMemory(model),
-        count: 1
-      });
+      const gm = { module_type: 'gpu', model, manufacturer, capacity: detectGpuMemory(model), count: 1 };
+      const addr = (line.match(/^(?:[0-9a-f]{4}:)?([0-9a-f]{2}:[0-9a-f]{2}\.[0-7])\s/i) || [])[1];
+      if (addr) Object.defineProperty(gm, '_bus', { value: addr.toLowerCase(), enumerable: false });   // 짝맞춤용(결과 키 아님)
+      modules.push(gm);
     }
   });
 
@@ -884,13 +942,29 @@ function parseGpu(output) {
 
   // Consolidate
   const consolidated = {};
+  const buses = {};   // v2.9 3a
   modules.forEach(m => {
     if (consolidated[m.model]) {
       consolidated[m.model].count++;
     } else {
       consolidated[m.model] = { ...m };
     }
+    (buses[m.model] = buses[m.model] || []).push(m._bus || null);
   });
+  // v2.9 3a: nvidia-smi 조회 결과를 bus 주소로 짝맞춰 선택 키 추가(gpu_name·gpu_memory_gb·gpu_device_id). 주소가 없으면 단일 모델일 때만.
+  const q = parseGpuQuery(output);
+  if (q.length) {
+    const models = Object.keys(consolidated);
+    models.forEach(k => {
+      let rows = buses[k].map(b => q.find(r => r.bus && r.bus === b)).filter(Boolean);
+      if (!rows.length && models.length === 1 && q.length === consolidated[k].count) rows = q;
+      if (!rows.length) return;
+      const one = (f) => { const u = Array.from(new Set(rows.map(r => r[f]).filter(v => v != null))); return u.length === 1 ? u[0] : null; };
+      if (one('name')) consolidated[k].gpu_name = one('name');
+      if (one('memory_gb')) consolidated[k].gpu_memory_gb = one('memory_gb');
+      if (one('device_id')) consolidated[k].gpu_device_id = one('device_id');
+    });
+  }
 
   return Object.values(consolidated);
 }
@@ -1118,6 +1192,8 @@ function parseAll(rawOutput) {
 module.exports = {
   parseAll,
   extractScanMarkers,
+  parseCardVpd,
+  parseGpuQuery,
   parseCpu,
   parseMemory,
   parseMemoryFallback,

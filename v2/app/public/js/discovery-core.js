@@ -42,6 +42,18 @@ function scanDiagnosticsHtml(data) {
         lines.map(function(l) { return '<div>&#x26A0; ' + l + '</div>'; }).join('') + '</div>';
 }
 
+// v2.9 3a: 스캔으로 읽은 카드 정보(품번·포트 수·GPU 메모리) — 있을 때만 실제 모듈 칸에 한 줄
+function cardInfoLine(m) {
+    if (!m) return '';
+    var parts = [];
+    if (m.card_part_number) parts.push('카드 품번 ' + escapeHtml(m.card_part_number));
+    else if (m.card_part_numbers && m.card_part_numbers.length) parts.push('카드 품번 ' + m.card_part_numbers.map(escapeHtml).join(', '));
+    if (m.module_type === 'network' && m.ports) parts.push('포트 ' + escapeHtml(String(m.ports)));
+    if (m.gpu_memory_gb) parts.push('메모리 ' + escapeHtml(String(m.gpu_memory_gb)) + 'GB' + (m.gpu_name ? ' (' + escapeHtml(m.gpu_name) + ')' : ''));
+    if (!parts.length) return '';
+    return '<div class="card-info-line text-muted" style="font-size:11px;">' + parts.join(' · ') + '</div>';
+}
+
 function moduleTypeBadge(type) {
     var labels = { cpu: 'CPU', memory: 'MEM', disk: 'DISK', network: 'NIC', raid: 'RAID', gpu: 'GPU', npu: 'NPU' };
     return labels[type] || type;
@@ -463,7 +475,7 @@ function renderComparison(data, assetId) {
 
         // Discovered module info
         if (row.disc) {
-            html += '<td style="border-right:2px solid var(--border); line-height:1.5;">' + formatModuleInfo(row.disc.model, row.disc.capacity, row.disc.specification, row.disc.manufacturer, row.type) + '</td>';
+            html += '<td style="border-right:2px solid var(--border); line-height:1.5;">' + formatModuleInfo(row.disc.model, row.disc.capacity, row.disc.specification, row.disc.manufacturer, row.type) + cardInfoLine(row.disc) + '</td>';
             html += '<td style="text-align:center;" id="disc-count-' + assetId + '-' + row.discIdx + '">' + (row.disc.count || 1) + '</td>';
             var ownerVal = row.disc.owner === 'vendor' && row.disc.owner_vendor_id ? 'vendor_' + row.disc.owner_vendor_id : 'company';
             html += '<td><select class="form-control" style="font-size:11px; padding:1px 3px; min-width:70px;" ';
@@ -1049,6 +1061,7 @@ function submitUnmatchedModules() {
   window.scanResults = scanResults;
   window.escapeHtml = escapeHtml;
   window.scanDiagnosticsHtml = scanDiagnosticsHtml;
+  window.cardInfoLine = cardInfoLine;
   window.moduleTypeBadge = moduleTypeBadge;
   window.moduleSummaryHtml = moduleSummaryHtml;
   window.moduleTypeLabel = moduleTypeLabel;

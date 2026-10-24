@@ -5,6 +5,9 @@
  *   mapping_draft.csv  (UTF-8 BOM, 엑셀용) 옛 코드·소유·업체·제조사·모델(시리얼 마스킹)·수량·제안 규격·신뢰도·이유·합쳐지는 옛 코드
  *   unresolved.csv     자동 해석 안 된 품목(보류 포함)과 빠진 필드
  *   summary.json       요약 통계 + 수량 영향 미리보기(규격별, 비활성 장비 장착분 포함 기준)
+ * --field=<파일>: 현장 확인 결과(itam-field-check v1 — app/services/fieldCheck.js 형식)를 생성기에 넣어 재생성.
+ *   반영 대상은 현재 high가 아닌 행(미해결·보류·medium/low)만 — 이미 확정(high)된 행은 불변(--field-override일 때만 적용).
+ *   같은 옛 코드에 서로 다른 값이 오면 충돌로 보고 그 품목은 반영하지 않음.
  * --apply-db: 새 테이블(module_specs·module_part_aliases·module_spec_mapping)에 초안 반영 — 단일 트랜잭션.
  *   격리 리허설 전용: 운영 포트(5433) 접속이면 거부(운영 반영은 검토·승인 후 별도 단계).
  * 사용:
@@ -19,9 +22,12 @@ const os = require('os');
 require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
 const { Pool } = require('pg');
 const sc = require('../../app/services/specCatalog');
+const fc = require('../../app/services/fieldCheck');
 
 const arg = (k) => { const a = process.argv.find((x) => x.startsWith('--' + k + '=')); return a ? a.slice(k.length + 3) : null; };
 const APPLY_DB = process.argv.includes('--apply-db');
+const FIELD_FILE = arg('field');
+const FIELD_OVERRIDE = process.argv.includes('--field-override');
 const OUT = (arg('out') || path.join(os.homedir(), 'v29-review')).replace(/^~(?=$|\/)/, os.homedir());
 const PORT = parseInt(process.env.PGPORT || '5433', 10);
 const pool = new Pool({ host: process.env.PGHOST || '127.0.0.1', port: PORT, user: process.env.POSTGRES_USER || 'itadmin',
@@ -33,7 +39,31 @@ const csv = (rows) => '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r
 const aliasNorm = (type, r, model) => (type === 'memory' && r.attrs && r.attrs.part_norm) ? r.attrs.part_norm
   : String(model || '').toUpperCase().replace(/\(SN[^)]*\)/g, '').replace(/[\s_]+/g, ' ').trim() || null;
 
+function loadField() {
+  if (!FIELD_FILE) return null;
+  const doc = JSON.parse(fs.readFileSync(FIELD_FILE.replace(/^~(?=$|\/)/, os.homedir()), 'utf8'));
+  const v = fc.validateFieldFile(doc);
+  if (v.errors.length) { console.error('[v29-1] field 파일 오류 ' + v.errors.length + '건:\n  ' + v.errors.slice(0, 20).join('\n  ')); process.exit(2); }
+  return fc.mergeByCode(v.items);
+}
+
+// 같은 모델 문자열(비메모리)인데 품목이 여럿인 묶음의 판정: 하나의 규격(unified) / 포트 등 근거로 나뉨(split) / 근거 부족(pending)
+function aliasGroups(rows) {
+  const g = {};
+  rows.filter((o) => o.i.module_type !== 'memory' && o.r.inventory).forEach((o) => {
+    const k = o.i.module_type + '|' + String(o.i.model || '').toUpperCase().replace(/\(SN[^)]*\)/g, '').replace(/[\s_]+/g, ' ').trim();
+    (g[k] = g[k] || []).push(o);
+  });
+  return Object.keys(g).filter((k) => g[k].length > 1 && new Set(g[k].map((o) => o.r.spec_code)).size > 1 || (g[k].length > 1 && g[k].some((o) => o.r.field_confirmed)))
+    .map((k) => {
+      const os_ = g[k], codes = Array.from(new Set(os_.map((o) => o.r.spec_code)));
+      const pending = os_.some((o) => (o.r.unresolved_fields || []).length || !o.r.spec_code);
+      return { model: k.split('|')[1], items: os_.map((o) => o.i.item_code + '→' + (o.r.spec_code || '-')), status: pending ? 'pending' : (codes.length === 1 ? 'unified' : 'split') };
+    });
+}
+
 async function main() {
+  const FIELD = loadField();
   const c = await pool.connect();
   try {
     await c.query('SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY');   // 읽기 단계는 읽기 전용 세션
@@ -54,8 +84,21 @@ async function main() {
     await c.query('COMMIT').catch(() => {});
 
     const psu = items.filter((i) => i.module_type === 'psu');
+    const fstat = { applied: [], skipped_confirmed: [], conflicts: FIELD ? Object.keys(FIELD.conflicts) : [], unknown_codes: [], type_mismatch: [] };
+    if (FIELD) { const known = new Set(items.map((i) => i.item_code)); fstat.unknown_codes = Object.keys(FIELD.map).filter((k) => !known.has(k)); }
     const rows = items.filter((i) => i.module_type !== 'psu').map((i) => {
-      const r = sc.generate({ module_type: i.module_type, manufacturer: i.manufacturer, model: i.model, capacity: i.capacity, specification: i.specification, legacy_code: i.item_code, owner: i.owner });
+      const base = { module_type: i.module_type, manufacturer: i.manufacturer, model: i.model, capacity: i.capacity, specification: i.specification, legacy_code: i.item_code, owner: i.owner };
+      let r = sc.generate(base);
+      const fe = FIELD && FIELD.map[i.item_code];
+      if (fe && !FIELD.conflicts[i.item_code]) {
+        if (fe.module_type && fe.module_type !== i.module_type) fstat.type_mismatch.push(i.item_code);
+        else if (r.inventory && r.spec_code && r.confidence === 'high' && !r.hold && !FIELD_OVERRIDE) fstat.skipped_confirmed.push(i.item_code);
+        else {
+          const before = r.spec_code + '/' + r.confidence;
+          r = sc.generate(Object.assign({}, base, { field: Object.assign({}, fe.field, { asset: fe.assets.join(',') || undefined }) }));
+          fstat.applied.push({ code: i.item_code, before, after: (r.inventory ? r.spec_code : '(재고 아님)') + '/' + r.confidence });
+        }
+      }
       const x = inst[i.item_code] || { active: 0, inactive: 0, maintenance: 0, other: 0, rows: 0, onboard_rows: 0 };
       if (r.inventory && ['network', 'raid'].includes(i.module_type) && x.rows > 0 && x.onboard_rows === x.rows) {
         Object.assign(r, { inventory: false, spec_code: null, exclude_reason: '온보드(장착 ' + x.rows + '행 모두 is_onboard)', reason: '재고 아님: 온보드(장착 행 모두 is_onboard)', serialized: false });
@@ -66,13 +109,14 @@ async function main() {
     const bySpec = {};
     rows.filter((o) => o.r.inventory && o.r.spec_code).forEach((o) => { (bySpec[o.r.spec_code] = bySpec[o.r.spec_code] || []).push(o); });
     const method = (o) => (!o.r.inventory ? 'rule' : (o.r.spec_code && !o.r.hold ? 'rule' : 'unresolved'));
-    const header = ['옛 코드', '유형', '소유', '업체명', '제조사', '모델(시리얼 마스킹)', '총', '장비실', '사용(활성)', '비활성·점검 장착', '제안 규격 코드', '방법', '신뢰도', '시리얼 관리', '이유', '빠진 필드', '같은 규격으로 합쳐지는 옛 코드'];
+    const header = ['옛 코드', '유형', '소유', '업체명', '제조사', '모델(시리얼 마스킹)', '총', '장비실', '사용(활성)', '비활성·점검 장착', '제안 규격 코드', '방법', '신뢰도', '시리얼 관리', '이유', '빠진 필드', '같은 규격으로 합쳐지는 옛 코드'].concat(FIELD ? ['현장 확인'] : []);
     const out = [header];
     rows.forEach((o) => {
       const peers = o.r.spec_code ? bySpec[o.r.spec_code].map((p) => p.i.item_code).filter((k) => k !== o.i.item_code) : [];
       out.push([o.i.item_code, o.i.module_type, o.i.owner === 'vendor' ? '업체' : '자사', o.i.vendor_name || '', o.i.manufacturer || '', sc.maskSerial(o.i.model),
         o.i.total_quantity, o.i.storage_quantity, o.i.in_use_quantity, o.x.inactive + o.x.maintenance,
-        o.r.inventory ? (o.r.spec_code || '') : '(재고 아님)', method(o), o.r.confidence, o.r.serialized ? 'Y' : '', o.r.reason, (o.r.unresolved_fields || []).join('+'), peers.join(' | ')]);
+        o.r.inventory ? (o.r.spec_code || '') : '(재고 아님)', method(o), o.r.confidence, o.r.serialized ? 'Y' : '', o.r.reason, (o.r.unresolved_fields || []).join('+'), peers.join(' | ')]
+        .concat(FIELD ? [o.r.field_confirmed ? '반영' : (FIELD.conflicts[o.i.item_code] ? '충돌' : (fstat.skipped_confirmed.includes(o.i.item_code) ? '확정분 유지' : ''))] : []));
     });
     const unres = [['옛 코드', '유형', '소유', '모델(시리얼 마스킹)', '용량', '현 스펙', '제안(부분)', '빠진 필드', '이유', '보류']];
     rows.filter((o) => o.r.inventory && (!o.r.spec_code || o.r.hold || (o.r.unresolved_fields || []).length)).forEach((o) => {
@@ -100,8 +144,11 @@ async function main() {
       serialized_specs: Object.values(bySpec).filter((g) => g[0].r.serialized).length,
       qty_totals: { current_total: qty.reduce((a, q) => a + q.total, 0), installed_inactive_linked: qty.reduce((a, q) => a + q.installed_inactive, 0),
         total_incl_inactive: qty.reduce((a, q) => a + q.total_incl_inactive, 0), phaseA_company_inactive_all: phaseA.n, phaseA_rows: phaseA.r },
-      qty_by_spec: qty
+      qty_by_spec: qty,
+      alias_groups: aliasGroups(rows)
     };
+    if (FIELD) summary.field = { file: path.basename(FIELD_FILE), override: FIELD_OVERRIDE, applied: fstat.applied, skipped_confirmed: fstat.skipped_confirmed,
+      conflicts: FIELD.conflicts, unknown_codes: fstat.unknown_codes, type_mismatch: fstat.type_mismatch };
     fs.mkdirSync(OUT, { recursive: true, mode: 0o700 }); fs.chmodSync(OUT, 0o700);
     const w = (f, d) => { fs.writeFileSync(path.join(OUT, f), d, { mode: 0o600 }); fs.chmodSync(path.join(OUT, f), 0o600); };
     w('mapping_draft.csv', csv(out)); w('unresolved.csv', csv(unres)); w('summary.json', JSON.stringify(summary, null, 1));
@@ -109,6 +156,9 @@ async function main() {
       ' · 합쳐지는 묶음 ' + summary.merged_groups + '(' + summary.merged_items + '품목) · 미해결 ' + summary.unresolved + '(코드 없음 ' + summary.unresolved_no_code + ', 보류 ' + summary.hold + ') · 재고 아님 ' + summary.excluded);
     console.log('[v29-1] 수량: 현재 총 ' + summary.qty_totals.current_total + ' · 비활성·점검 장착(연결분) +' + summary.qty_totals.installed_inactive_linked + ' → ' + summary.qty_totals.total_incl_inactive +
       ' (참고: 자사·비활성·점검 장착 전체 ' + phaseA.n + '개/' + phaseA.r + '행)');
+    if (FIELD) console.log('[v29-1] 현장 확인 반영 ' + fstat.applied.length + ' · 확정분 유지 ' + fstat.skipped_confirmed.length + ' · 충돌 ' + fstat.conflicts.length +
+      ' · 모르는 코드 ' + fstat.unknown_codes.length + ' · 유형 불일치 ' + fstat.type_mismatch.length);
+    console.log('[v29-1] 같은 모델 문자열 묶음: ' + summary.alias_groups.map((g) => g.status + ' ' + g.model.slice(0, 40)).join(' / '));
     console.log('[v29-1] 출력: ' + OUT + ' (mapping_draft.csv · unresolved.csv · summary.json)');
 
     if (APPLY_DB) {

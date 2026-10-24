@@ -216,6 +216,27 @@ lspci 2>/dev/null | grep -iE 'rebellions|furiosa|npu|neural|processing accelerat
   lspci -vv -s "$PCI" 2>/dev/null
 done
 echo "===NPU_END==="
+# v2.9 단계 3a: 카드 정보(읽기 전용) — NIC·RAID 카드별(같은 bus:device의 첫 function) lspci -vv VPD 줄만.
+#   [SN]은 출력 단계에서 앞 4자만 남김(파서에서도 한 번 더 마스킹). VPD를 못 읽으면(<access denied>) 권한 표식.
+echo "===CARDVPD_START==="
+if command -v lspci >/dev/null 2>&1; then
+  for s in $(lspci -D 2>/dev/null | grep -iE 'ethernet|infiniband|raid' | awk '{split($1,a,"."); if (!seen[a[1]]++) print $1}'); do
+    echo "===CARD:$s==="
+    lspci -nn -s "$s" 2>/dev/null
+    V=$(priv lspci lspci -vv -s "$s")
+    printf '%s\\n' "$V" | grep -E '^===PERMISSION_DENIED:|Subsystem:|Product Name:|\\[(PN|EC|MN|SN|V0)\\]' | sed -E 's/(\\[SN\\][^:]*:[[:space:]]*)(.{0,4}).*/\\1\\2…/'
+    if printf '%s' "$V" | grep -q '<access denied>' && ! printf '%s' "$V" | grep -q 'Product Name:'; then echo "===PERMISSION_DENIED:lspci-vpd==="; fi
+  done
+fi
+echo "===CARDVPD_END==="
+# v2.9 단계 3a: GPU 이름·메모리·장치 ID(bus_id는 lspci 주소와 짝맞춤용)
+echo "===GPUQ_START==="
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi --query-gpu=name,memory.total,pci.bus_id,pci.device_id --format=csv,noheader 2>/dev/null
+elif lspci 2>/dev/null | grep -qi 'NVIDIA'; then
+  echo "===TOOL_MISSING:nvidia-smi==="
+fi
+echo "===GPUQ_END==="
 echo "===FREE_START==="
 free -h 2>/dev/null
 echo "===FREE_END==="
