@@ -5,13 +5,15 @@
 </div>
 
 <%
-  const typeLabels = { cpu: 'CPU', memory: '메모리', disk: '디스크/스토리지', network: 'NIC', raid: 'RAID', gpu: 'GPU', cable: '케이블' };
+  // B-7: 유형 라벨은 라우트 표준(miTypeLabels) 단일 출처 — CPU/메모리/디스크/NIC/GPU/RAID/NPU/케이블
+  const typeLabels = miTypeLabels;
   const activeTab = tab || 'inventory';
+  const canEdit = (typeof currentUser !== 'undefined' && currentUser) && (currentUser.role === 'admin' || currentUser.role === 'maintenance');
 %>
 
 <!-- Tabs -->
 <div class="tabs" style="display:flex; gap:0; margin-bottom:20px; border-bottom:2px solid var(--border, #ddd);">
-    <a href="/module-inventory?tab=inventory<%= selectedType ? '&type=' + selectedType : '' %><%= selectedOwner ? '&inv_owner=' + selectedOwner : '' %>"
+    <a href="/module-inventory?tab=inventory<%= ownerTab ? '&owner=' + ownerTab : '' %>"
        class="tab-link<%= activeTab === 'inventory' ? ' active' : '' %>" style="padding:10px 24px; font-weight:<%= activeTab === 'inventory' ? 'bold' : 'normal' %>; border-bottom:<%= activeTab === 'inventory' ? '2px solid var(--primary, #2563eb)' : '2px solid transparent' %>; margin-bottom:-2px; text-decoration:none; color:<%= activeTab === 'inventory' ? 'var(--primary, #2563eb)' : 'var(--text-secondary, #666)' %>;">
         부품 재고
     </a>
@@ -51,14 +53,37 @@
     color: var(--text-light, #999); padding: 4px 8px; line-height: 1;
 }
 .modal-close:hover { color: var(--danger, #e00); }
+/* B-7: 표 스크롤 컨테이너(3개 탭 공통) — 상단 고정 내비 56px + 여백 40px을 뺀 높이. 페이지를 내려 표 상단을 맞추면
+   가로 스크롤바가 항상 화면 안에 보임. 머리줄 sticky. */
+.mi-scroll { max-height: calc(100vh - 96px); overflow: auto; }
+.mi-scroll thead th { position: sticky; top: 0; z-index: 2; }
 </style>
 
 <% if (activeTab === 'inventory') { %>
-<!-- ===== Tab 1: 부품 재고 ===== -->
+<!-- ===== Tab 1: 부품 재고 (B-7: 소유 탭 · 탭 기준 카드 · 유형 칩 · 검색 · 스크롤 표 · [⋯] 메뉴) ===== -->
+<%
+  const ownerTabs = [['company', '자사 재고'], ['vendor', '업체 보관'], ['all', '전체']];
+  const vendorName = (id) => ((vendors.find(v => v.id === id) || {}).vendor_name);
+  const miSearchKey = (i) => [i.item_code, i.model, i.manufacturer, i.specification, i.capacity, i.asset_number].filter(Boolean).join(' ').toLowerCase();
+  // 업체 보관 탭: 업체별 그룹(품목 수 내림차순, 업체 미지정은 마지막)
+  let vendorGroups = [];
+  if (ownerTab === 'vendor') {
+    const byV = {};
+    items.forEach(i => { const k = i.owner_vendor_id == null ? 'none' : String(i.owner_vendor_id); (byV[k] = byV[k] || []).push(i); });
+    vendorGroups = Object.keys(byV).map(k => ({ key: k, name: k === 'none' ? '(업체 미지정)' : (vendorName(Number(k)) || ('업체#' + k)), rows: byV[k] }))
+      .sort((a, b) => (a.key === 'none') - (b.key === 'none') || b.rows.length - a.rows.length || a.name.localeCompare(b.name));
+  }
+  const groups = ownerTab === 'vendor' ? vendorGroups : [{ key: '', name: '', rows: items }];
+%>
+<div class="mi-owner-tabs" role="tablist">
+    <% ownerTabs.forEach(([k, label]) => { %>
+    <a href="/module-inventory?tab=inventory&owner=<%= k %>" class="mi-owner-tab<%= ownerTab === k ? ' active' : '' %>" data-owner="<%= k %>"><%= label %> <span class="mi-owner-count"><%= ownerCounts[k] %></span></a>
+    <% }) %>
+</div>
 
-<div class="stats-grid">
+<div class="stats-grid" id="miStats" data-owner="<%= ownerTab %>">
     <% statsByType.forEach(s => { %>
-    <div class="stat-card">
+    <div class="stat-card" data-type="<%= s.module_type %>" data-total="<%= s.total %>" data-storage="<%= s.storage %>" data-in-use="<%= s.in_use %>" data-spare="<%= s.spare %>">
         <div class="stat-value"><%= s.total || 0 %></div>
         <div class="stat-label"><%= typeLabels[s.module_type] || s.module_type %> (총)</div>
         <%# B-T1.5: tui-fallback=테마 없을 때 원본 표기, tui-stat-gauge=테마 있을 때만
@@ -80,110 +105,104 @@
         </div>
     </div>
     <% }) %>
+    <% if (!statsByType.length) { %><p class="text-muted">이 탭에 해당하는 부품이 없습니다.</p><% } %>
 </div>
 
-<div class="card">
-    <form class="filters" method="GET" action="/module-inventory" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
-        <input type="hidden" name="tab" value="inventory">
-        <div class="form-group" style="margin:0;">
-            <label>유형 필터</label>
-            <select name="type" class="form-control" onchange="this.form.submit()">
-                <option value="">전체</option>
-                <% appConfig.moduleTypes.forEach(m => { %>
-                <option value="<%= m.value %>" <%= selectedType === m.value ? 'selected' : '' %>><%= m.label %></option>
-                <% }) %>
-            </select>
+<div class="card mi-card">
+    <div class="mi-toolbar">
+        <div class="mi-chips" id="miChips" data-initial="<%= selectedType %>">
+            <button type="button" class="mi-chip" data-type="">전체 <span class="mi-chip-n"></span></button>
+            <% miTypeOrder.forEach(t => { %>
+            <button type="button" class="mi-chip" data-type="<%= t %>"><%= typeLabels[t] %> <span class="mi-chip-n"></span></button>
+            <% }) %>
         </div>
-        <div class="form-group" style="margin:0;">
-            <label>소유 구분</label>
-            <select name="inv_owner" class="form-control" onchange="this.form.submit()">
-                <option value="">전체</option>
-                <option value="company" <%= selectedOwner === 'company' ? 'selected' : '' %>>자사</option>
-                <option value="vendor" <%= selectedOwner === 'vendor' ? 'selected' : '' %>>업체</option>
-            </select>
+        <div class="mi-tools">
+            <input type="search" id="miSearch" class="form-control" placeholder="코드·모델·스펙·자산번호 검색" autocomplete="off">
+            <label class="mi-spare-label"><input type="checkbox" id="miSpareOnly" <%= spareOnly ? 'checked' : '' %>> 여유분만 보기</label>
         </div>
-        <div class="form-group" style="margin:0;">
-            <label>업체명</label>
-            <select name="inv_vendor_id" class="form-control" onchange="this.form.submit()">
-                <option value="">전체</option>
-                <% vendors.forEach(v => { %>
-                <option value="<%= v.id %>" <%= selectedVendorId === String(v.id) ? 'selected' : '' %>><%= v.vendor_name %></option>
-                <% }) %>
-            </select>
-        </div>
-        <div class="form-group" style="display:flex; align-items:center; gap:6px; margin:0; padding-bottom:4px;">
-            <input type="checkbox" name="spare_only" value="1" id="spareOnlyChk" <%= spareOnly ? 'checked' : '' %> onchange="this.form.submit()">
-            <label for="spareOnlyChk" style="margin:0; cursor:pointer;">여유분만 보기</label>
-        </div>
-    </form>
-</div>
-
-<div class="card">
-    <div class="table-wrapper">
-        <table>
+    </div>
+    <div class="table-wrapper mi-scroll">
+        <table class="mi-table">
+            <colgroup>
+                <col style="width:150px"><col style="width:64px"><col style="width:100px"><col style="width:110px">
+                <col><col style="width:140px"><col style="width:180px">
+                <col style="width:56px"><col style="width:56px"><col style="width:56px"><col style="width:56px"><col style="width:44px">
+            </colgroup>
             <thead>
                 <tr>
+                    <th class="mi-sticky">코드</th>
                     <th>유형</th>
                     <th>소유</th>
-                    <th>코드</th>
                     <th>자산번호</th>
-                    <th>제조사</th>
-                    <th>모델</th>
+                    <th>제조사 · 모델</th>
                     <th>용량/사양</th>
                     <th>스펙</th>
-                    <th>총수량</th>
-                    <th>장비실</th>
-                    <th>사용중</th>
-                    <th>여유</th>
-                    <th>입출고</th>
+                    <th class="mi-num" title="총수량">총</th>
+                    <th class="mi-num">장비실</th>
+                    <th class="mi-num">사용중</th>
+                    <th class="mi-num">여유</th>
                     <th></th>
                 </tr>
             </thead>
             <tbody>
                 <% if (items.length === 0) { %>
-                <tr><td colspan="14" class="text-center text-muted">부품 데이터가 없습니다.</td></tr>
+                <tr class="mi-empty-static"><td colspan="12" class="text-center text-muted">부품 데이터가 없습니다.</td></tr>
                 <% } %>
-                <% items.forEach(item => { %>
-                <tr class="<%= item.spare_quantity > 0 ? '' : 'text-muted' %>" style="<%= item.spare_quantity > 0 ? 'background:#f0fdf4;' : '' %>">
+                <% groups.forEach(g => { %>
+                <% if (g.key) { %>
+                <tr class="mi-group-head" data-vendor="<%= g.key %>"><td colspan="12">
+                    <button type="button" class="mi-group-toggle" data-vendor="<%= g.key %>" aria-expanded="true">▾</button>
+                    <strong><%= g.name %></strong>
+                    <span class="mi-group-meta" data-items="<%= g.rows.length %>" data-qty="<%= g.rows.reduce((s, i) => s + (Number(i.total_quantity) || 0), 0) %>"><%= g.rows.length %>품목 · <%= g.rows.reduce((s, i) => s + (Number(i.total_quantity) || 0), 0) %>개</span>
+                </td></tr>
+                <% } %>
+                <% g.rows.forEach(item => { %>
+                <tr class="mi-row<%= item.spare_quantity > 0 ? '' : ' text-muted' %>" style="<%= item.spare_quantity > 0 ? 'background:#f0fdf4;' : '' %>"
+                    data-type="<%= item.module_type %>" data-vendor="<%= g.key %>" data-spare="<%= item.spare_quantity > 0 ? 1 : 0 %>" data-qty="<%= Number(item.total_quantity) || 0 %>" data-search="<%= miSearchKey(item) %>">
+                    <td class="mi-sticky">
+                        <a href="#" class="comp-code-link" data-code="<%= item.item_code %>" style="font-weight:bold; cursor:pointer;"><code><%= item.item_code || '-' %></code></a>
+                    </td>
                     <td><span class="badge badge-secondary"><%= typeLabels[item.module_type] || item.module_type %></span></td>
-                    <td>
+                    <td class="mi-ellip">
                         <% if (item.owner === 'vendor') { %>
-                            <span class="badge badge-warning"><%= (vendors.find(v => v.id === item.owner_vendor_id) || {}).vendor_name || '업체' %></span>
+                            <span class="badge badge-warning" title="<%= vendorName(item.owner_vendor_id) || '업체' %>"><%= vendorName(item.owner_vendor_id) || '업체' %></span>
                         <% } else { %>
                             <span class="badge badge-success">자사</span>
                         <% } %>
                     </td>
-                    <td style="white-space:nowrap;">
-                        <a href="#" class="comp-code-link" data-code="<%= item.item_code %>" style="font-weight:bold; cursor:pointer;">
-                            <code><%= item.item_code || '-' %></code>
-                        </a>
+                    <td class="mi-ellip<%= canEdit ? ' editable-cell inv-editable' : '' %>" data-inv-id="<%= item.id %>" data-field="asset_number" title="<%= canEdit ? '클릭하여 수정' : (item.asset_number || '') %>"><%= item.asset_number || '-' %></td>
+                    <td class="mi-mfm">
+                        <div class="mi-mf mi-ellip<%= canEdit ? ' editable-cell inv-editable' : '' %>" data-inv-id="<%= item.id %>" data-field="manufacturer" title="<%= item.manufacturer || '' %>"><%= item.manufacturer || '-' %></div>
+                        <div class="mi-md mi-ellip<%= canEdit ? ' editable-cell inv-editable' : '' %>" data-inv-id="<%= item.id %>" data-field="model" title="<%= item.model || '' %>"><%= item.model || '-' %></div>
                     </td>
-                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="asset_number" title="클릭하여 수정"><%= item.asset_number || '-' %></td>
-                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="manufacturer" title="클릭하여 수정"><%= item.manufacturer || '-' %></td>
-                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="model" title="클릭하여 수정"><%= item.model || '-' %></td>
-                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="capacity" title="클릭하여 수정"><%= item.capacity || '-' %></td>
-                    <td class="editable-cell inv-editable" data-inv-id="<%= item.id %>" data-field="specification" title="클릭하여 수정" style="font-size:12px;"><%= item.specification || '-' %></td>
-                    <td><strong><%= item.total_quantity %></strong></td>
-                    <td class="storage-editable" data-inv-id="<%= item.id %>" data-code="<%= item.item_code %>" style="cursor:pointer;" title="클릭하여 수정"><%= item.storage_quantity || 0 %></td>
-                    <td><%= item.in_use_quantity %></td>
-                    <td><strong style="color: <%= item.spare_quantity > 0 ? 'var(--success)' : 'var(--text-light)' %>"><%= item.spare_quantity %></strong></td>
+                    <td class="mi-ellip<%= canEdit ? ' editable-cell inv-editable' : '' %>" data-inv-id="<%= item.id %>" data-field="capacity" title="<%= item.capacity || '' %>"><%= item.capacity || '-' %></td>
+                    <td class="mi-ellip<%= canEdit ? ' editable-cell inv-editable' : '' %>" data-inv-id="<%= item.id %>" data-field="specification" title="<%= item.specification || '' %>" style="font-size:12px;"><%= item.specification || '-' %></td>
+                    <td class="mi-num"><strong><%= item.total_quantity %></strong></td>
+                    <td class="mi-num<%= canEdit ? ' storage-editable' : '' %>" data-inv-id="<%= item.id %>" data-code="<%= item.item_code %>"<%- canEdit ? ' style="cursor:pointer;" title="클릭하여 수정"' : '' %>><%= item.storage_quantity || 0 %></td>
+                    <td class="mi-num"><%= item.in_use_quantity %></td>
+                    <td class="mi-num"><strong style="color: <%= item.spare_quantity > 0 ? 'var(--success)' : 'var(--text-light)' %>"><%= item.spare_quantity %></strong></td>
                     <td>
-                        <div class="btn-group">
-                            <button class="btn btn-sm btn-outline adjust-btn" data-inv-id="<%= item.id %>" data-code="<%= item.item_code %>" data-total="<%= item.total_quantity %>" onclick="openAdjustModal(this)">+/-</button>
-                            <% if (item.owner === 'vendor' && item.total_quantity > 0) { %>
-                            <button class="btn btn-sm btn-warning return-vendor-btn" data-inv-id="<%= item.id %>" data-code="<%= item.item_code %>" data-total="<%= item.total_quantity %>" onclick="returnVendor(this)">반납</button>
-                            <% } %>
-                        </div>
-                    </td>
-                    <td>
-                        <button class="btn btn-sm btn-outline" onclick="openModulePhotoModal(<%= item.id %>, '<%= (item.item_code || '').replace(/'/g, "\\'") %>')" title="사진">&#128247;</button>
+                        <button type="button" class="btn btn-sm btn-outline mi-more" title="작업" aria-haspopup="menu"
+                                data-inv-id="<%= item.id %>" data-code="<%= item.item_code %>" data-total="<%= item.total_quantity %>"
+                                data-can-return="<%= (canEdit && item.owner === 'vendor' && item.total_quantity > 0) ? 1 : 0 %>">⋯</button>
                     </td>
                 </tr>
                 <% }) %>
+                <% }) %>
+                <tr class="mi-empty-filter" hidden><td colspan="12" class="text-center text-muted">조건에 맞는 부품이 없습니다.</td></tr>
             </tbody>
         </table>
     </div>
-    <p class="text-muted mt-1">총 <%= items.length %>종</p>
+    <p class="text-muted mt-1">표시 <span id="miShown"><%= items.length %></span>종 / 이 탭 <%= items.length %>종</p>
+</div>
+
+<%# B-7: [⋯] 행 메뉴 — 스크롤 컨테이너에 잘리지 않도록 body 고정 위치 1개. 항목은 기존 버튼과 같은 함수·data-*로 호출. %>
+<div id="miRowMenu" class="mi-menu" role="menu" hidden>
+    <% if (canEdit) { %>
+    <button type="button" role="menuitem" class="mi-menu-item" data-act="adjust">입출고 ±</button>
+    <button type="button" role="menuitem" class="mi-menu-item" data-act="return">반납</button>
+    <% } %>
+    <button type="button" role="menuitem" class="mi-menu-item" data-act="photo">사진</button>
 </div>
 
 <!-- Adjust Quantity Modal -->
@@ -825,6 +844,138 @@ document.querySelectorAll('.comp-code-link').forEach(function(link) {
 }
 </style>
 
+
+<%# B-7: 부품 재고 탭 — 라이트 기본은 기존 변수만, 다크(TUI)는 tui-theme.css body 접두 오버라이드 %>
+<style>
+.mi-owner-tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+.mi-owner-tab { padding:6px 16px; border:1px solid var(--border); border-radius:6px; text-decoration:none; color:var(--text-secondary, var(--text-light)); background:var(--bg-white); }
+.mi-owner-tab.active { border-color:var(--primary); color:var(--primary); font-weight:700; }
+.mi-owner-count { font-size:12px; opacity:.75; }
+.mi-toolbar { display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:10px; }
+.mi-chips { display:flex; gap:6px; flex-wrap:wrap; }
+.mi-chip { padding:3px 10px; font-size:12.5px; border:1px solid var(--border); border-radius:12px; background:var(--bg-white); color:var(--text-light); cursor:pointer; white-space:nowrap; }
+.mi-chip.active { border-color:var(--primary); color:var(--primary); font-weight:700; }
+.mi-chip[disabled] { opacity:.45; cursor:default; }
+.mi-chip-n { font-size:11.5px; opacity:.8; }
+.mi-tools { display:flex; gap:12px; align-items:center; }
+.mi-tools input[type=search] { width:260px; margin:0; }
+.mi-spare-label { margin:0; display:flex; gap:6px; align-items:center; cursor:pointer; white-space:nowrap; }
+.mi-table { table-layout: fixed; width: 100%; min-width: 1232px; }
+.mi-table tbody tr { background: var(--bg-white); }
+.mi-table .mi-sticky { position: sticky; left: 0; z-index: 1; background: inherit; }
+.mi-table thead th.mi-sticky { z-index: 3; background: var(--bg); }
+.mi-table td, .mi-table th { overflow: hidden; }
+.mi-ellip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mi-mfm .mi-mf { font-size: 12px; color: var(--text-light); }
+.mi-mfm .mi-md { font-weight: 600; }
+.mi-num { text-align: right; font-variant-numeric: tabular-nums; }
+.mi-group-head td { background: var(--bg); font-size: 13px; padding: 6px 10px; cursor: pointer; }
+.mi-group-toggle { border:none; background:none; cursor:pointer; padding:0 6px 0 0; font-size:13px; color:inherit; }
+.mi-group-head.collapsed .mi-group-toggle { transform: rotate(-90deg); }
+.mi-group-meta { margin-left: 8px; font-size: 12px; color: var(--text-light); }
+.mi-menu { position: fixed; z-index: 1100; min-width: 130px; background: var(--bg-white); border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); padding: 4px 0; display: flex; flex-direction: column; }
+.mi-menu[hidden] { display: none; }
+.mi-menu-item { border: none; background: none; text-align: left; padding: 7px 14px; cursor: pointer; font-size: 13px; color: var(--text); }
+.mi-menu-item:hover, .mi-menu-item:focus { background: var(--bg); outline: none; }
+</style>
+<script>
+// ===== B-7: 부품 재고 탭 — 유형 칩·검색·여유분·업체 그룹 접기(localStorage)·[⋯] 메뉴 =====
+(function(){
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.mi-table tr.mi-row'));
+    var chipsEl = document.getElementById('miChips');
+    if (!chipsEl) return;
+    var searchEl = document.getElementById('miSearch'), spareEl = document.getElementById('miSpareOnly');
+    var state = { type: chipsEl.getAttribute('data-initial') || '', q: '', spare: !!(spareEl && spareEl.checked) };
+    var LS_KEY = 'mi.vendor.collapsed';
+    var collapsed = {};
+    try { collapsed = JSON.parse(localStorage.getItem(LS_KEY) || '{}') || {}; } catch (e) { collapsed = {}; }
+    function saveCollapsed() { try { localStorage.setItem(LS_KEY, JSON.stringify(collapsed)); } catch (e) {} }
+    function baseMatch(r) {   // 칩 외 조건(검색·여유분)
+        if (state.spare && r.getAttribute('data-spare') !== '1') return false;
+        if (state.q && (r.getAttribute('data-search') || '').indexOf(state.q) === -1) return false;
+        return true;
+    }
+    function apply() {
+        // 칩 개수 = 검색·여유분 반영 후 유형별 건수(현재 소유 탭 범위)
+        var counts = { '': 0 };
+        rows.forEach(function(r){ if (!baseMatch(r)) return; var t = r.getAttribute('data-type'); counts[t] = (counts[t] || 0) + 1; counts['']++; });
+        chipsEl.querySelectorAll('.mi-chip').forEach(function(c){
+            var t = c.getAttribute('data-type'), n = counts[t] || 0;
+            c.querySelector('.mi-chip-n').textContent = n;
+            c.classList.toggle('active', t === state.type);
+            c.disabled = (t !== '' && n === 0 && t !== state.type);
+        });
+        var shown = 0, groupStat = {};
+        rows.forEach(function(r){
+            var ok = baseMatch(r) && (!state.type || r.getAttribute('data-type') === state.type);
+            var v = r.getAttribute('data-vendor');
+            if (ok && v) { var g = groupStat[v] = groupStat[v] || { n: 0, q: 0 }; g.n++; g.q += Number(r.getAttribute('data-qty')) || 0; }
+            if (ok) shown++;
+            r.hidden = !ok || !!(v && collapsed[v]);
+        });
+        document.querySelectorAll('.mi-table tr.mi-group-head').forEach(function(h){
+            var v = h.getAttribute('data-vendor'), g = groupStat[v];
+            h.hidden = !g;
+            h.classList.toggle('collapsed', !!collapsed[v]);
+            var b = h.querySelector('.mi-group-toggle'); if (b) b.setAttribute('aria-expanded', collapsed[v] ? 'false' : 'true');
+            if (g) h.querySelector('.mi-group-meta').textContent = g.n + '품목 · ' + g.q + '개';
+        });
+        var empty = document.querySelector('.mi-table tr.mi-empty-filter');
+        if (empty) empty.hidden = !(rows.length && shown === 0);
+        var s = document.getElementById('miShown'); if (s) s.textContent = shown;
+    }
+    chipsEl.addEventListener('click', function(e){
+        var c = e.target.closest('.mi-chip'); if (!c || c.disabled) return;
+        state.type = c.getAttribute('data-type'); apply();
+    });
+    if (searchEl) searchEl.addEventListener('input', function(){ state.q = searchEl.value.trim().toLowerCase(); apply(); });
+    if (spareEl) spareEl.addEventListener('change', function(){ state.spare = spareEl.checked; apply(); });
+    document.querySelectorAll('.mi-table tr.mi-group-head').forEach(function(h){
+        h.addEventListener('click', function(){
+            var v = h.getAttribute('data-vendor');
+            if (collapsed[v]) delete collapsed[v]; else collapsed[v] = true;
+            saveCollapsed(); apply();
+        });
+    });
+    apply();
+
+    // [⋯] 메뉴: 항목은 기존 행 버튼과 같은 함수·같은 data-*(inv-id/code/total)로 호출 → 요청 동일
+    var menu = document.getElementById('miRowMenu'), cur = null;
+    function closeMenu() { if (menu) menu.hidden = true; cur = null; }
+    window.miCloseRowMenu = closeMenu;
+    document.querySelectorAll('.mi-more').forEach(function(b){
+        b.addEventListener('click', function(e){
+            e.stopPropagation();
+            if (cur === b) { closeMenu(); return; }
+            cur = b;
+            menu.querySelectorAll('.mi-menu-item').forEach(function(it){
+                it.dataset.invId = b.dataset.invId; it.dataset.code = b.dataset.code; it.dataset.total = b.dataset.total;
+                if (it.getAttribute('data-act') === 'return') it.hidden = b.dataset.canReturn !== '1';
+            });
+            menu.hidden = false;
+            var rc = b.getBoundingClientRect(), mw = menu.offsetWidth || 130, mh = menu.offsetHeight || 100;
+            var left = Math.max(8, Math.min(rc.right - mw, window.innerWidth - mw - 8));
+            var top = (rc.bottom + mh + 8 > window.innerHeight) ? Math.max(8, rc.top - mh - 4) : rc.bottom + 4;
+            menu.style.left = left + 'px'; menu.style.top = top + 'px';
+            var first = menu.querySelector('.mi-menu-item:not([hidden])'); if (first) first.focus();
+        });
+    });
+    if (menu) menu.addEventListener('click', function(e){
+        var it = e.target.closest('.mi-menu-item'); if (!it) return;
+        var act = it.getAttribute('data-act');
+        closeMenu();
+        if (act === 'adjust') openAdjustModal(it);
+        else if (act === 'return') returnVendor(it);
+        else if (act === 'photo') openModulePhotoModal(parseInt(it.dataset.invId, 10), it.dataset.code || '');
+    });
+    document.addEventListener('click', function(e){ if (menu && !menu.hidden && !menu.contains(e.target)) closeMenu(); });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && menu && !menu.hidden) closeMenu(); });
+    var sc = document.querySelector('.mi-card .mi-scroll');
+    if (sc) sc.addEventListener('scroll', closeMenu, { passive: true });
+    window.addEventListener('scroll', closeMenu, { passive: true });
+    window.addEventListener('resize', closeMenu);
+})();
+</script>
 <% } else if (activeTab === 'installed') { %>
 <!-- ===== Tab 2: 설치 현황 ===== -->
 
@@ -835,8 +986,8 @@ document.querySelectorAll('.comp-code-link').forEach(function(link) {
             <label>유형</label>
             <select name="module_type" class="form-control" onchange="this.form.submit()">
                 <option value="">전체</option>
-                <% appConfig.moduleTypes.forEach(t => { %>
-                <option value="<%= t.value %>" <%= filters.module_type === t.value ? 'selected' : '' %>><%= t.label %></option>
+                <% miTypeOrder.forEach(t => { %><%# B-7: PSU 제외·라벨 통일 %>
+                <option value="<%= t %>" <%= filters.module_type === t ? 'selected' : '' %>><%= typeLabels[t] %></option>
                 <% }) %>
             </select>
         </div>
@@ -860,7 +1011,7 @@ document.querySelectorAll('.comp-code-link').forEach(function(link) {
 </div>
 
 <div class="card">
-    <div class="table-wrapper">
+    <div class="table-wrapper mi-scroll">
         <table>
             <thead>
                 <tr>
@@ -883,7 +1034,7 @@ document.querySelectorAll('.comp-code-link').forEach(function(link) {
                 <% } %>
                 <% modules.forEach(m => { %>
                 <tr>
-                    <td><span class="badge badge-info"><%= appConfig.moduleTypes.find(t => t.value === m.module_type)?.label || m.module_type %></span></td>
+                    <td><span class="badge badge-info"><%= typeLabels[m.module_type] || m.module_type %></span></td>
                     <td>
                         <% if (m.owner === 'vendor') { %>
                             <span class="badge badge-warning"><%= m.owner_vendor_name || '업체' %></span>
@@ -1149,7 +1300,7 @@ document.addEventListener('keydown', function(e) {
 </div>
 
 <div class="card">
-    <div class="table-wrapper">
+    <div class="table-wrapper mi-scroll">
         <table>
             <thead>
                 <tr>

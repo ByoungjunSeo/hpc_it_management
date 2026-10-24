@@ -689,3 +689,19 @@ body .adp-subtab.active { background: var(--tui-green); color: var(--tui-bg); bo
 body .adp-target-tag { color: var(--tui-yellow); border-color: var(--tui-border); border-radius: 0; font-family: var(--tui-font); }
 body .adp-node-link { color: var(--tui-green); }
 body .adp-auto-note { color: var(--tui-fg-dim); border-left-color: var(--tui-yellow); }
+/* B-7: 부품현황 — 소유 탭·유형 칩·스크롤 표(sticky)·업체 그룹·[⋯] 메뉴 */
+body .mi-owner-tab { background: transparent; color: var(--tui-fg-dim); border-color: var(--tui-border); border-radius: 0; font-family: var(--tui-font); }
+body .mi-owner-tab:not(.active):hover { background: var(--tui-bg-raise); color: var(--tui-fg); }
+body .mi-owner-tab.active { background: var(--tui-green); color: var(--tui-bg); border-color: var(--tui-green); }
+body .mi-chip { background: transparent; color: var(--tui-fg-dim); border-color: var(--tui-border); border-radius: 0; font-family: var(--tui-font); }
+body .mi-chip:not(.active):not([disabled]):hover { background: var(--tui-bg-raise); color: var(--tui-fg); }
+body .mi-chip.active { background: var(--tui-green); color: var(--tui-bg); border-color: var(--tui-green); }
+body .mi-table tbody tr { background: var(--tui-bg); }
+body .mi-table tbody tr:hover { background: var(--tui-bg-raise); }
+body .mi-table thead th.mi-sticky { background: var(--tui-green); }
+body .mi-mfm .mi-mf { color: var(--tui-fg-dim); }
+body .mi-group-head td { background: var(--tui-bg-raise); color: var(--tui-fg); border-bottom-color: var(--tui-border); }
+body .mi-group-meta { color: var(--tui-fg-dim); }
+body .mi-menu { background: var(--tui-bg-raise); border-color: var(--tui-border-bright); border-radius: 0; box-shadow: none; }
+body .mi-menu-item { color: var(--tui-fg); font-family: var(--tui-font); }
+body .mi-menu-item:hover, body .mi-menu-item:focus { background: var(--tui-green); color: var(--tui-bg); }

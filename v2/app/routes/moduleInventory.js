@@ -11,6 +11,11 @@ const { requireMaintenance } = require('../middleware/auth');
 const AuditLog = require('../models/auditLog');
 const { pool } = require('../config/database');
 
+// B-7: 부품현황 화면 유형 표준(칩 순서·라벨 통일). PSU는 화면에서 숨김(데이터 정리는 OPS-5).
+const MI_TYPE_ORDER = ['cpu', 'memory', 'disk', 'network', 'gpu', 'raid', 'npu', 'cable'];
+const MI_TYPE_LABELS = { cpu: 'CPU', memory: '메모리', disk: '디스크', network: 'NIC', gpu: 'GPU', raid: 'RAID', npu: 'NPU', cable: '케이블' };
+const MI_HIDDEN_TYPES = ['psu'];
+
 // §5: EUL 하드웨어 동기 제거. 재고 재계산만 유지. (함수명은 v1 호환 유지 — 실동작은 recalc뿐)
 // v1: 50+컬럼 개별 동기 (EquipmentUsageLog.updateHardwareColumns / create)
 // v2: EUL은 JSONB 스냅샷 이벤트소싱 — 컬럼 동기 개념 없음. recalculateInUse만 호출.
@@ -23,22 +28,30 @@ async function syncModulesToUsageLog(assetId) {
 router.get('/', async (req, res) => {
   try {
     const tab = req.query.tab || 'inventory';
-    const selectedType = req.query.type || '';
-    const selectedOwner = req.query.inv_owner || '';
+    // B-7: 소유 탭(?owner=company|vendor|all, 기본 자사). 구 링크(inv_owner·inv_vendor_id) 호환.
     const selectedVendorId = req.query.inv_vendor_id || '';
-    const statsByType = await ModuleInventory.getStatsByType();
-    let items = await ModuleInventory.findAll(selectedType || undefined, selectedOwner || undefined);
-
-    // Apply vendor filter
-    if (selectedVendorId) {
-      items = items.filter(item => String(item.owner_vendor_id) === selectedVendorId);
+    let ownerTab = (tab === 'inventory') ? req.query.owner : null;
+    if (!['company', 'vendor', 'all'].includes(ownerTab)) {
+      const legacy = req.query.inv_owner;
+      if (legacy === 'vendor' || selectedVendorId) ownerTab = 'vendor';
+      else if (legacy === 'company') ownerTab = 'company';
+      else if (legacy === '') ownerTab = 'all';
+      else ownerTab = 'company';
     }
-
-    // Apply spare_only filter
-    const spareOnly = req.query.spare_only === '1';
-    if (spareOnly) {
-      items = items.filter(item => item.spare_quantity > 0);
-    }
+    const selectedType = MI_TYPE_ORDER.includes(req.query.type) ? req.query.type : '';   // 초기 유형 칩
+    const spareOnly = req.query.spare_only === '1';                                       // 초기 "여유분만"
+    const ownerOf = (i) => (i.owner === 'vendor' ? 'vendor' : 'company');
+    const allItems = (await ModuleInventory.findAll()).filter(i => !MI_HIDDEN_TYPES.includes(i.module_type));
+    const ownerCounts = { company: 0, vendor: 0, all: allItems.length };
+    allItems.forEach(i => { ownerCounts[ownerOf(i)]++; });
+    let items = ownerTab === 'all' ? allItems : allItems.filter(i => ownerOf(i) === ownerTab);
+    if (ownerTab === 'vendor' && selectedVendorId) items = items.filter(i => String(i.owner_vendor_id) === selectedVendorId);
+    // 요약 카드 = 선택한 소유 탭의 품목만 유형별 합계(PSU 제외)
+    const sum = (arr, k) => arr.reduce((s, i) => s + (Number(i[k]) || 0), 0);
+    const statsByType = MI_TYPE_ORDER.map(t => {
+      const r = items.filter(i => i.module_type === t);
+      return r.length ? { module_type: t, items: r.length, total: sum(r, 'total_quantity'), storage: sum(r, 'storage_quantity'), in_use: sum(r, 'in_use_quantity'), spare: sum(r, 'spare_quantity') } : null;
+    }).filter(Boolean);
 
     // Installed modules data
     const filters = {
@@ -47,7 +60,7 @@ router.get('/', async (req, res) => {
       owner: req.query.owner,
       search: req.query.search
     };
-    const modules = await ComputingModule.findAll(filters);
+    const modules = (await ComputingModule.findAll(filters)).filter(m => !MI_HIDDEN_TYPES.includes(m.module_type));   // B-7: PSU 숨김
 
     // History tab data
     const historyFilters = {
@@ -60,7 +73,7 @@ router.get('/', async (req, res) => {
     const historyLogs = tab === 'history' ? await ModuleInventoryLog.findAll(historyFilters) : [];
 
     // All item codes for history filter dropdown
-    const allItemCodes = tab === 'history' ? (await ModuleInventory.findAll()).map(i => i.item_code).filter(Boolean) : [];
+    const allItemCodes = tab === 'history' ? (await ModuleInventory.findAll()).filter(i => !MI_HIDDEN_TYPES.includes(i.module_type)).map(i => i.item_code).filter(Boolean) : [];
 
     const vendors = await Vendor.findAll();
 
@@ -72,8 +85,11 @@ router.get('/', async (req, res) => {
       tab,
       statsByType,
       items,
+      ownerTab,
+      ownerCounts,
+      miTypeOrder: MI_TYPE_ORDER,
+      miTypeLabels: MI_TYPE_LABELS,
       selectedType,
-      selectedOwner,
       selectedVendorId,
       spareOnly,
       modules,
