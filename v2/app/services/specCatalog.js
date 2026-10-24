@@ -149,6 +149,7 @@ function genDisk(i) {
   let conf = 'high';
   let itf = null, ff = null, media = null;
   for (const [re, a, b, c] of DISK_RULES) { if (re.test(text)) { itf = itf || a; ff = ff || b; media = media || c; if (itf && ff && media) break; } }
+  if (i.form_factor_override) ff = i.form_factor_override;   // 현장 확인값
   if (!media && /SSD/.test(text)) media = 'SSD';
   if (!media && /HDD/.test(text)) media = 'HDD';
   if (!media && itf === 'NVME') media = 'SSD';
@@ -190,14 +191,16 @@ function genCpu(i) {
 const GPU_MEM = { T4: 16, L40S: 48, RTXA4000: 16, H100NVL: 94, RTXPRO6000: 96, RTX5080: 16, A30: 24, A40: 48, L4: 24 };
 function genGpu(i) {
   const s = up([i.model, i.specification].filter(Boolean).join(' '));
-  if (/DEVICE [0-9A-F]{4}\b/.test(s) && !/\[/.test(s)) return result('gpu', null, { model_raw: i.model || null }, 'low', ['미식별 장치(lspci Device ID) — 보류'], ['model', 'memory', 'form_factor'], { hold: true });
   const br = (s.match(/\[([^\]]+)\]/) || [])[1] || s;
   let model = null;
   let m = br.match(/\b(A100|A30|A40|H100L?|H100\s*NVL|H200|L40S|L4|T4|RTX\s*A\d{4}|RTX\s*PRO\s*6000|RTX\s*\d{4}(?:\s*TI)?)\b/);
   if (m) model = m[1].replace(/\s+/g, '').replace(/^H100L$/, 'H100NVL');
-  if (!model) return result('gpu', null, { model_raw: i.model || null }, 'low', ['GPU 모델 해석 불가'], ['model']);
   const reasons = ['모델 문자열'], unresolved = [];
   let conf = 'high';
+  // 결정(v2.9 단계 1-보완): NVIDIA Device 2bb5 = RTX PRO 6000 Blackwell 계열 → medium(현장 확인 후 high)
+  if (!model && /DEVICE 2BB5\b/.test(s)) { model = 'RTXPRO6000'; conf = 'medium'; reasons.splice(0, 1, 'Device 2bb5 = RTX PRO 6000 Blackwell 계열(결정)'); }
+  if (!model && /DEVICE [0-9A-F]{4}\b/.test(s)) return result('gpu', null, { model_raw: i.model || null }, 'low', ['미식별 장치(lspci Device ID) — 보류'], ['model', 'memory', 'form_factor'], { hold: true });
+  if (!model) return result('gpu', null, { model_raw: i.model || null }, 'low', ['GPU 모델 해석 불가'], ['model']);
   let gb = null;
   const mm = (br + ' ' + up(i.capacity)).match(/(\d{1,3})\s*GB?\b/);
   if (mm) gb = Number(mm[1]);
@@ -252,7 +255,14 @@ function genNic(i) {
 // ───────────────────────── RAID ─────────────────────────
 function genRaid(i) {
   const s = up([i.model, i.specification].filter(Boolean).join(' '));
-  if (/SSATA|RAID MODE|ASMEDIA|106X/.test(s)) return excluded('raid', '온보드 RAID/SATA 컨트롤러(' + String(i.model || '').trim() + ')');
+  if (/SSATA|RAID MODE/.test(s)) return excluded('raid', '온보드 RAID/SATA 컨트롤러(' + String(i.model || '').trim() + ')');
+  if (/ASMEDIA|106X/.test(s)) {   // 결정: 현장 확인 대상(온보드 칩인지 추가 카드인지)
+    const f = i.field || {};
+    if (f.onboard === true) return Object.assign(excluded('raid', '온보드 SATA 컨트롤러(현장 확인)'), { field_confirmed: true });
+    const chip = { '0611': 'ASM1061', '0612': 'ASM1062', '0625': 'ASM1064', '1164': 'ASM1164', '1166': 'ASM1166' }[String(f.pci_device_id || '').toLowerCase()];
+    if (f.onboard === false && chip) return result('raid', 'RAID-' + chip, { family: 'ASMedia', model: chip }, 'high', ['추가 카드(현장 확인)'], []);
+    return result('raid', null, { model_raw: i.model || null }, 'low', ['현장 확인 대상 — 온보드 칩인지 추가 카드인지'], ['onboard'], { hold: true });
+  }
   let m = s.match(/PERC\s*(H\d{3,4}[A-Z]?)/); if (m) return result('raid', 'RAID-PERC-' + m[1], { family: 'PERC', model: m[1] }, 'high', ['모델 문자열'], []);
   m = s.match(/SR-?(\d{4})/); if (m && /GRAID/.test(s)) return result('raid', 'RAID-GRAID-SR' + m[1], { family: 'GRAID', model: 'SR' + m[1] }, 'high', ['모델 문자열'], []);
   m = s.match(/\b(9\d{3})-(\d{1,2}I)\b/); if (m) return result('raid', 'RAID-' + m[1] + '-' + m[2], { family: 'MegaRAID', model: m[1] + '-' + m[2] }, 'high', ['카드 품번'], []);
@@ -293,8 +303,26 @@ function genCable(i) {
   return result('cable', code, { kind, gbps, connector: conn, length_m: len ? Number(len[1]) : null, manufacturer: i.manufacturer || null }, conf, reasons, unresolved);
 }
 
+// 현장 확인값(field) → 생성기 입력 보강: 카드 품번·제품명은 스펙 문자열에, 포트 수는 "N포트"로(기록 우선 규칙 재사용),
+// GPU 메모리는 용량으로, 디스크 폼팩터는 직접 지정. 빠진 필드가 모두 채워지면 confidence=high.
+const FF_WORD = [[/2\.5/, '25'], [/3\.5/, '35'], [/M\.?2/, 'M2'], [/U\.?3/, 'U3'], [/U\.?2/, 'U2'], [/E3\.?S/, 'E3S'], [/HHHL|ADD-?IN/, 'HHHL']];
 function generate(input) {
   const i = input || {};
+  if (!i.field) return dispatch(i);
+  const f = i.field, a = Object.assign({}, i);
+  const extra = [f.part_number, f.product_name, f.model, f.name].filter(Boolean).join(' ');
+  if (extra) a.specification = [i.specification, extra].filter(Boolean).join(' ');
+  if (f.ports && i.module_type === 'network') a.specification = (a.specification || '') + ' ' + Number(f.ports) + '포트';
+  if (f.memory_gb && i.module_type === 'gpu') a.capacity = Number(f.memory_gb) + 'GB';
+  if (f.form_factor && i.module_type === 'disk') { const w = FF_WORD.find(([re]) => re.test(up(f.form_factor))); if (w) a.form_factor_override = w[1]; }
+  if (f.nominal_tb && i.module_type === 'disk') a.capacity = f.nominal_tb + 'TB';
+  const r = dispatch(a);
+  r.field_confirmed = true;
+  if (r.inventory && r.spec_code && !(r.unresolved_fields || []).length) r.confidence = 'high';
+  r.reason = [r.reason, '현장 확인' + (f.asset ? '(' + f.asset + ')' : '')].filter(Boolean).join('; ');
+  return r;
+}
+function dispatch(i) {
   switch (i.module_type) {
     case 'memory': return genMemory(i);
     case 'disk': return genDisk(i);

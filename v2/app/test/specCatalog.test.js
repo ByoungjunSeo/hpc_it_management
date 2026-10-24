@@ -99,7 +99,7 @@ test('GPU — 모델·메모리·폼팩터, Device xxxx 미식별은 보류(unre
   assert.equal(g('gpu', 'NVIDIA Corporation GA100 [A100 PCIe 80GB] (rev a1)', '80GB HBM2', '').spec_code, 'GPU-A100-80G-PCIE');
   assert.equal(g('gpu', 'NVIDIA Corporation GA100 [A100 PCIe 40GB] (rev a1)', '40GB HBM2', '').spec_code, 'GPU-A100-40G-PCIE');
   assert.equal(g('gpu', 'L40S', '48GB', '').spec_code, 'GPU-L40S-48G-PCIE');
-  const d = g('gpu', 'NVIDIA Corporation Device 2bb5 (rev a1)', '', '');
+  const d = g('gpu', 'NVIDIA Corporation Device 2c31 (rev a1)', '', '');   // 2bb5는 결정으로 RTX PRO 6000 — 아래 별도 테스트
   assert.equal(d.spec_code, null); assert.equal(d.hold, true); assert.ok(d.unresolved_fields.includes('model'));
   assert.equal(g('gpu', 'L40S', '48GB', '').serialized, true);
 });
@@ -138,4 +138,44 @@ test('시리얼 관리 대상 판정(설계 확정 범위)', () => {
 test('PSU·시리얼 마스킹', () => {
   assert.equal(g('psu', 'PWS-2K04A', '2000W', '').inventory, false);
   assert.equal(sc.maskSerial('Dell DC NVMe PM9A3 RI U.2 3.84TB(SN: S6JENC0Y312656)'), 'Dell DC NVMe PM9A3 RI U.2 3.84TB(SN: S6JE…)');
+});
+
+// ───── v2.9 단계 1-보완: 결정 반영 + 현장 확인값(field) ─────
+test('GPU — Device 2bb5 = RTX PRO 6000 Blackwell 계열(medium), 현장 확인 시 high', () => {
+  const d = g('gpu', 'NVIDIA Corporation Device 2bb5 (rev a1)', '', '');
+  assert.equal(d.spec_code, 'GPU-RTXPRO6000-96G-PCIE'); assert.equal(d.confidence, 'medium'); assert.ok(!d.hold);
+  const f = g('gpu', 'NVIDIA Corporation Device 2bb5 (rev a1)', '', '', { field: { name: 'NVIDIA RTX PRO 6000 Blackwell Server Edition', memory_gb: 96, asset: 'X' } });
+  assert.equal(f.spec_code, 'GPU-RTXPRO6000-96G-PCIE'); assert.equal(f.confidence, 'high'); assert.equal(f.field_confirmed, true);
+  assert.equal(g('gpu', 'NVIDIA Corporation Device 2c31 (rev a1)', '', '').hold, true);   // 다른 미식별 ID는 계속 보류
+  const ti = g('gpu', 'NVIDIA Corporation GB206 [GeForce RTX 5060 Ti] (rev a1)', '', '', { field: { memory_gb: 16 } });
+  assert.equal(ti.spec_code, 'GPU-RTX5060TI-16G-PCIE'); assert.equal(ti.confidence, 'high');
+});
+
+test('NIC — 현장 확인 포트 수·카드 품번으로 확정(별칭 충돌 통합/분리)', () => {
+  const x710 = 'Intel Corporation Ethernet Controller X710 for 10GBASE-T (rev 02)';
+  const a = g('network', x710, '10GbE', '', { field: { ports: 2 } }), b = g('network', x710, '', '2포트');
+  assert.equal(a.spec_code, 'NIC-10G-2P-RJ45-X710'); assert.equal(a.confidence, 'high'); assert.equal(a.spec_code, b.spec_code);   // 통합
+  const c = g('network', 'Intel Corporation I350 Gigabit Network Connection (rev 01)', '', '', { field: { ports: 4 } });
+  assert.equal(c.spec_code, 'NIC-1G-4P-RJ45-I350');                                                                                  // 포트 다르면 분리
+  const cx = g('network', 'Mellanox Technologies MT2910 Family [ConnectX-7]', '400GbE', '', { field: { part_number: 'MCX75310AAS-NEAT' } });
+  assert.equal(cx.spec_code, 'NIC-400G-1P-OSFP-CX7'); assert.equal(cx.confidence, 'high');
+  const lx = g('network', 'Mellanox Technologies MT27710 Family [ConnectX-4 Lx]', '25Gbps', '', { field: { ports: 2, part_number: 'MCX4121A-ACAT' } });
+  assert.equal(lx.spec_code, 'NIC-25G-2P-SFP28-CX4LX'); assert.equal(lx.confidence, 'high');
+});
+
+test('RAID — ASMedia 106x는 현장 확인 대상(보류) → 온보드면 재고 아님, 추가 카드면 규격', () => {
+  const m = 'ASMedia Technology Inc. 106x SATA/RAID Controller (rev 01)';
+  const h = g('raid', m, '', ''); assert.equal(h.inventory, true); assert.equal(h.hold, true); assert.equal(h.spec_code, null);
+  assert.equal(g('raid', m, '', '', { field: { onboard: true } }).inventory, false);
+  const card = g('raid', m, '', '', { field: { onboard: false, pci_device_id: '0612' } }); assert.equal(card.spec_code, 'RAID-ASM1062'); assert.equal(card.confidence, 'high');
+  assert.equal(g('raid', 'Intel Corporation sSATA Controller [RAID Mode] (rev 0a)', '', '').inventory, false);   // sSATA는 확정
+  const r = g('raid', 'Broadcom / LSI MegaRAID SAS-3 3108 [Invader] (rev 02)', '', '', { field: { model: 'AVAGO MegaRAID SAS 9361-8i' } });
+  assert.equal(r.spec_code, 'RAID-9361-8I'); assert.equal(r.confidence, 'high');
+});
+
+test('디스크 — 현장 확인 폼팩터·공칭 용량 반영', () => {
+  const r = g('disk', 'ISE PE9010 GEN4 RI', '480GB', 'HFS480GEJ8X176N', { field: { form_factor: 'U.2' } });
+  assert.equal(r.spec_code, 'SSD-NVME-U2-480G'); assert.equal(r.confidence, 'high');
+  const m = g('disk', 'Micron_5200_MTFDDAK3T8TDC', '2.7T', '', { field: { model: 'Micron_5200_MTFDDAK3T8TDC', form_factor: '2.5 inches', nominal_tb: 3.84 } });
+  assert.equal(m.spec_code, 'SSD-SATA-25-3.84T'); assert.equal(m.confidence, 'high');
 });
