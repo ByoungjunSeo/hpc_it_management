@@ -1,0 +1,16 @@
+{
+  "_comment": "OPS-6 대상 설정(2안 확정). 섀시 관리번호는 실행 시 management_prefix의 다음 번호로 계산(설정 순서대로 배정). nodes 순서 = node_index 1..N = N1..N4(A→N1 … D→N4).",
+  "management_prefix": "TPC-SV-BL-2U-",
+  "chassis": [
+    {
+      "asset_number": "20AFD392",
+      "u_size": 2,
+      "nodes": ["20AFD392_A", "20AFD392_B", "20AFD392_C", "20AFD392_D"]
+    },
+    {
+      "asset_number": "20AFD393",
+      "u_size": 2,
+      "nodes": ["20AFD393_A", "20AFD393_B", "20AFD393_C", "20AFD393_D"]
+    }
+  ]
+}
