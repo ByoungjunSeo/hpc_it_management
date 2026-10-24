@@ -681,6 +681,11 @@ body .sr-panel-other { color: var(--tui-green); }
 body .sr-match-warn { background: var(--tui-bg-raise); border-color: var(--tui-border); color: var(--tui-fg); }
 /* B-5c */
 body .sr-panel-hidden { border-top-color: var(--tui-border); color: var(--tui-fg-dim); }
-/* B-6 */
-body .sr-chassis-link { color: var(--tui-green); }
-body .sr-node-row:hover td { background: var(--tui-bg-raise); }
+/* B-6b: 섀시 팝업 하위 탭 — 메인 탭(.adp-tab)과 같은 언어(선택 = green 채움 반전) */
+body .adp-subtabs { border-bottom-color: var(--tui-border); }
+body .adp-subtab { color: var(--tui-fg-dim); border-color: var(--tui-border); font-family: var(--tui-font); border-radius: 0; }
+body .adp-subtab:not(.active):hover { background: var(--tui-bg-raise); color: var(--tui-fg); }
+body .adp-subtab.active { background: var(--tui-green); color: var(--tui-bg); border-color: var(--tui-green); font-weight: 700; }
+body .adp-target-tag { color: var(--tui-yellow); border-color: var(--tui-border); border-radius: 0; font-family: var(--tui-font); }
+body .adp-node-link { color: var(--tui-green); }
+body .adp-auto-note { color: var(--tui-fg-dim); border-left-color: var(--tui-yellow); }

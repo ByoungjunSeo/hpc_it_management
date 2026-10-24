@@ -1987,7 +1987,12 @@ body.rooms-panel-split main.container { margin-right:var(--sr-panel-w); max-widt
 .sr-status-chip { opacity: 0.5; }
 .sr-status-chip.active { opacity: 1; }
 .sr-panel-hidden { padding: 8px 12px; font-size: 12px; border-top: 1px dashed var(--border, #e2e8f0); }
-/* B-6: 섀시 노드 탭 */
-.sr-chassis-link { color:#2563eb; text-decoration:none; }
-.sr-chassis-link:hover { text-decoration:underline; }
-.sr-node-row:hover td { background: rgba(59,130,246,0.06); }
+/* B-6b: 섀시 팝업 하위 탭 [섀시 | 노드1 | 노드2] + 쓰기 대상 표시 */
+.adp-subtabs { display:flex; flex-wrap:wrap; gap:4px; padding:6px 16px; border-bottom:1px solid var(--border); }
+.adp-subtab { padding:3px 10px; font-size:12px; border:1px solid var(--border); border-radius:12px; background:none; cursor:pointer; color:var(--text-light); white-space:nowrap; }
+.adp-subtab:hover { color:var(--text); }
+.adp-subtab.active { color:var(--primary); border-color:var(--primary); font-weight:600; }
+.adp-target-tag { font-size:11px; padding:1px 8px; border:1px solid var(--border); border-radius:10px; color:var(--text-light); white-space:nowrap; }
+.adp-node-link { color:var(--primary); text-decoration:none; }
+.adp-node-link:hover { text-decoration:underline; }
+.adp-auto-note { font-size:12px; color:var(--text-light); margin:0 0 8px; padding:4px 8px; border-left:3px solid var(--primary); }

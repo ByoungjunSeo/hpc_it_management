@@ -307,15 +307,11 @@
 <div class="modal-overlay" id="assetDetailPopup">
     <div class="modal" style="max-width:700px;max-height:85vh;display:flex;flex-direction:column;">
         <div class="modal-header">
-            <div style="flex:1;min-width:0;">
-                <div id="adpChassisLink" style="display:none;font-size:12px;margin-bottom:2px;"></div><%# B-6: ◀ 섀시 복귀 링크 %>
-                <h3 id="adpTitle" style="margin:0;">장비 정보</h3>
-            </div>
+            <h3 id="adpTitle">장비 정보</h3>
             <button class="modal-close" onclick="closeModal('assetDetailPopup')">&times;</button>
         </div>
         <div class="adp-tabs" style="display:flex;border-bottom:1px solid var(--border);padding:0 16px;gap:0;flex-wrap:wrap;">
             <button class="adp-tab active" data-tab="basic" onclick="switchAdpTab('basic')">기본정보</button>
-            <button class="adp-tab" data-tab="nodes" onclick="switchAdpTab('nodes')" id="adpNodesTab" style="display:none;">노드</button><%# B-6 %>
             <button class="adp-tab" data-tab="ip" onclick="switchAdpTab('ip')">IP정보</button>
             <button class="adp-tab" data-tab="access" onclick="switchAdpTab('access')">접속정보</button>
             <button class="adp-tab" data-tab="ops" onclick="switchAdpTab('ops')">운영정보</button>
@@ -323,6 +319,7 @@
             <button class="adp-tab" data-tab="match" onclick="switchAdpTab('match')" id="adpMatchTab" style="display:none;">자산 매칭</button><%# B-5b %>
             <button class="adp-tab" data-tab="power" onclick="switchAdpTab('power')" id="adpPowerTab" style="display:none;">전원</button>
         </div>
+        <div class="adp-subtabs" id="adpSubTabs" style="display:none;"></div><%# B-6b: 섀시 팝업 하위 탭 [섀시 | 노드1 | 노드2] %>
         <div id="adpContent" style="padding:16px;overflow-y:auto;flex:1;">
             <p class="text-muted">로딩중...</p>
         </div>
@@ -407,14 +404,25 @@ document.querySelectorAll('.clickable-unit').forEach(function(el) {
     });
 });
 
-var adpPendingTab = null;   // B-6: 다음 렌더에서 강제할 탭(섀시=노드 기본, [열기]=basic 등)
+// ===== B-6b: 팝업 = 루트(섀시 또는 일반 자산) + 현재 대상(target). 섀시면 하위 탭으로 대상 선택. =====
+var adpPendingTab = null;   // 다음 렌더에서 강제할 메인 탭(위치 이동 진입=basic 등)
+var adpRootId = null;       // 팝업 루트 자산 id(섀시 또는 일반 자산). 노드로 열면 부모 섀시가 루트.
+var adpTargetId = null;     // 현재 대상 id(섀시=루트, 하위 탭에서 노드 선택 시 노드 id). 메인 탭 전환에도 유지.
+var adpOpenSeq = 0;         // 늦게 도착한 응답이 새로 연 팝업을 덮지 않도록
+var adpAutoNote = '';       // 섀시 빈 탭 → 첫 노드 자동 전환 안내(1회 렌더)
+var srEdit = null;          // 진행 중 빠른수정 { id: 편집 시작 대상, tab, snap: 시작 시 폼 스냅샷 }
+var srMatchState = {};      // 자산 매칭 하위 탭별 상태 { id: { phase, msg } } — 팝업마다 초기화
+var srMatchInflight = {};   // 진행 중 스캔(id) — 팝업 재오픈에도 유지(중복 스캔 방지)
 function openAssetPopup(assetId, initialTab) {
+    assetId = parseInt(assetId);
+    var seq = ++adpOpenSeq;
     adpPendingTab = initialTab || null;
+    adpRootId = assetId; adpTargetId = assetId; adpAutoNote = '';
+    srEdit = null; srMatchState = {};
     document.getElementById('adpTitle').textContent = '로딩중...';
     document.getElementById('adpContent').innerHTML = '<p class="text-muted">로딩중...</p>';
-    var clink = document.getElementById('adpChassisLink'); if (clink) { clink.style.display = 'none'; clink.innerHTML = ''; }
-    document.getElementById('adpDetailLink').href = '/assets/' + assetId;
-    document.getElementById('adpEditLink').href = '/assets/' + assetId + '/edit?returnTo=' + encodeURIComponent(location.pathname + location.search);
+    var sub0 = document.getElementById('adpSubTabs'); if (sub0) { sub0.style.display = 'none'; sub0.innerHTML = ''; }
+    srSetPopupLinks(assetId);
     adpCurrentTab = 'basic';
     var modalEl0 = document.querySelector('#assetDetailPopup .modal');
     if (modalEl0) modalEl0.classList.remove('adp-wide');   // B-5b: 기본 폭으로 복귀
@@ -425,70 +433,216 @@ function openAssetPopup(assetId, initialTab) {
         .then(function(r) { return r.json(); })
         .then(function(data) {
             adpCache[assetId] = data;
+            if (seq !== adpOpenSeq) return;
+            // B-6b: 블레이드 노드로 열면 → 부모 섀시 팝업을 "그 노드가 대상"인 상태로 연다(진입 경로 공통).
+            if (srIsBladeNode(data)) return srOpenChassisFor(data, seq);
             renderAdp(data);
         })
         .catch(function() {
+            if (seq !== adpOpenSeq) return;
             document.getElementById('adpContent').innerHTML = '<p style="color:#ef4444;">데이터를 불러올 수 없습니다.</p>';
         });
+}
+function srOpenChassisFor(nodeData, seq) {
+    var pid = nodeData.asset.parent_asset_id, nid = nodeData.asset.id;
+    srFlashAsset(pid);                                  // 섀시 셀 강조
+    adpRootId = pid; adpTargetId = nid;
+    function go(pdata) { if (seq !== adpOpenSeq) return; renderAdp(pdata, nid); }
+    if (adpCache[pid]) return go(adpCache[pid]);
+    fetch('/assets/' + pid + '/json').then(function(r){ return r.json(); }).then(function(p){ adpCache[pid] = p; go(p); })
+        .catch(function(){ if (seq === adpOpenSeq) document.getElementById('adpContent').innerHTML = '<p style="color:#ef4444;">섀시 정보를 불러올 수 없습니다.</p>'; });
+}
+// 섀시 셀 강조(이미 강조 중이면 스크롤 생략 — locateAsset 경로와 중복 스크롤 방지)
+function srFlashAsset(id) {
+    var cells = document.querySelectorAll('.clickable-unit[data-asset-id="' + id + '"]');
+    if (!cells.length) return;
+    var already = cells[0].classList.contains('sr-highlight');
+    document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); });
+    if (!already) { var rack = cells[0].closest('.wide-rack'); if (rack) rack.scrollIntoView({ inline: 'center', block: 'center', behavior: 'smooth' }); }
+    cells.forEach(function(c){ c.classList.add('sr-highlight'); });
+    clearTimeout(srHlTimer);
+    srHlTimer = setTimeout(function(){ document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); }); }, 4000);
 }
 
 // B-6: 블레이드 노드 판정 — 자식 중 cdu/chiller(인프라 링크) 제외. 섀시=그런 노드가 1개 이상.
 function srBladeNodes(data) {
     return (data.children || []).filter(function(c){ return c.asset_type !== 'cdu' && c.asset_type !== 'chiller'; });
 }
+// B-6b: 자산 자신이 cdu/chiller면 노드 아님(섀시 하위 CDU가 노드로 오판되던 B-6 잠재 결함 보정)
 function srIsBladeNode(data) {
-    return !!(data.asset.parent_asset_id && data.parent && (data.parent.asset_type === 'server' || data.parent.asset_type === 'storage'));
+    var a = data && data.asset;
+    return !!(a && a.parent_asset_id && a.asset_type !== 'cdu' && a.asset_type !== 'chiller' &&
+              data.parent && (data.parent.asset_type === 'server' || data.parent.asset_type === 'storage'));
 }
-function renderAdp(data) {
-    var a = data.asset;
-    document.getElementById('adpTitle').textContent = a.model_name || a.asset_type || '장비 정보';
-    var nodes = srBladeNodes(data);
-    // B-6: [노드] 탭 — 블레이드 자식이 있으면 "노드 (N)" 노출
-    var nodesTab = document.getElementById('adpNodesTab');
-    if (nodesTab) {
-        nodesTab.style.display = nodes.length ? '' : 'none';
-        nodesTab.textContent = '노드 (' + nodes.length + ')';
-    }
-    // B-6: 노드 팝업이면 ◀ 섀시 복귀 링크
-    var clink = document.getElementById('adpChassisLink');
-    if (clink) {
-        if (srIsBladeNode(data)) {
-            var pl = esc(data.parent.management_number || data.parent.model_name || ('#' + data.parent.id));
-            clink.innerHTML = '<a href="#" class="sr-chassis-link" onclick="openAssetPopup(' + data.parent.id + ');return false;">◀ 섀시: ' + pl + '</a>';
-            clink.style.display = '';
-        } else { clink.style.display = 'none'; clink.innerHTML = ''; }
-    }
-    // Show/hide power tab based on asset type and BMC availability
-    var powerTab = document.getElementById('adpPowerTab');
-    var powerTypes = ['server', 'storage', 'switch', 'kvm', 'other'];
-    var hasBmc = data.assetIps && data.assetIps.some(function(ip) { return ip.ip_type === 'bmc'; });
-    if (powerTab) {
-        powerTab.style.display = (powerTypes.indexOf(a.asset_type) !== -1 && hasBmc) ? '' : 'none';
-    }
-    // B-5b/B-6: 자산 매칭 탭 — admin/maint + server/storage. 노드도 허용(0단계 판정: /discovery가 이미 노드 대상).
-    //   섀시 자체는 접속 IP 없으면 탭 본문에서 안내. cdu 등 다른 유형은 제외.
-    var matchTab = document.getElementById('adpMatchTab');
-    if (matchTab) {
-        var canMatch = srCanEdit() && (a.asset_type === 'server' || a.asset_type === 'storage');
-        matchTab.style.display = canMatch ? '' : 'none';
-    }
-    // B-6: 섀시는 처음 열 때 기본 탭 = 노드(명시 initialTab 우선)
-    var tab = adpPendingTab || (nodes.length ? 'nodes' : adpCurrentTab);
+var SR_SLOT_ORDER = { left: 1, '좌측': 1, right: 2, '우측': 2 };
+// 루트의 노드 목록(node_index → 슬롯(좌/우) → 관리번호 순)
+function srNodes() {
+    var r = adpCache[adpRootId]; if (!r) return [];
+    return srBladeNodes(r).slice().sort(function(x, y){
+        var xi = (x.node_index != null && x.node_index !== '') ? Number(x.node_index) : (SR_SLOT_ORDER[x.blade_slot] || 99);
+        var yi = (y.node_index != null && y.node_index !== '') ? Number(y.node_index) : (SR_SLOT_ORDER[y.blade_slot] || 99);
+        if (xi !== yi) return xi - yi;
+        return String(x.management_number || '').localeCompare(String(y.management_number || ''));
+    });
+}
+function srMultiTarget() { return srNodes().length > 0; }
+// "노드N + 슬롯명" — N은 node_index, 없으면 정렬 순번
+function srNodeLabel(n) {
+    var list = srNodes(), i = list.findIndex(function(x){ return x.id === n.id; });
+    var num = (n.node_index != null && n.node_index !== '') ? n.node_index : (i + 1);
+    return '노드' + num + (n.blade_slot ? ' ' + n.blade_slot : '');
+}
+function srNodeById(id) { return srNodes().find(function(n){ return n.id === id; }) || null; }
+function srMgmtOf(id) {
+    var d = adpCache[id], n = srNodeById(id);
+    var a = d ? d.asset : n;
+    return a ? (a.management_number || a.asset_number || a.model_name || ('#' + id)) : ('#' + id);
+}
+function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
+// 쓰기 대상 명확화 — 섀시 팝업에서만 "대상: <관리번호>" (일반 자산 팝업은 변경 없음)
+function srTargetTag(id) {
+    if (!srMultiTarget()) return '';
+    return '<span class="adp-target-tag">대상: ' + esc(srMgmtOf(id == null ? adpTargetId : id)) + '</span>';
+}
+function srSetPopupLinks(id) {
+    document.getElementById('adpDetailLink').href = '/assets/' + id;
+    document.getElementById('adpEditLink').href = '/assets/' + id + '/edit?returnTo=' + encodeURIComponent(location.pathname + location.search);
+}
+var SR_POWER_TYPES = ['server', 'storage', 'switch', 'kvm', 'other'];
+function srPowerOk(d) {
+    return !!(d && d.asset && SR_POWER_TYPES.indexOf(d.asset.asset_type) !== -1 &&
+              d.assetIps && d.assetIps.some(function(ip) { return ip.ip_type === 'bmc'; }));
+}
+function srMatchTypeOk(t) { return t === 'server' || t === 'storage'; }
+function srMatchEligible(d) { return !!(d && d.asset && srCanEdit() && srMatchTypeOk(d.asset.asset_type) && srMatchConnIp(d)); }
+// 섀시 데이터가 그 탭에서 비었는가(자동 전환 판정). 기본·운영은 항상 섀시 유지.
+function srChassisEmpty(tab, d) {
+    if (tab === 'ip') return !(d.assetIps && d.assetIps.length) && !d.asset.ip_address;
+    if (tab === 'access') return !(d.credentials && d.credentials.length);   // 레거시 ssh_user는 DEFAULT 'root'라 판정 제외
+    if (tab === 'modules') return !(d.modules && d.modules.length);
+    if (tab === 'power') return !srPowerOk(d);
+    if (tab === 'match') return !srMatchEligible(d);
+    return false;
+}
+var SR_TAB_EMPTY_LABEL = { ip: 'IP 정보', access: '접속 정보', modules: '컴퓨팅 모듈', power: '전원 제어 대상(BMC)', match: '자산 매칭 대상(접속 IP)' };
+
+// 루트 렌더(최초). target: 노드로 진입 시 노드 id.
+function renderAdp(rootData, target) {
+    adpRootId = rootData.asset.id;
+    adpTargetId = (target && target !== adpRootId) ? target : adpRootId;
+    var tab = adpPendingTab || adpCurrentTab;
     adpPendingTab = null;
     adpCurrentTab = tab;
     document.querySelectorAll('.adp-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
     var modalEl = document.querySelector('#assetDetailPopup .modal');
     if (modalEl) modalEl.classList.toggle('adp-wide', tab === 'match');
-    renderAdpTab(data, tab);
+    srRenderChrome();
+    srRenderCurrent();
+    srPrefetchNodes();
+}
+// 제목·링크·하위 탭·메인 탭 노출(섀시 또는 노드 중 하나라도 충족하면 메인 탭 표시)
+function srRenderChrome() {
+    var root = adpCache[adpRootId]; if (!root) return;
+    var a = root.asset;
+    var multi = srMultiTarget();
+    var title = a.model_name || a.asset_type || '장비 정보';
+    if (multi && adpTargetId !== adpRootId) {
+        var n = srNodeById(adpTargetId);
+        if (n) title += ' · ' + srNodeLabel(n) + ' (' + srMgmtOf(adpTargetId) + ')';
+    }
+    document.getElementById('adpTitle').textContent = title;
+    srSetPopupLinks(adpTargetId);
+    var sub = document.getElementById('adpSubTabs');
+    if (sub) {
+        if (!multi) { sub.style.display = 'none'; sub.innerHTML = ''; }
+        else {
+            var html = '<button type="button" class="adp-subtab' + (adpTargetId === adpRootId ? ' active' : '') + '" data-target="' + adpRootId + '" title="' + escAttr(srMgmtOf(adpRootId)) + '" onclick="srSelectTarget(' + adpRootId + ')">섀시</button>';
+            srNodes().forEach(function(n){
+                html += '<button type="button" class="adp-subtab' + (adpTargetId === n.id ? ' active' : '') + '" data-target="' + n.id + '" title="' + escAttr(srMgmtOf(n.id)) + '" onclick="srSelectTarget(' + n.id + ')">' +
+                    esc(srNodeLabel(n)) + (n.asset_type === 'switch' ? ' <span class="badge">SW</span>' : '') + '</button>';
+            });
+            sub.innerHTML = html; sub.style.display = '';
+        }
+    }
+    var targets = [adpRootId].concat(srNodes().map(function(n){ return n.id; }));
+    var powerTab = document.getElementById('adpPowerTab');
+    if (powerTab) powerTab.style.display = targets.some(function(id){ return srPowerOk(adpCache[id]); }) ? '' : 'none';
+    // B-5b/B-6: 자산 매칭 — admin/maint + server/storage(노드 유형은 children 목록으로 판정)
+    var matchTab = document.getElementById('adpMatchTab');
+    if (matchTab) {
+        var canMatch = srCanEdit() && (srMatchTypeOk(a.asset_type) || srNodes().some(function(n){ return srMatchTypeOk(n.asset_type); }));
+        matchTab.style.display = canMatch ? '' : 'none';
+    }
+}
+// 노드 데이터 선조회(전원 메인 탭 노출 판정용 — 노드 BMC는 노드 json에만 있음). 읽기 전용 GET.
+function srPrefetchNodes() {
+    var rid = adpRootId;
+    srNodes().forEach(function(n){
+        if (adpCache[n.id]) return;
+        fetch('/assets/' + n.id + '/json').then(function(r){ return r.ok ? r.json() : null; }).then(function(j){
+            if (!j || !j.asset) return;
+            if (!adpCache[n.id]) adpCache[n.id] = j;
+            if (adpRootId === rid) srRenderChrome();
+        }).catch(function(){});
+    });
+}
+// 현재 대상·메인 탭으로 본문 렌더(대상 데이터 없으면 조회 후)
+function srRenderCurrent() {
+    var id = adpTargetId, tab = adpCurrentTab;
+    if (adpCache[id]) { renderAdpTab(adpCache[id], tab); return; }
+    document.getElementById('adpContent').innerHTML = '<p class="text-muted">로딩중...</p>';
+    var rid = adpRootId;
+    fetch('/assets/' + id + '/json').then(function(r){ return r.json(); }).then(function(j){
+        adpCache[id] = j;
+        if (adpRootId !== rid || adpTargetId !== id) return;
+        srRenderChrome();
+        renderAdpTab(j, adpCurrentTab);
+    }).catch(function(){ if (adpTargetId === id) document.getElementById('adpContent').innerHTML = '<p style="color:#ef4444;">데이터를 불러올 수 없습니다.</p>'; });
+}
+// 하위 탭 선택 = 현재 대상 변경. 미저장 편집이 있으면 확인창.
+function srSelectTarget(id) {
+    id = parseInt(id);
+    if (id === adpTargetId) return;
+    if (!srConfirmLeaveEdit()) return;
+    srEdit = null; adpAutoNote = '';
+    adpTargetId = id;
+    srRenderChrome();
+    srRenderCurrent();
+}
+// 저장된 루트 재조회(노드 저장/적용 후 하위 탭 라벨·children 갱신). 본문은 건드리지 않음(편집 폼 보존).
+function srRefetchRoot() {
+    var rid = adpRootId;
+    fetch('/assets/' + rid + '/json').then(function(r){ return r.json(); }).then(function(j){
+        if (!j || !j.asset) return;
+        adpCache[rid] = j;
+        if (adpRootId === rid) srRenderChrome();
+    }).catch(function(){});
+}
+// B-6 동작 유지: 저장/적용 후 부모(섀시) children 캐시 무효화. 단 열린 팝업의 루트면 삭제 대신 재조회.
+function srInvalidateParent(id) {
+    var c = adpCache[id], pid = c && c.asset && c.asset.parent_asset_id;
+    if (!pid) return;
+    var popup = document.getElementById('assetDetailPopup');
+    if (adpRootId === pid && popup && popup.classList.contains('active')) srRefetchRoot();
+    else delete adpCache[pid];
 }
 
 function switchAdpTab(tab) {
     adpCurrentTab = tab;
+    srEdit = null;   // 메인 탭 전환은 기존처럼 편집 폼을 닫음
     var modalEl = document.querySelector('#assetDetailPopup .modal');
     if (modalEl) modalEl.classList.toggle('adp-wide', tab === 'match');   // B-5b: 매치 탭만 넓힘
     document.querySelectorAll('.adp-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
-    var assetId = parseInt(document.getElementById('adpDetailLink').href.split('/assets/')[1]);
-    if (adpCache[assetId]) renderAdpTab(adpCache[assetId], tab);
+    // B-6b: 대상 유지. 대상이 섀시인데 이 탭에서 섀시 데이터가 비면 첫 노드로 자동 전환(기본·운영 제외).
+    adpAutoNote = '';
+    var root = adpCache[adpRootId];
+    if (root && srMultiTarget() && adpTargetId === adpRootId && srChassisEmpty(tab, root)) {
+        var first = srNodes()[0];
+        adpTargetId = first.id;
+        adpAutoNote = '섀시에 ' + SR_TAB_EMPTY_LABEL[tab] + ' 없음 — ' + srNodeLabel(first) + '(으)로 자동 전환했습니다.';
+        srRenderChrome();
+    }
+    if (adpCache[adpRootId]) srRenderCurrent();
 }
 
 function renderAdpTab(data, tab) {
@@ -496,14 +650,18 @@ function renderAdpTab(data, tab) {
     var html = '';
 
     if (tab === 'basic') {
-        // B-6: 노드/섀시 컨텍스트
+        // B-6: 노드/섀시 컨텍스트 — B-6b: 섀시는 "노드 N대: 노드1 좌측(관리번호) · …"(클릭 시 그 하위 탭)
         var nodeCtx = '';
-        var _nodes = srBladeNodes(data);
         if (srIsBladeNode(data)) {
-            var nn = (a.node_index != null && a.node_index !== '') ? ('노드 ' + esc(String(a.node_index))) : (a.blade_slot ? ('슬롯 ' + esc(a.blade_slot)) : '노드');
-            nodeCtx = tr('섀시', esc(data.parent.management_number || data.parent.model_name || ('#' + data.parent.id)) + ' · ' + nn);
-        } else if (_nodes.length) {
-            nodeCtx = tr('노드', _nodes.length + '대');
+            var bn = srNodeById(a.id);
+            var nn = bn ? srNodeLabel(bn) : ((a.node_index != null && a.node_index !== '') ? ('노드' + a.node_index) : (a.blade_slot ? ('슬롯 ' + a.blade_slot) : '노드'));
+            nodeCtx = tr('섀시', (data.parent.management_number || data.parent.model_name || ('#' + data.parent.id)) + ' · ' + nn);
+        } else if (a.id === adpRootId && srMultiTarget()) {
+            var _nodes = srNodes();
+            var links = _nodes.map(function(n){
+                return '<a href="#" class="adp-node-link" onclick="srSelectTarget(' + n.id + ');return false;">' + esc(srNodeLabel(n)) + '(' + esc(srMgmtOf(n.id)) + ')</a>';
+            }).join(' · ');
+            nodeCtx = '<tr><td><strong>노드</strong></td><td>' + _nodes.length + '대: ' + links + '</td></tr>';
         }
         // 노드는 자체 랙/U가 없음(섀시 기준). 노드면 위치 라벨에 안내.
         var locLabel = srIsBladeNode(data) ? '위치(섀시 기준)' : 'U위치';
@@ -522,8 +680,6 @@ function renderAdpTab(data, tab) {
             tr(locLabel, a.rack_unit_start ? 'U' + (Math.floor((a.rack_unit_start - 1) / 3) + 1) + ((a.rack_unit_size || 3) > 3 ? ' ~ U' + (Math.floor((a.rack_unit_start + (a.rack_unit_size || 3) - 2) / 3) + 1) : '') : (srIsBladeNode(data) ? '섀시 참조' : '-')) +
             '</table>';
         if (srCanEdit()) html += srEditBar('basic');   // UX-2: 빠른 편집 토글
-    } else if (tab === 'nodes') {
-        html = srNodesTabHtml(data);   // B-6
     } else if (tab === 'ip') {
         if (data.assetIps && data.assetIps.length > 0) {
             html = '<table class="adp-table"><tr><th>유형</th><th>인터페이스</th><th>속도</th><th>IP 주소</th><th>설명</th></tr>';
@@ -582,9 +738,13 @@ function renderAdpTab(data, tab) {
         } else {
             html = '<p class="text-muted">등록된 컴퓨팅 모듈이 없습니다.</p>';
         }
+    } else if (tab === 'power' && !srPowerOk(data)) {
+        // B-6b: 메인 탭은 섀시/노드 중 하나라도 충족 시 표시 — 이 대상이 미충족이면 안내
+        html = '<p class="text-muted">이 대상(' + esc(srMgmtOf(a.id)) + ')에는 BMC IP가 등록되지 않아 전원 제어를 할 수 없습니다.</p>';
     } else if (tab === 'power') {
         var assetId = a.id;
         html = '<div id="adpPowerContent">' +
+            (srMultiTarget() ? '<div style="margin-bottom:8px;">' + srTargetTag(assetId) + '</div>' : '') +
             '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">' +
             '<label style="font-weight:600;font-size:13px;margin:0;">현재 전원 상태</label>' +
             '<span id="adpPowerBadge" style="font-size:11px;padding:2px 10px;border-radius:10px;background:#94a3b8;color:white;">확인 중...</span>' +
@@ -599,10 +759,13 @@ function renderAdpTab(data, tab) {
         // Auto-check power status
         setTimeout(function() { adpCheckPower(assetId); }, 100);
     } else if (tab === 'match') {
-        html = srMatchTabHtml(data);   // B-5b
+        html = srMatchTabHtml(data);   // B-5b · B-6b: 대상별 독립 상태
     }
 
+    // B-6b: 섀시 빈 탭 자동 전환 안내(1회)
+    if (adpAutoNote && a.id === adpTargetId) { html = '<p class="adp-auto-note">' + esc(adpAutoNote) + '</p>' + html; adpAutoNote = ''; }
     document.getElementById('adpContent').innerHTML = html;
+    if (tab === 'match') srMatchAfterRender(a.id);
 }
 
 function tr(label, val) {
@@ -668,6 +831,15 @@ function applyPowerResults(section, results) {
 
 // --- Power control in asset popup ---
 function adpCheckPower(assetId) {
+    // B-6b: 노드는 rack_id가 없어(BUG-9) 랙 일괄 상태 조회(/racks/:id/power-status) 결과에 포함되지 않음.
+    //   서버 무변경 범위에서는 상태 조회 불가 → 명시 안내. 제어(켜기/끄기/재시작)는 섀시 랙 경로로 가능하고 응답에 상태가 실림.
+    if (adpCache[assetId] && srIsBladeNode(adpCache[assetId])) {
+        var nb = document.getElementById('adpPowerBadge');
+        if (nb) { nb.textContent = '상태 조회 미지원'; nb.style.background = '#94a3b8'; }
+        var nm = document.getElementById('adpPowerMsg');
+        if (nm) nm.textContent = '블레이드 노드는 랙 상태 일괄 조회 대상이 아닙니다. 제어 명령 후 결과 상태가 표시됩니다.';
+        return;
+    }
     // Find the rack ID for this asset from the DOM
     var rackId = adpFindRackId(assetId);
     if (!rackId) return;
@@ -698,7 +870,15 @@ function adpFindRackId(assetId) {
         if (rack) return rack.dataset.rackId;
     }
     // Fallback: check cached data for rack_id
-    if (adpCache[assetId] && adpCache[assetId].asset) return adpCache[assetId].asset.rack_id;
+    if (adpCache[assetId] && adpCache[assetId].asset && adpCache[assetId].asset.rack_id) return adpCache[assetId].asset.rack_id;
+    // B-6b: 블레이드 노드는 자체 랙이 없음 → 부모 섀시의 랙(power-control은 본문 assetId로 BMC를 찾으므로 노드 대상 그대로)
+    var c = adpCache[assetId];
+    if (c && c.asset && c.asset.parent_asset_id) {
+        var pid = c.asset.parent_asset_id;
+        var pel = document.querySelector('.clickable-unit[data-asset-id="' + pid + '"]');
+        if (pel && pel.closest('.wide-rack')) return pel.closest('.wide-rack').dataset.rackId;
+        if (c.parent && c.parent.rack_id) return c.parent.rack_id;
+    }
     return null;
 }
 
@@ -794,64 +974,87 @@ function srMatchConnIp(data) {
     if (any) return any.ip_address;
     return (data.asset && data.asset.ip_address) || null;
 }
+// B-6b: 하위 탭(대상)마다 독립 상태 — phase: idle|scanning|result|error|applied|conflict.
+//   결과·지문은 DiscoveryCore.results[id](assetId 키)에 이미 대상별로 보관됨. 비교표는 "현재 화면 대상"일 때만
+//   그 대상 box에 mount 후 렌더(노드1 스캔이 노드2 화면에 그려지는 일 방지). 적용 본문 asset_id·지문 = 렌더된 대상 것.
+function srMatchActive(id) {
+    var popup = document.getElementById('assetDetailPopup');
+    return !!(popup && popup.classList.contains('active') && adpTargetId === id && adpCurrentTab === 'match');
+}
 function srMatchTabHtml(data) {
     var id = data.asset.id;
+    if (!srMatchTypeOk(data.asset.asset_type)) {
+        return '<p class="text-muted">이 대상(' + esc(srMgmtOf(id)) + ')은 자산 매칭 대상 유형이 아닙니다. (서버·스토리지만)</p>';
+    }
     var ip = srMatchConnIp(data);
     if (!ip) {
         return '<p class="text-muted">접속 가능한 IP가 없어 자산 매칭을 실행할 수 없습니다. (OS 또는 관리(10.x) IP 등록 후 가능)</p>';
     }
+    var st = srMatchState[id] || { phase: 'idle' };
+    var scanning = !!srMatchInflight[id];
+    var btnLabel = scanning ? '스캔 중… (최대 15초)' : (st.phase === 'idle' ? '스캔' : '다시 스캔');
+    var body;
+    if (scanning) body = '<p class="text-muted" style="font-size:13px;">스캔 중… 최대 15초 소요됩니다.</p>';
+    else if (st.phase === 'error') body = '<div class="alert alert-error" style="margin:0;">' + esc(st.msg || '스캔 실패') + '</div>';
+    else if (st.phase === 'applied') body = '<div class="alert alert-success" style="margin:0;">적용 완료 — 재고·모듈이 갱신되었습니다. 다시 적용하려면 [다시 스캔]을 누르세요.</div>';
+    else if (st.phase === 'conflict') body = '<div class="alert alert-error" style="margin:0;">다른 곳에서 먼저 적용되어 모듈 구성이 변경되었습니다. [다시 스캔] 후 재시도하세요.</div>';
+    else if (st.phase === 'result') body = '';   // srMatchAfterRender가 비교표 렌더
+    else body = '<p class="text-muted" style="font-size:13px;">[스캔]을 눌러 실제 장착 모듈을 수집·비교하세요.</p>';
     return '<div class="sr-match-head">' +
-        '<button type="button" class="btn btn-sm btn-primary" id="adpMatchScanBtn" onclick="srMatchScan(' + id + ')">스캔</button> ' +
+        '<button type="button" class="btn btn-sm btn-primary" id="adpMatchScanBtn" onclick="srMatchScan(' + id + ')"' + (scanning ? ' disabled' : '') + '>' + btnLabel + '</button> ' +
+        srTargetTag(id) + ' ' +
         '<span class="text-muted" style="font-size:12px;">대상 IP: ' + esc(ip) + ' · SSH 스캔(최대 15초)</span>' +
         '</div>' +
         '<div class="sr-match-warn">적용 시 등록 모듈이 실제 수집 결과로 교체되고 재고(storage) 수량이 변동됩니다. 적용 전 비교표를 확인하세요.</div>' +
-        '<div id="adpMatchBox" style="overflow-x:auto; margin-top:8px;"><p class="text-muted" style="font-size:13px;">[스캔]을 눌러 실제 장착 모듈을 수집·비교하세요.</p></div>';
+        '<div id="adpMatchBox" data-asset-id="' + id + '" style="overflow-x:auto; margin-top:8px;">' + body + '</div>';
 }
-var srMatchScanning = false;
-function srMatchScan(assetId) {
-    if (srMatchScanning) return;
+function srMatchAfterRender(id) {
+    var st = srMatchState[id];
+    if (!st || st.phase !== 'result' || srMatchInflight[id] || !DiscoveryCore.results[id]) return;
     var box = document.getElementById('adpMatchBox');
-    var btn = document.getElementById('adpMatchScanBtn');
-    srMatchScanning = true;
-    if (btn) { btn.disabled = true; btn.textContent = '스캔 중… (최대 15초)'; }
-    if (box) box.innerHTML = '<p class="text-muted" style="font-size:13px;">스캔 중… 최대 15초 소요됩니다.</p>';
-    var session = DiscoveryCore.mount(box, assetId, {
-        onApplied: function(id, result, d) { srMatchApplied(id, result, d); },
-        onConflict: function(id) { srMatchConflict(id); }
+    if (!box || parseInt(box.dataset.assetId) !== id) return;
+    DiscoveryCore.mount(box, id, {
+        onApplied: function(aid, result, d) { srMatchApplied(aid, result, d); },
+        onConflict: function(aid) { srMatchConflict(aid); }
     });
-    session.scan().then(function(d) {
-        srMatchScanning = false;
-        if (btn) { btn.disabled = false; btn.textContent = '다시 스캔'; }
+    DiscoveryCore.showDetail(id, true);   // 비교표를 이 대상 box에 렌더
+}
+function srMatchScan(assetId) {
+    if (srMatchInflight[assetId]) return;
+    srMatchInflight[assetId] = true;
+    srMatchState[assetId] = { phase: 'scanning' };
+    if (srMatchActive(assetId)) srRenderCurrent();
+    DiscoveryCore.scan(assetId).then(function(d) {
+        delete srMatchInflight[assetId];
         if (!d || d.status !== 'success') {
             var msg = (d && d.error) ? d.error : ((d && d.status) || '스캔 실패');
-            if (box) box.innerHTML = '<div class="alert alert-error" style="margin:0;">스캔 실패: ' + esc(msg) + '</div>';
-            return;
+            srMatchState[assetId] = { phase: 'error', msg: '스캔 실패: ' + msg };
+        } else {
+            srMatchState[assetId] = { phase: 'result' };
         }
-        DiscoveryCore.showDetail(assetId, true);   // 비교표를 adpMatchBox에 렌더
+        if (srMatchActive(assetId)) srRenderCurrent();   // 다른 대상 보는 중이면 결과만 보관
     }).catch(function() {
-        srMatchScanning = false;
-        if (btn) { btn.disabled = false; btn.textContent = '다시 스캔'; }
-        if (box) box.innerHTML = '<div class="alert alert-error" style="margin:0;">스캔 오류</div>';
+        delete srMatchInflight[assetId];
+        srMatchState[assetId] = { phase: 'error', msg: '스캔 오류' };
+        if (srMatchActive(assetId)) srRenderCurrent();
     });
 }
 function srMatchApplied(assetId, result, d) {
-    var box = document.getElementById('adpMatchBox');
-    if (box) box.innerHTML = '<div class="alert alert-success" style="margin:0;">적용 완료 — 재고·모듈이 갱신되었습니다. 다시 적용하려면 [다시 스캔]을 누르세요.</div>';
-    var btn = document.getElementById('adpMatchScanBtn'); if (btn) { btn.disabled = false; btn.textContent = '다시 스캔'; }
+    srMatchState[assetId] = { phase: 'applied' };
+    if (srMatchActive(assetId)) srRenderCurrent();
     srShowToast('자산 매칭 적용 완료');
-    // 팝업 캐시 갱신 → 모듈 탭 최신화 + 장비 목록 패널 행 갱신
+    // 해당 대상 캐시만 갱신 → 모듈 탭 최신화 + 장비 목록 패널 행 갱신 + 섀시 children 갱신(B-6 동작 유지)
     fetch('/assets/' + assetId + '/json').then(function(r){ return r.json(); }).then(function(j) {
         adpCache[assetId] = j;
-        if (j.asset && j.asset.parent_asset_id) delete adpCache[j.asset.parent_asset_id];   // B-6: 섀시 노드탭 재조회 유도
+        srInvalidateParent(assetId);
         if (typeof srRefreshAssetViews === 'function') srRefreshAssetViews(assetId);
         var panel = document.getElementById('srPanel');
         if (panel && panel.classList.contains('open') && typeof srPanelReload === 'function') srPanelReload();
     }).catch(function(){});
 }
 function srMatchConflict(assetId) {
-    var box = document.getElementById('adpMatchBox');
-    if (box) box.innerHTML = '<div class="alert alert-error" style="margin:0;">다른 곳에서 먼저 적용되어 모듈 구성이 변경되었습니다. [다시 스캔] 후 재시도하세요.</div>';
-    var btn = document.getElementById('adpMatchScanBtn'); if (btn) { btn.disabled = false; btn.textContent = '다시 스캔'; }
+    srMatchState[assetId] = { phase: 'conflict' };
+    if (srMatchActive(assetId)) srRenderCurrent();
 }
 // B-5b: ESC 순서(capture) — 미매칭 모달 먼저, 그다음 팝업. 패널 ESC(분할 모드 무반응)보다 앞서 처리.
 document.addEventListener('keydown', function(e) {
@@ -861,40 +1064,6 @@ document.addEventListener('keydown', function(e) {
     var popup = document.getElementById('assetDetailPopup');
     if (popup && popup.classList.contains('active')) { e.stopPropagation(); closeModal('assetDetailPopup'); return; }
 }, true);
-
-// ===== B-6: 섀시 [노드] 탭 =====
-function srNodesTabHtml(data) {
-    var nodes = srBladeNodes(data);
-    if (!nodes.length) return '<p class="text-muted">하위 노드가 없습니다.</p>';
-    var slotOrder = { left: 1, '좌측': 1, right: 2, '우측': 2 };
-    nodes = nodes.slice().sort(function(x, y){
-        var xi = (x.node_index != null) ? x.node_index : (slotOrder[x.blade_slot] || 99);
-        var yi = (y.node_index != null) ? y.node_index : (slotOrder[y.blade_slot] || 99);
-        if (xi !== yi) return xi - yi;
-        return String(x.management_number || '').localeCompare(String(y.management_number || ''));
-    });
-    var hasSwitch = nodes.some(function(n){ return n.asset_type === 'switch'; });
-    var html = '';
-    if (hasSwitch) html += '<p class="text-muted" style="font-size:12px;margin:0 0 6px;">SW 배지 = 스위치 블레이드</p>';
-    html += '<table class="adp-table"><tr><th>노드</th><th>관리번호</th><th>모델</th><th>대표 IP</th><th>상태</th><th>소유</th><th></th></tr>';
-    nodes.forEach(function(n){
-        var label = (n.node_index != null && n.node_index !== '') ? ('#' + esc(String(n.node_index))) : esc(n.blade_slot || '-');
-        if (n.asset_type === 'switch') label += ' <span class="badge">SW</span>';
-        var owner = (n.ownership === 'vendor') ? '<span class="badge badge-warning">' + esc(n.vendor_name || '업체') + '</span>' : '<span class="badge badge-success">자사</span>';
-        html += '<tr class="sr-node-row" onclick="srOpenNode(' + n.id + ')" style="cursor:pointer;">' +
-            '<td>' + label + '</td>' +
-            '<td>' + esc(n.management_number || n.asset_number || ('#' + n.id)) + '</td>' +
-            '<td>' + esc(n.model_name || '') + '</td>' +
-            '<td>' + esc(n.rep_ip || '-') + '</td>' +
-            '<td>' + esc(SR_STATUS_LABELS[n.status] || n.status || '') + '</td>' +
-            '<td>' + owner + '</td>' +
-            '<td><button type="button" class="btn btn-xs btn-outline" onclick="srOpenNode(' + n.id + ');event.stopPropagation();">열기</button></td>' +
-            '</tr>';
-    });
-    html += '</table>';
-    return html;
-}
-function srOpenNode(nodeId) { openAssetPopup(parseInt(nodeId), 'basic'); }
 
 // 공용: 자산 id → 서버실 화면에서 랙 셀로 스크롤 + 강조. DOM에 없으면(미배치) 안내.
 function locateAsset(assetId) {
@@ -909,10 +1078,11 @@ function locateAsset(assetId) {
         clearTimeout(srHlTimer);
         srHlTimer = setTimeout(function(){ document.querySelectorAll('.sr-highlight').forEach(function(h){ h.classList.remove('sr-highlight'); }); }, 4000);
     }
-    // json 조회 — (a) 자체 셀 없으면 블레이드 부모 셀/미배치 안내, (b) B-6: 노드면 노드 팝업 자동 오픈
+    // json 조회 — (a) 자체 셀 없으면 블레이드 부모 셀/미배치 안내, (b) B-6b: 노드면 섀시 팝업을 그 노드 대상으로 오픈
     fetch('/assets/' + assetId + '/json').then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
         if (!d || !d.asset) { if (!hadOwn) srShowToast('이 서버실 화면에서 위치를 찾을 수 없습니다.'); return; }
-        var isNode = !!(d.asset.parent_asset_id && d.parent && (d.parent.asset_type === 'server' || d.parent.asset_type === 'storage'));
+        adpCache[assetId] = d;
+        var isNode = srIsBladeNode(d);   // B-6b: 자신이 cdu/chiller면 제외
         if (!hadOwn) {
             var pid = d.asset.parent_asset_id;
             var pcells = pid ? document.querySelectorAll('.clickable-unit[data-asset-id="' + pid + '"]') : [];
@@ -929,7 +1099,7 @@ function locateAsset(assetId) {
                 srShowToast('랙에 배치되지 않은 자산입니다 (상태: ' + st + ').');
             }
         }
-        if (isNode) openAssetPopup(assetId, 'basic');   // B-6: 노드 팝업 자동 오픈(renderAdp가 ◀섀시 링크 부착)
+        if (isNode) openAssetPopup(assetId, 'basic');   // B-6b: openAssetPopup이 섀시 팝업(노드 target, 기본정보)으로 연다
     }).catch(function(){ if (!hadOwn) srShowToast('이 서버실 화면에서 위치를 찾을 수 없습니다.'); });
     return hadOwn;
 }
@@ -1286,8 +1456,31 @@ function srPanelRender() {
     });
 }
 // ===== UX-2: 팝업 인라인 빠른 수정 =====
-function srCurrentAssetId() { return parseInt((document.getElementById('adpDetailLink').href.split('/assets/')[1] || '').split(/[\/?#]/)[0]); }
-function srEditBar(tab) { return '<div class="adp-edit-bar"><button type="button" class="btn btn-sm btn-outline" onclick="srEditTab(\'' + tab + '\')">&#9998; 편집</button></div>'; }
+// B-6b: 현재 대상(하위 탭 선택). 편집·저장은 이 값이 아니라 srEdit.id(편집을 시작한 대상)로만 전송.
+function srCurrentAssetId() { return adpTargetId || parseInt((document.getElementById('adpDetailLink').href.split('/assets/')[1] || '').split(/[\/?#]/)[0]); }
+function srEditBar(tab) { return '<div class="adp-edit-bar"><button type="button" class="btn btn-sm btn-outline" onclick="srEditTab(\'' + tab + '\')">&#9998; 편집</button>' + srTargetTag() + '</div>'; }
+// 편집 폼 스냅샷(입력값 + 행 수 + 삭제 예정) — 미저장 변경 판정용
+function srEditSnapshot() {
+    var vals = [];
+    document.querySelectorAll('#adpContent .adp-edit-form input, #adpContent .adp-edit-form select, #adpContent .adp-edit-form textarea').forEach(function(el){ vals.push(el.className + '=' + el.value); });
+    return JSON.stringify([vals, srCredDeleted.length]);
+}
+function srBeginEdit(id, tab) { srEdit = { id: id, tab: tab, snap: srEditSnapshot() }; }
+function srEditDirty() { return !!(srEdit && document.querySelector('#adpContent .adp-edit-form') && srEditSnapshot() !== srEdit.snap); }
+// 하위 탭 전환 시 미저장 변경이 있으면 확인(버리고 이동 / 취소)
+function srConfirmLeaveEdit() {
+    if (!srEditDirty()) return true;
+    return confirm('저장하지 않은 변경이 있습니다 (대상: ' + srMgmtOf(srEdit.id) + ').\n[확인] 변경을 버리고 이동 · [취소] 편집 계속');
+}
+function srEditFooter(saveFn, tab) {
+    return '<div class="adp-edit-bar">' +
+        '<button type="button" class="btn btn-sm btn-primary" id="srQuickSaveBtn" onclick="' + saveFn + '">저장</button> ' +
+        '<button type="button" class="btn btn-sm btn-secondary" onclick="srQuickCancel(\'' + tab + '\')">취소</button>' +
+        srTargetTag() +
+        '<span id="srQuickMsg" class="sr-edit-msg"></span></div>';
+}
+// 저장 응답 후 화면 복귀 — 같은 편집 세션일 때만 폼을 닫고, 그 사이 다른 대상으로 옮겼으면 크롬만 갱신
+function srAfterSave(ed, tab) { if (srEdit === ed) srQuickCancel(tab); else srRenderChrome(); }
 // 탭별 화이트리스트 필드 정의
 var SR_EDIT_FIELDS = {
     basic: [ { k:'manufacturer', label:'제조사' }, { k:'model_name', label:'모델명' }, { k:'serial_number', label:'시리얼' }, { k:'status', label:'상태', type:'status' } ],
@@ -1319,15 +1512,14 @@ function srEditTab(tab) {
         return '<tr><th>' + f.label + '</th><td>' + input + '</td></tr>';
     }).join('');
     var html = '<table class="adp-table adp-edit-form">' + rows + '</table>' +
-        '<div class="adp-edit-bar">' +
-        '<button type="button" class="btn btn-sm btn-primary" id="srQuickSaveBtn" onclick="srQuickSave(\'' + tab + '\')">저장</button> ' +
-        '<button type="button" class="btn btn-sm btn-secondary" onclick="srQuickCancel(\'' + tab + '\')">취소</button>' +
-        '<span id="srQuickMsg" class="sr-edit-msg"></span></div>';
+        srEditFooter('srQuickSave(\'' + tab + '\')', tab);
     document.getElementById('adpContent').innerHTML = html;
+    srBeginEdit(id, tab);
 }
-function srQuickCancel(tab) { var id = srCurrentAssetId(); renderAdpTab(adpCache[id], tab); }
+function srQuickCancel(tab) { srEdit = null; srRenderCurrent(); }
 function srQuickSave(tab) {
-    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    var ed = srEdit; if (!ed) return;
+    var id = ed.id; var data = adpCache[id]; if (!data) return;   // B-6b: 편집 시작 대상 고정
     var body = { updated_at_token: data.asset.updated_at_token };
     document.querySelectorAll('#adpContent .sr-edit-input').forEach(function(el){ body[el.dataset.k] = el.value; });
     var btn = document.getElementById('srQuickSaveBtn'); var msg = document.getElementById('srQuickMsg');
@@ -1335,14 +1527,14 @@ function srQuickSave(tab) {
     fetch('/assets/' + id + '/quick', { method:'POST', headers:{ 'Content-Type':'application/json', 'Accept':'application/json' }, body: JSON.stringify(body) })
         .then(function(r){ return r.json().then(function(j){ return { status:r.status, j:j }; }); })
         .then(function(res){
-            if (res.status === 409) { if (msg) msg.textContent = ''; alert('다른 사용자가 먼저 수정했습니다. 최신 값으로 다시 불러옵니다.'); if (res.j.asset) adpCache[id].asset = res.j.asset; srQuickCancel(tab); return; }
+            if (res.status === 409) { if (msg) msg.textContent = ''; alert('다른 사용자가 먼저 수정했습니다. 최신 값으로 다시 불러옵니다.'); if (res.j.asset) adpCache[id].asset = res.j.asset; srAfterSave(ed, tab); return; }
             if (res.status === 403) { if (btn) btn.disabled=false; if (msg) msg.textContent = '수정 권한이 없습니다.'; return; }
             if (res.status !== 200) { if (btn) btn.disabled=false; if (msg) msg.textContent = (res.j && res.j.error) || '저장 실패'; return; }
-            // 성공
+            // 성공 — 해당 대상 캐시만 갱신 + 섀시 children 갱신(B-6 동작 유지)
             if (res.j.asset) adpCache[id].asset = res.j.asset;
-            if (adpCache[id].asset && adpCache[id].asset.parent_asset_id) delete adpCache[adpCache[id].asset.parent_asset_id];   // B-6: 섀시 노드탭 재조회
+            srInvalidateParent(id);
             srRefreshAssetViews(id);
-            srQuickCancel(tab);
+            srAfterSave(ed, tab);
         })
         .catch(function(){ if (btn) btn.disabled=false; if (msg) msg.textContent = '저장 오류'; });
 }
@@ -1365,14 +1557,13 @@ function srEditIpTab() {
     var html = '<table class="adp-table adp-edit-form"><tr><th>유형</th><th>인터페이스</th><th>속도</th><th>IP</th><th>설명</th><th></th></tr>' +
         '<tbody id="srIpRows">' + rowsHtml + '</tbody></table>' +
         '<div class="adp-edit-bar"><button type="button" class="btn btn-xs btn-outline" onclick="document.getElementById(\'srIpRows\').insertAdjacentHTML(\'beforeend\', srIpRow())">+ 행 추가</button></div>' +
-        '<div class="adp-edit-bar">' +
-        '<button type="button" class="btn btn-sm btn-primary" id="srQuickSaveBtn" onclick="srSaveIps()">저장</button> ' +
-        '<button type="button" class="btn btn-sm btn-secondary" onclick="srQuickCancel(\'ip\')">취소</button>' +
-        '<span id="srQuickMsg" class="sr-edit-msg"></span></div>';
+        srEditFooter('srSaveIps()', 'ip');
     document.getElementById('adpContent').innerHTML = html;
+    srBeginEdit(id, 'ip');
 }
 function srSaveIps() {
-    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    var ed = srEdit; if (!ed) return;
+    var id = ed.id; var data = adpCache[id]; if (!data) return;   // B-6b: 편집 시작 대상 고정
     var ips = [];
     document.querySelectorAll('#srIpRows .sr-ip-row').forEach(function(tr){
         var addr = tr.querySelector('.sr-ip-addr').value.trim();
@@ -1394,14 +1585,14 @@ function srSaveIps() {
                     });
                     if (btn) btn.disabled = false;
                     if (msg) msg.textContent = '충돌: ' + res.j.conflicts.map(function(c){return c.ip_address;}).join(', ');
-                } else { if (msg) msg.textContent=''; alert('다른 사용자가 먼저 수정했습니다. 최신값으로 다시 불러옵니다.'); srRefreshFromAvail(id, res.j); srQuickCancel('ip'); }
+                } else { if (msg) msg.textContent=''; alert('다른 사용자가 먼저 수정했습니다. 최신값으로 다시 불러옵니다.'); srRefreshFromAvail(id, res.j); srAfterSave(ed, 'ip'); }
                 return;
             }
             if (res.status === 403) { if (btn) btn.disabled=false; if (msg) msg.textContent='수정 권한이 없습니다.'; return; }
             if (res.status !== 200) { if (btn) btn.disabled=false; if (msg) msg.textContent=(res.j&&res.j.error)||'저장 실패'; return; }
             srRefreshFromAvail(id, res.j);
             if (res.j.warnings && res.j.warnings.length) alert('경고:\n' + res.j.warnings.join('\n'));
-            srQuickCancel('ip');
+            srAfterSave(ed, 'ip');
         })
         .catch(function(){ if (btn) btn.disabled=false; if (msg) msg.textContent='저장 오류'; });
 }
@@ -1430,13 +1621,13 @@ function srEditCredTab() {
     var html = '<table class="adp-table adp-edit-form"><tr><th>유형</th><th>사용자명</th><th>비밀번호</th><th>설명</th><th></th></tr>' +
         '<tbody id="srCredRows">' + rowsHtml + '</tbody></table>' +
         '<div class="adp-edit-bar"><button type="button" class="btn btn-xs btn-outline" onclick="document.getElementById(\'srCredRows\').insertAdjacentHTML(\'beforeend\', srCredRow())">+ 행 추가</button></div>' +
-        '<div class="adp-edit-bar"><button type="button" class="btn btn-sm btn-primary" id="srQuickSaveBtn" onclick="srSaveCreds()">저장</button> ' +
-        '<button type="button" class="btn btn-sm btn-secondary" onclick="srQuickCancel(\'access\')">취소</button>' +
-        '<span id="srQuickMsg" class="sr-edit-msg"></span></div>';
+        srEditFooter('srSaveCreds()', 'access');
     document.getElementById('adpContent').innerHTML = html;
+    srBeginEdit(id, 'access');
 }
 function srSaveCreds() {
-    var id = srCurrentAssetId(); var data = adpCache[id]; if (!data) return;
+    var ed = srEdit; if (!ed) return;
+    var id = ed.id; var data = adpCache[id]; if (!data) return;   // B-6b: 편집 시작 대상 고정
     var creds = [];
     document.querySelectorAll('#srCredRows .sr-cred-row').forEach(function(tr){
         creds.push({ id: tr.dataset.id ? parseInt(tr.dataset.id,10) : null, credential_type: tr.querySelector('.sr-cred-type').value, username: tr.querySelector('.sr-cred-user').value.trim(), password: tr.querySelector('.sr-cred-pw').value, description: tr.querySelector('.sr-cred-desc').value.trim() });
@@ -1446,25 +1637,25 @@ function srSaveCreds() {
     fetch('/assets/' + id + '/quick-credentials', { method:'POST', headers:{'Content-Type':'application/json','Accept':'application/json'}, body: JSON.stringify({ credentials: creds, deleted_ids: srCredDeleted, updated_at_token: data.asset.updated_at_token }) })
         .then(function(r){ return r.json().then(function(j){ return {status:r.status,j:j}; }); })
         .then(function(res){
-            if (res.status === 409) { if (msg) msg.textContent=''; alert('다른 사용자가 먼저 수정했습니다. 최신값으로 다시 불러옵니다.'); srRefreshFromAvail(id, res.j); srQuickCancel('access'); return; }
+            if (res.status === 409) { if (msg) msg.textContent=''; alert('다른 사용자가 먼저 수정했습니다. 최신값으로 다시 불러옵니다.'); srRefreshFromAvail(id, res.j); srAfterSave(ed, 'access'); return; }
             if (res.status === 403) { if (btn) btn.disabled=false; if (msg) msg.textContent='수정 권한이 없습니다.'; return; }
             if (res.status !== 200) { if (btn) btn.disabled=false; if (msg) msg.textContent=(res.j&&res.j.error)||'저장 실패'; return; }
             srRefreshFromAvail(id, res.j);
-            srQuickCancel('access');
+            srAfterSave(ed, 'access');
         })
         .catch(function(){ if (btn) btn.disabled=false; if (msg) msg.textContent='저장 오류'; });
 }
 // 응답의 가용성·IP·자격증명·토큰으로 adpCache 갱신 + 전원/SSH/SOL/BMC 버튼 재계산
 function srRefreshFromAvail(id, j) {
     var c = adpCache[id]; if (!c) return;
-    if (c.asset && c.asset.parent_asset_id) delete adpCache[c.asset.parent_asset_id];   // B-6: 섀시 노드탭 재조회 유도
     if (j.assetIps) c.assetIps = j.assetIps;
     if (j.credentials) c.credentials = j.credentials;
     if (j.updated_at_token) c.asset.updated_at_token = j.updated_at_token;
     if (typeof j.sshAvailable !== 'undefined') c.sshAvailable = j.sshAvailable;
     if (typeof j.solAvailable !== 'undefined') c.solAvailable = j.solAvailable;
     if (typeof j.bmcWebUrl !== 'undefined') c.bmcWebUrl = j.bmcWebUrl;
-    if (typeof renderAdp === 'function') renderAdp(c);   // 전원 탭 노출 등 재계산
+    srInvalidateParent(id);                                       // B-6 동작 유지(열린 루트면 재조회)
+    if (typeof srRenderChrome === 'function') srRenderChrome();   // B-6b: 전원 탭 노출 등 재계산(대상·하위 탭 유지)
     // 장비 목록 패널 대표 IP 갱신
     if (srPanelData && srPanelData.length && j.assetIps) {
         var row = srPanelData.find(function(x){ return x.id === id; });
