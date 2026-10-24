@@ -1,7 +1,16 @@
 # B-3 이후 애플리케이션 이식 — 재개 가이드
 
-> 작성일: 2026-06-26 / 최종 현행화: 2026-10-24 (v2.6.0 자산 매칭 팝업)
+> 작성일: 2026-06-26 / 최종 현행화: 2026-10-24 (v2.7.0 블레이드 노드)
 > 작성 목적: 서버 종료 전 맥락 보존. 재개 시 이 문서 + git log부터 확인.
+
+> ★ **v2.7.0 블레이드 노드 (2026-10-24, 격리 검증 PASS · DDL 없음)** — B-6(섀시 노드 진입) + B-6b(각 탭 아래 [섀시|노드1|노드2] 하위 탭).
+> - **노드 판정**: 섀시의 노드 = 자식 중 `asset_type ∉ {cdu, chiller}`(`srBladeNodes`). 자산이 노드인지 = 부모가 server/storage **이고 자신이 cdu/chiller가 아님**(`srIsBladeNode`, BUG-41). 정렬 = node_index → 슬롯(좌측/left=1, 우측/right=2) → 관리번호. 라벨 "노드N + 슬롯명"(node_index 없으면 정렬 순번).
+> - **하위 탭 구조**(rooms.ejs): `adpRootId`(섀시 또는 일반 자산) / `adpTargetId`(현재 대상) 분리. 노드로 열면 `openAssetPopup`이 부모 섀시 팝업을 그 노드 대상으로 연다(진입 경로 공통: 셀·패널 [정보]·locateAsset·?focus·검색). 메인 탭 전환에도 대상 유지. **빈 탭 자동 전환**: 대상=섀시이고 그 탭에서 섀시가 비면 첫 노드로(IP=asset_ips 0 ∧ 레거시 ip_address 없음 / 접속=자격증명 0(레거시 ssh_user는 DEFAULT 'root'라 제외) / 모듈 0 / 전원=유형·BMC 미충족 / 매칭=권한·유형·접속IP 미충족). 기본·운영은 섀시 유지, [섀시] 명시 선택은 전환 안 함. 메인 탭 노출 = 섀시 또는 노드 중 하나라도 충족(노드 BMC 판정 위해 섀시 팝업 열 때 노드 json 선조회).
+> - **쓰기 대상 고정**: 빠른수정은 `srEdit={id,tab,snap}` — 저장 요청은 **편집 시작 id로만**, 하위 탭 전환 시 미저장 변경이면 확인창, 저장 응답 시 그 사이 다른 대상으로 옮겼으면 폼을 닫지 않고 크롬만 갱신. 자산 매칭은 **대상별 상태**(`srMatchState[id]`, 결과·지문은 `DiscoveryCore.results[id]`) — 비교표는 "현재 화면 대상"일 때만 그 대상 box에 mount·렌더(노드1 스캔이 노드2 화면에 그려지지 않게). 저장/적용 후 해당 대상 캐시만 갱신 + 부모 섀시는 열린 루트면 재조회, 아니면 캐시 삭제.
+> - **노드 전원 경로**: 제어 = `POST /racks/<섀시 랙 id>/power-control {assetId: 노드 id}`(BUG-40). 상태 조회는 미지원 안내(BUG-43 — `findByRack`이 rack_id 기준이라 노드 미포함).
+> - **노드 rack_id NULL 설계**: BUG-9/10 — 노드는 자체 위치 없음(섀시 기준). 위치·전원·검색 강조는 모두 부모 섀시로 귀결.
+> - **보안**: `/assets/:id/json` children·parent 레거시 `ssh_password` 키 제거(v2.4.1 누락 경로).
+> - **확립 규칙**: ① DOM 동작 검증은 **jsdom을 세션 스크래치패드에만 설치**해 격리 서버가 렌더한 실페이지·실코드를 실행(요청 본문·확인창 기록) — 프로젝트 의존성 무변경, 검증 후 삭제. ② SSH·IPMI는 격리 서버에만 **`node -r <프리로드>`로 `sshDiscovery.connectAndDiscover`·`utils/ipmi.ipmiExecFile` mock** + `IPMI_DRYRUN=1`, 테스트 IP는 TEST-NET(192.0.2.x) — 라우트의 비교·지문 계산은 실코드 그대로. ③ 격리 프로세스 종료는 포트→PID→명령행 확인 후 그 PID만.
 
 > ★ **v2.6.0 자산 매칭 팝업 (2026-10-24, 격리 검증 PASS · DDL 없음)** — /discovery 단일 장비 매칭 로직을 공용화해 서버실 팝업에서 실행 + 동시 적용 보호 + 패널 상태 필터.
 > - **discovery-core.js**(B-5a 추출): 단일 장비 흐름(scan→비교→소유/분할→apply→미매칭 link/register) 공용 모듈. 공개 API `DiscoveryCore.configure/scan/mount/showDetail/applyAsset/results`. mount(rootEl, assetId, {onApplied,onConflict,detailRow}) — consumer 리졸버로 DOM 주입(기본값=/discovery 전역 id라 /discovery 동작 불변). consumer 옵션: `contentEl·detailRow·statusCell`(팝업 null)·`silentSuccess`(팝업 true)·`onApplied`·`onConflict`. 전역 노출 이름 30개(escapeHtml/showDetail/applyAsset/… — onclick·페이지 호환). **데드 코드**: renderDiscoveredModuleTable·renderModuleTable(호출처 없음).
