@@ -1,4 +1,4 @@
-<%- include('../partials/header', { title, currentPath, extraCss }) %>
+<%- include('../partials/header', { title, currentPath, extraCss, bodyClass: 'page-wide' }) %>
 
 <div class="page-header">
     <h1>부품 현황</h1>
@@ -55,7 +55,7 @@
 .modal-close:hover { color: var(--danger, #e00); }
 /* B-7: 표 스크롤 컨테이너(3개 탭 공통) — 상단 고정 내비 56px + 여백 40px을 뺀 높이. 페이지를 내려 표 상단을 맞추면
    가로 스크롤바가 항상 화면 안에 보임. 머리줄 sticky. */
-.mi-scroll { max-height: calc(100vh - 96px); overflow: auto; }
+.mi-scroll { max-height: calc(100vh - 96px); overflow: auto; scrollbar-gutter: stable; }   /* 세로 스크롤바 자리 상시 확보 → 마지막 열 가림 방지 */
 .mi-scroll thead th { position: sticky; top: 0; z-index: 2; }
 </style>
 
@@ -74,6 +74,21 @@
       .sort((a, b) => (a.key === 'none') - (b.key === 'none') || b.rows.length - a.rows.length || a.name.localeCompare(b.name));
   }
   const groups = ownerTab === 'vendor' ? vendorGroups : [{ key: '', name: '', rows: items }];
+  // B-7 보정: 열 폭 = 내용 기준(이 탭 데이터의 최장 텍스트 추정 폭 + 셀 패딩 16). 한글 1em, 그 외 0.6em(모노 기준 — 보수적).
+  // 남는 폭은 폭 미지정 열(제조사·모델, 스펙)이 나눠 가짐. 근거는 리포트 표 참조.
+  const miPx = (s, fz) => { let w = 0; for (const ch of String(s == null ? '' : s)) w += /[ᄀ-ᇿ㄰-㆏가-힯]/.test(ch) ? fz : fz * 0.6; return Math.ceil(w); };
+  const miMax = (arr) => arr.reduce((m, v) => Math.max(m, v), 0);
+  const miClamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  const miHasAsset = items.some(i => i.asset_number);
+  const miCols = {
+    code: miClamp(miMax(items.map(i => miPx(i.item_code || '-', 13))) + 16, 72, 210),
+    type: miClamp(miMax(items.map(i => miPx(typeLabels[i.module_type] || i.module_type, 12))) + 18 + 16, 58, 90),
+    owner: ownerTab === 'company' ? 58 : miClamp(miMax(items.map(i => miPx(i.owner === 'vendor' ? (vendorName(i.owner_vendor_id) || '업체') : '자사', 12))) + 18 + 16, 58, 118),
+    asset: miHasAsset ? miClamp(miMax(items.map(i => miPx(i.asset_number || '-', 14))) + 16, 72, 150) : 72,
+    cap: 120, total: 48, storage: 58, inUse: 58, spare: 48, more: 48
+  };
+  const miFixed = Object.keys(miCols).reduce((s, k) => s + miCols[k], 0);
+  const miMinWidth = miFixed + 200 + 160;   // 제조사·모델 ≥200, 스펙 ≥160
 %>
 <div class="mi-owner-tabs" role="tablist">
     <% ownerTabs.forEach(([k, label]) => { %>
@@ -122,11 +137,11 @@
         </div>
     </div>
     <div class="table-wrapper mi-scroll">
-        <table class="mi-table">
+        <table class="mi-table" style="min-width:<%= miMinWidth %>px" data-min-width="<%= miMinWidth %>">
             <colgroup>
-                <col style="width:150px"><col style="width:64px"><col style="width:100px"><col style="width:110px">
-                <col><col style="width:140px"><col style="width:180px">
-                <col style="width:56px"><col style="width:56px"><col style="width:56px"><col style="width:56px"><col style="width:44px">
+                <col style="width:<%= miCols.code %>px"><col style="width:<%= miCols.type %>px"><col style="width:<%= miCols.owner %>px"><col style="width:<%= miCols.asset %>px">
+                <col class="mi-col-model"><col style="width:<%= miCols.cap %>px"><col class="mi-col-spec">
+                <col style="width:<%= miCols.total %>px"><col style="width:<%= miCols.storage %>px"><col style="width:<%= miCols.inUse %>px"><col style="width:<%= miCols.spare %>px"><col style="width:<%= miCols.more %>px">
             </colgroup>
             <thead>
                 <tr>
@@ -141,7 +156,7 @@
                     <th class="mi-num">장비실</th>
                     <th class="mi-num">사용중</th>
                     <th class="mi-num">여유</th>
-                    <th></th>
+                    <th class="mi-sticky-r" aria-label="작업"></th>
                 </tr>
             </thead>
             <tbody>
@@ -157,7 +172,7 @@
                 </td></tr>
                 <% } %>
                 <% g.rows.forEach(item => { %>
-                <tr class="mi-row<%= item.spare_quantity > 0 ? '' : ' text-muted' %>" style="<%= item.spare_quantity > 0 ? 'background:#f0fdf4;' : '' %>"
+                <tr class="mi-row<%= item.spare_quantity > 0 ? '' : ' text-muted' %>" style="<%= item.spare_quantity > 0 ? 'background:var(--surface-success);' : '' %>"
                     data-type="<%= item.module_type %>" data-vendor="<%= g.key %>" data-spare="<%= item.spare_quantity > 0 ? 1 : 0 %>" data-qty="<%= Number(item.total_quantity) || 0 %>" data-search="<%= miSearchKey(item) %>">
                     <td class="mi-sticky">
                         <a href="#" class="comp-code-link" data-code="<%= item.item_code %>" style="font-weight:bold; cursor:pointer;"><code><%= item.item_code || '-' %></code></a>
@@ -181,7 +196,7 @@
                     <td class="mi-num<%= canEdit ? ' storage-editable' : '' %>" data-inv-id="<%= item.id %>" data-code="<%= item.item_code %>"<%- canEdit ? ' style="cursor:pointer;" title="클릭하여 수정"' : '' %>><%= item.storage_quantity || 0 %></td>
                     <td class="mi-num"><%= item.in_use_quantity %></td>
                     <td class="mi-num"><strong style="color: <%= item.spare_quantity > 0 ? 'var(--success)' : 'var(--text-light)' %>"><%= item.spare_quantity %></strong></td>
-                    <td>
+                    <td class="mi-sticky-r">
                         <button type="button" class="btn btn-sm btn-outline mi-more" title="작업" aria-haspopup="menu"
                                 data-inv-id="<%= item.id %>" data-code="<%= item.item_code %>" data-total="<%= item.total_quantity %>"
                                 data-can-return="<%= (canEdit && item.owner === 'vendor' && item.total_quantity > 0) ? 1 : 0 %>">⋯</button>
@@ -860,11 +875,15 @@ document.querySelectorAll('.comp-code-link').forEach(function(link) {
 .mi-tools { display:flex; gap:12px; align-items:center; }
 .mi-tools input[type=search] { width:260px; margin:0; }
 .mi-spare-label { margin:0; display:flex; gap:6px; align-items:center; cursor:pointer; white-space:nowrap; }
-.mi-table { table-layout: fixed; width: 100%; min-width: 1232px; }
+/* B-7 보정: min-width는 표 인라인 style(열 폭 합, 데이터 기준 계산). 셀 패딩 8px 통일(폭 계산의 +16 근거). */
+.mi-table { table-layout: fixed; width: 100%; }
 .mi-table tbody tr { background: var(--bg-white); }
-.mi-table .mi-sticky { position: sticky; left: 0; z-index: 1; background: inherit; }
-.mi-table thead th.mi-sticky { z-index: 3; background: var(--bg); }
-.mi-table td, .mi-table th { overflow: hidden; }
+.mi-table td, .mi-table th { overflow: hidden; padding-left: 8px; padding-right: 8px; }
+/* 좌(코드)·우([⋯]) 고정 열 — 대칭. border-collapse에서 sticky 셀 테두리는 따라오지 않으므로 inset 그림자로 경계선 */
+.mi-table .mi-sticky { position: sticky; left: 0; z-index: 1; background: inherit; box-shadow: inset -1px 0 0 var(--border); }
+.mi-table .mi-sticky-r { position: sticky; right: 0; z-index: 1; background: inherit; box-shadow: inset 1px 0 0 var(--border); text-align: center; padding-left: 4px; padding-right: 4px; }
+.mi-table thead th.mi-sticky, .mi-table thead th.mi-sticky-r { z-index: 3; background: var(--bg); }
+.mi-table .mi-more { padding: 2px 8px; line-height: 1.2; }
 .mi-ellip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mi-mfm .mi-mf { font-size: 12px; color: var(--text-light); }
 .mi-mfm .mi-md { font-weight: 600; }

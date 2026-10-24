@@ -63,6 +63,25 @@
     --text-secondary: var(--tui-fg-dim);
     --bg-primary: var(--tui-bg);
     --bg-secondary: var(--tui-bg);
+
+    /* v2.8.0: main.css 의미 토큰(밝은 배경 정리) 다크 매핑 — 틴트는 색조만 남긴 어두운 면, 글자는 액센트 */
+    --surface-muted: var(--tui-bg-raise);
+    --surface-strong: var(--tui-border);
+    --surface-info: #122030;
+    --surface-success: #11251a;
+    --surface-success-strong: #173a25;
+    --surface-warn: #262010;
+    --surface-warn-strong: #332a0c;
+    --surface-danger: #2a1414;
+    --surface-select: #1d3a5c;
+    --surface-select-alt: #4a3a0a;
+    --line-info: #2c4a6b;
+    --line-success: #2e5a3b;
+    --line-warn: #6b5a1c;
+    --line-danger: #6b2c2c;
+    --on-info: var(--tui-blue);
+    --on-warn: var(--tui-yellow);
+    --on-danger: var(--tui-red);
 }
 
 /* ============ 베이스 ============ */
@@ -512,6 +531,8 @@ body .room-type-chip.storage { background: var(--tui-bg-raise); color: var(--tui
 body .room-type-chip.pdu { background: var(--tui-bg-raise); color: var(--tui-magenta); }
 body .room-type-chip.office { background: var(--tui-bg-raise); color: var(--tui-magenta); }
 body .room-type-chip.etc { background: var(--tui-bg-raise); color: var(--tui-blue); }
+body .room-type-chip.ups { background: var(--tui-bg-raise); color: var(--tui-magenta); }   /* v2.8.0: 누락분 */
+body .room-type-chip.kvm { background: var(--tui-bg-raise); color: var(--tui-cyan); }
 body .rack-stats-chip.company { background: var(--tui-bg-raise); color: var(--tui-blue); }
 body .rack-stats-chip.vendor { background: var(--tui-bg-raise); color: var(--tui-orange); }
 body .rack-stats-chip.type-server { background: var(--tui-bg-raise); color: var(--tui-blue); }
@@ -698,7 +719,8 @@ body .mi-chip:not(.active):not([disabled]):hover { background: var(--tui-bg-rais
 body .mi-chip.active { background: var(--tui-green); color: var(--tui-bg); border-color: var(--tui-green); }
 body .mi-table tbody tr { background: var(--tui-bg); }
 body .mi-table tbody tr:hover { background: var(--tui-bg-raise); }
-body .mi-table thead th.mi-sticky { background: var(--tui-green); }
+body .mi-table thead th.mi-sticky, body .mi-table thead th.mi-sticky-r { background: var(--tui-green); }
+body .mi-table .mi-more { padding: 1px 4px; gap: 0; }   /* [⋯] 48px 열 안에 괄호 포함 수용 */
 body .mi-mfm .mi-mf { color: var(--tui-fg-dim); }
 body .mi-group-head td { background: var(--tui-bg-raise); color: var(--tui-fg); border-bottom-color: var(--tui-border); }
 body .mi-group-meta { color: var(--tui-fg-dim); }

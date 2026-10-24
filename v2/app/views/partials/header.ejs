@@ -10,7 +10,7 @@
     <% } %>
     <link rel="stylesheet" href="/css/tui-theme.css?v=<%= Date.now() %>"><%# B-T1 TUI 테마 — 이 줄 삭제 시 완전 원복 %>
 </head>
-<body>
+<body<% if (typeof bodyClass !== 'undefined' && bodyClass) { %> class="<%= bodyClass %>"<% } %>><%# 페이지별 body 클래스(예: page-wide = 넓은 화면 모드) %>
     <nav class="navbar">
         <div class="nav-brand">
             <a href="/">IT 자산 관리</a>

@@ -320,8 +320,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <style>
 .asset-results { position:relative; }
-.asset-result-item { padding:4px 8px; border:1px solid #ddd; border-top:none; cursor:pointer; font-size:0.85em; background:#fff; }
-.asset-result-item:hover { background:#f0f4f8; }
+.asset-result-item { padding:4px 8px; border:1px solid var(--border); border-top:none; cursor:pointer; font-size:0.85em; background:var(--bg-white); }
+.asset-result-item:hover { background:var(--surface-muted); }
 </style>
 
 <%- include('../partials/footer', { extraJs }) %>

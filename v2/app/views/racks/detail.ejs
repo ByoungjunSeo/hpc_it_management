@@ -260,7 +260,7 @@ function getAssetClass(info) {
             <p><strong>장비 수:</strong> <%= assets.length %>대</p>
             <% if (rack.switch_slots) { %><p><strong>스위치 슬롯:</strong> <%= rack.switch_slots %>개</p><% } %>
             <% if (rack.linked_asset_id) { %>
-            <div style="margin-top:8px; padding:8px; background:#eff6ff; border-radius:6px; font-size:12px;">
+            <div style="margin-top:8px; padding:8px; background:var(--surface-info); border-radius:6px; font-size:12px;">
                 <p style="margin:0 0 4px;"><strong>연결 자산:</strong>
                     <a href="/assets/<%= rack.linked_asset_id %>"><%= rack.linked_model_name || rack.linked_asset_number || '자산 #' + rack.linked_asset_id %></a>
                 </p>
@@ -270,7 +270,7 @@ function getAssetClass(info) {
             <% } %>
             <% if (rack.description) { %><p><strong>설명:</strong> <%= rack.description %></p><% } %>
             <% if (typeof connectedInfra !== 'undefined' && connectedInfra.length > 0) { %>
-            <div style="margin-top:8px; padding:8px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; font-size:12px;">
+            <div style="margin-top:8px; padding:8px; background:var(--surface-success); border:1px solid var(--line-success); border-radius:6px; font-size:12px;">
                 <p style="margin:0 0 6px; font-weight:600;">연결 설비</p>
                 <% connectedInfra.forEach(function(ci) { %>
                 <p style="margin:0 0 3px;">
@@ -677,7 +677,7 @@ function renderPopup(assetId, data) {
 
     // Parent chassis info (if this is a node)
     if (data.parent) {
-        html += '<div style="margin-top:8px; padding:6px 10px; background:#eff6ff; border-radius:4px; font-size:12px; color:#1e40af;">' +
+        html += '<div style="margin-top:8px; padding:6px 10px; background:var(--surface-info); border-radius:4px; font-size:12px; color:var(--on-info);">' +
             '<strong>섀시:</strong> ' + esc(data.parent.management_number) + ' (' + esc(data.parent.model_name || '') + ')' +
             '</div>';
     }
@@ -726,7 +726,7 @@ function renderPopup(assetId, data) {
     if (powerTypes.indexOf(a.asset_type) !== -1) {
         var hasBmc = data.assetIps && data.assetIps.some(function(ip) { return ip.ip_type === 'bmc'; });
         if (hasBmc) {
-            html += '<div class="power-control-section" id="powerControlSection_' + assetId + '" style="margin-top:10px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">' +
+            html += '<div class="power-control-section" id="powerControlSection_' + assetId + '" style="margin-top:10px;padding:10px;background:var(--surface-muted);border:1px solid var(--border);border-radius:6px;">' +
                 '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
                 '<label style="font-weight:600;font-size:12px;margin:0;">전원 제어</label>' +
                 '<span class="power-status-badge" id="popupPowerBadge_' + assetId + '" style="font-size:11px;padding:2px 8px;border-radius:10px;background:#94a3b8;color:white;">확인 중...</span>' +

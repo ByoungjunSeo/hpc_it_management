@@ -31,6 +31,24 @@
     --ups-color: #9333ea;
     --other-color: #64748b;
     --empty-color: #cbd5e1;
+    /* v2.8.0 의미 토큰(밝은 배경 정리) — 라이트 값 = 기존 하드코딩 색. 다크 값은 tui-theme.css :root */
+    --surface-muted: #f8fafc;          /* 중립 옅은 패널(안내 박스·표 머리·랙 U 라벨) */
+    --surface-strong: #e2e8f0;         /* 중립 진한 면(진행 바 트랙·정렬 hover·회색 알약) */
+    --surface-info: #eff6ff;           /* 정보 박스 */
+    --surface-success: #f0fdf4;        /* 성공/여유 행 */
+    --surface-success-strong: #dcfce7; /* 성공 강조(저장 플래시·결과 박스) */
+    --surface-warn: #fffbeb;           /* 주의 박스 */
+    --surface-warn-strong: #fef9c3;    /* 주의 강조(배너·선택 슬롯) */
+    --surface-danger: #fef2f2;         /* 오류 박스 */
+    --surface-select: #dbeafe;         /* 랙 미리보기 선택(장비) */
+    --surface-select-alt: #fef3c7;     /* 랙 미리보기 선택(선반) */
+    --line-info: #bfdbfe;
+    --line-success: #bbf7d0;
+    --line-warn: #fde68a;
+    --line-danger: #fecaca;
+    --on-info: #1e40af;                /* 틴트 면 위 글자 */
+    --on-warn: #92400e;
+    --on-danger: #991b1b;
 }
 
 body {
@@ -240,6 +258,8 @@ body {
     margin: 0 auto;
     padding: 24px;
 }
+/* 넓은 화면 모드(페이지별 선택: header include에 bodyClass:'page-wide') — 표 위주 화면용, 좌우 여백 24px 유지 */
+body.page-wide .container { max-width: none; }
 
 /* Page header */
 .page-header {

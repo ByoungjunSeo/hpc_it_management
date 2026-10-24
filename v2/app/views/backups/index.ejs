@@ -20,7 +20,7 @@
 
 <% if (typeof dir !== 'undefined' && dir && !dir.ok) { %>
 <%# BUG-13: 백업 디렉터리 사용 불가(예: compose 앱 컨테이너의 루트 경로 EACCES) — 페이지는 살리고 안내만 %>
-<div style="background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:#92400e;">
+<div style="background:var(--surface-warn); border:1px solid var(--line-warn); border-radius:6px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:var(--on-warn);">
     <b>⚠ 백업 디렉터리를 사용할 수 없습니다</b>(<code><%= dir.reason %></code>: <code><%= dir.dir %></code>).
     표준 <b>compose 배포에서는 앱 컨테이너에서 백업 생성이 불가</b>합니다 — <b>호스트에서 <code>bash scripts/backup.sh</code></b>(CLI)로
     백업하세요(DEPLOY.md §5-1). 아래 목록·생성은 이 환경에서 동작하지 않습니다.
@@ -73,11 +73,11 @@
 <div class="card" id="restore-guide">
     <div class="card-header"><h2>복원 가이드</h2></div>
     <div style="padding:6px 0;">
-        <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:10px 14px; margin-bottom:10px; font-size:13px; color:#991b1b;">
+        <div style="background:var(--surface-danger); border:1px solid var(--line-danger); border-radius:6px; padding:10px 14px; margin-bottom:10px; font-size:13px; color:var(--on-danger);">
             <b>⚠ 복원은 전체 덮어쓰기입니다.</b> 현재 데이터가 백업 시점으로 교체되며, <b>세션이 초기화되어 전 사용자가 로그아웃</b>됩니다.
             운영 중 실행하지 말고 <b>서비스 정지 후</b> 수행하세요(복원 스크립트가 복원 전 안전백업을 먼저 만듭니다).
         </div>
-        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:#92400e;">
+        <div style="background:var(--surface-warn); border:1px solid var(--line-warn); border-radius:6px; padding:10px 14px; margin-bottom:12px; font-size:13px; color:var(--on-warn);">
             <b>⚠ 암호화 키(BL-11) 주의.</b> 백업에는 자격증명 <b>암호문</b>만 있고 <b>암호화 키(.env <code>CREDENTIAL_ENCRYPTION_KEY</code>)는 포함되지 않습니다.</b>
             다른 서버로 복원하면 그 서버의 키가 달라 <b>자격증명 복호화가 불가</b>합니다. 복원 대상 서버에 <b>동일한 키</b>가 있어야 합니다.
         </div>

@@ -173,7 +173,7 @@ function showDetail(assetId, forceRefresh) {
             return (m.model && m.model.indexOf('상세정보 없음') >= 0) || m.specification === '/proc/meminfo';
         });
         if (isFallbackMem) {
-            html += '<div style="padding:8px 12px; margin-bottom:8px; background:#fff3cd; border:1px solid #ffc107; border-radius:6px; font-size:13px;">';
+            html += '<div style="padding:8px 12px; margin-bottom:8px; background:var(--surface-warn-strong); border:1px solid var(--line-warn); border-radius:6px; font-size:13px;">';
             html += '<strong>&#x26A0; 메모리 상세정보 없음:</strong> dmidecode 권한 부족으로 DIMM 정보를 수집할 수 없습니다. ';
             html += '갱신 시 <b>기존 등록된 메모리가 유지</b>됩니다. (root 계정 등록 후 재스캔 권장)';
             html += '</div>';
@@ -313,7 +313,7 @@ function formatRegisteredModuleInfo(mod) {
         var label = mod.linked_item_label || mod.model || '';
         lines.push('<a href="javascript:void(0)" onclick="showInventoryDetail(\'' + escapeHtml(mod.linked_item_code) + '\')" style="font-size:12px; font-weight:600; color:var(--primary, #0066cc); text-decoration:underline; cursor:pointer;">' + escapeHtml(mod.linked_item_code) + '</a> <span style="font-size:11px; color:#555;">(' + escapeHtml(label) + ')</span>');
     } else {
-        lines.push('<span class="badge badge-secondary" style="font-size:10px; background:#e0e0e0; color:#666;">코드없음</span> <strong style="font-size:12px;">' + escapeHtml(mod.model || '-') + '</strong>');
+        lines.push('<span class="badge badge-secondary" style="font-size:10px; background:var(--surface-strong); color:var(--text-secondary, #666);">코드없음</span> <strong style="font-size:12px;">' + escapeHtml(mod.model || '-') + '</strong>');
     }
     if (mod.manufacturer) {
         lines.push('<span style="color:#555; font-size:11px;">제조사: <b>' + escapeHtml(mod.manufacturer) + '</b></span>');

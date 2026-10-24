@@ -5,9 +5,9 @@
 .asset-rack-empty { background: #fff; }
 .asset-rack-empty:hover { background: #f0f9ff !important; }
 /* BUG-8: 선택 하이라이트도 클래스+CSS로 (JS 인라인 배경 제거) */
-.asset-sel-device { background: #dbeafe !important; outline: 1px solid #3b82f6; outline-offset: -1px; }
+.asset-sel-device { background: var(--surface-select) !important; outline: 1px solid #3b82f6; outline-offset: -1px; }
 .asset-sel-tag { color: #1e40af; font-size: 9px; font-weight: 600; }
-.ip-pick-btn:hover { background: #eff6ff !important; }
+.ip-pick-btn:hover { background: var(--surface-info) !important; }
 </style>
 
 <div class="page-header">
@@ -111,7 +111,7 @@
     <% if (asset && asset.parent_asset_id && !['cdu','chiller'].includes(asset.asset_type)) { %>
     <%# BUG-9: 블레이드 노드(자식)는 독립 물리 위치가 없다 — 위치 입력 숨김, 부모 참조 안내 (CDU-1i: cdu/chiller는 인프라 연결이라 제외) %>
     <div class="form-row"><div class="form-group" style="flex:1">
-        <div style="padding:10px 12px; background:#fef9c3; border:1px solid #fde047; border-radius:4px; font-size:13px; color:#713f12;">
+        <div style="padding:10px 12px; background:var(--surface-warn-strong); border:1px solid var(--line-warn); border-radius:4px; font-size:13px; color:var(--on-warn);">
             이 자산은 <b>블레이드 노드</b>(부모 섀시에 속함)입니다. 물리 위치는 <b>부모 섀시</b>를 따르며 개별 위치(서버실·랙·U)를 지정할 수 없습니다. (BUG-9)
         </div>
     </div></div>
@@ -228,7 +228,7 @@
             </div>
             <div class="form-group">
                 <label>총 슬롯 크기</label>
-                <input type="number" name="rack_unit_size" id="totalSlots" class="form-control" value="<%= curSlots %>" readonly style="background:#f1f5f9;font-weight:600;">
+                <input type="number" name="rack_unit_size" id="totalSlots" class="form-control" value="<%= curSlots %>" readonly style="background:var(--bg);font-weight:600;">
                 <small style="color:#64748b;font-size:11px;">1U=3칸, 2U=6칸 · 선반은 U+홀 병행(예: 0U+1홀 = 1/3U 선반)</small>
             </div>
         </div>
@@ -239,7 +239,7 @@
                 <small style="color:#64748b;" id="rackPreviewInfo"></small>
                 <small style="color:#94a3b8; margin-left:auto;">빈 칸 클릭 → U 시작위치 + 구멍 자동 설정</small>
             </div>
-            <div id="rackPreviewContainer" style="max-height:500px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:4px; background:#f8fafc;"></div>
+            <div id="rackPreviewContainer" style="max-height:500px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:4px; background:var(--surface-muted);"></div>
         </div>
     </div>
     </div><%# /위치 입력 컨테이너 %>
@@ -522,7 +522,7 @@
 
 <!-- 가용 IP 조회 모달 -->
 <div id="ipModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999;">
-    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; border-radius:8px; padding:20px; width:520px; max-height:80vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:var(--bg-white); border-radius:8px; padding:20px; width:520px; max-height:80vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <h3 style="margin:0; font-size:16px;">가용 IP 조회</h3>
             <button type="button" onclick="closeIpModal()" style="border:none; background:none; font-size:22px; cursor:pointer; color:#64748b;">&times;</button>
@@ -924,10 +924,10 @@ function renderRackPreview(data) {
             html += '<tr data-slot="' + slot + '" data-u="' + u + '" data-h="' + h + '">';
 
             if (h === 3) {
-                html += '<td rowspan="3" style="padding:1px 4px; text-align:right; font-weight:600; color:#64748b; border:1px solid #e2e8f0; background:#f8fafc; font-size:11px; white-space:nowrap; vertical-align:middle;">U' + u + '</td>';
+                html += '<td rowspan="3" style="padding:1px 4px; text-align:right; font-weight:600; color:var(--text-light); border:1px solid var(--border); background:var(--surface-muted); font-size:11px; white-space:nowrap; vertical-align:middle;">U' + u + '</td>';
             }
 
-            html += '<td style="padding:0 3px; text-align:center; color:#94a3b8; border:1px solid #f1f5f9; background:#f8fafc; font-size:9px;">' + holeLabels[h - 1] + '</td>';
+            html += '<td style="padding:0 3px; text-align:center; color:var(--text-light); border:1px solid var(--border); background:var(--surface-muted); font-size:9px;">' + holeLabels[h - 1] + '</td>';
 
             if (hasFull) {
                 var a = m.full;
@@ -1103,7 +1103,7 @@ function loadAvailableIps() {
             var html = '<div style="margin-bottom:8px;font-size:12px;color:#64748b;">' + data.ips.length + '개 가용 IP</div>';
             html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;">';
             data.ips.forEach(function(ip) {
-                html += '<button type="button" class="ip-pick-btn" style="padding:4px 6px;font-size:11px;border:1px solid #e2e8f0;border-radius:4px;background:white;cursor:pointer;text-align:left;transition:background 0.15s;" onclick="selectAvailableIp(\'' + ip + '\')">' + ip + '</button>';
+                html += '<button type="button" class="ip-pick-btn" style="padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:var(--bg-white);cursor:pointer;text-align:left;transition:background 0.15s;" onclick="selectAvailableIp(\'' + ip + '\')">' + ip + '</button>';
             });
             html += '</div>';
             results.innerHTML = html;

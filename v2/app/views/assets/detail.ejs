@@ -178,7 +178,7 @@
             <% if (coolingSource.status === 'returned') { %>
                 <span style="margin-left:6px; padding:2px 8px; border-radius:10px; background:#fde047; color:#713f12; font-size:11px; font-weight:600;">공급 칠러 반납됨</span>
             <% } else if (coolingSource.status !== 'active') { %>
-                <span style="margin-left:6px; padding:2px 8px; border-radius:10px; background:#e5e7eb; color:#374151; font-size:11px; font-weight:600;">공급 칠러 <%= coolingSource.status %></span>
+                <span style="margin-left:6px; padding:2px 8px; border-radius:10px; background:var(--surface-strong); color:var(--text); font-size:11px; font-weight:600;">공급 칠러 <%= coolingSource.status %></span>
             <% } %>
         </p>
     </div></div>
@@ -571,7 +571,7 @@
 
 <!-- Module Transfer Modal -->
 <div id="moduleTransferModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:8px; width:90%; max-width:520px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+  <div style="background:var(--bg-white); border-radius:8px; width:90%; max-width:520px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
     <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee;">
       <h3 style="margin:0;" id="transferModalTitle">모듈 이동</h3>
       <button onclick="closeTransferModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
@@ -600,8 +600,8 @@
 
 <!-- Fault Repair Modal -->
 <div id="faultRepairModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; align-items:center; justify-content:center; overflow-y:auto;">
-  <div style="background:#fff; border-radius:8px; width:95%; max-width:800px; box-shadow:0 4px 20px rgba(0,0,0,0.3); margin:30px auto;">
-    <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee; background:#fff3cd; border-radius:8px 8px 0 0;">
+  <div style="background:var(--bg-white); border-radius:8px; width:95%; max-width:800px; box-shadow:0 4px 20px rgba(0,0,0,0.3); margin:30px auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid var(--border); background:var(--surface-warn-strong); border-radius:8px 8px 0 0;">
       <h3 style="margin:0;">장애/수리 처리</h3>
       <button onclick="closeFaultRepairModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
     </div>
@@ -645,7 +645,7 @@
         </table>
       </div>
 
-      <div id="faultTransferSection" style="display:none; border:1px solid #ddd; border-radius:6px; padding:12px; margin-bottom:16px; background:#f9f9f9;">
+      <div id="faultTransferSection" style="display:none; border:1px solid var(--border); border-radius:6px; padding:12px; margin-bottom:16px; background:var(--surface-muted);">
         <label style="font-weight:bold; margin-bottom:6px; display:block;">이동 대상 자산</label>
         <input type="text" id="faultTransferSearch" class="form-control" placeholder="관리번호 또는 모델명 검색..." oninput="filterFaultTransferAssets()" style="margin-bottom:6px;">
         <select id="faultTransferAssetSelect" class="form-control" size="5" style="height:auto;">
@@ -665,8 +665,8 @@
 <!-- Restore Modal -->
 <% if (asset.status === 'maintenance') { %>
 <div id="restoreModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:8px; width:90%; max-width:500px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
-    <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee; background:#d4edda; border-radius:8px 8px 0 0;">
+  <div style="background:var(--bg-white); border-radius:8px; width:90%; max-width:500px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid var(--border); background:var(--surface-success-strong); border-radius:8px 8px 0 0;">
       <h3 style="margin:0;">수리완료 / 복귀</h3>
       <button onclick="closeRestoreModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
     </div>
@@ -704,7 +704,7 @@
 
 <!-- Module Action Modal (장비실/반납) -->
 <div id="moduleActionModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:8px; width:90%; max-width:480px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+  <div style="background:var(--bg-white); border-radius:8px; width:90%; max-width:480px; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
     <div style="display:flex; justify-content:space-between; align-items:center; padding:15px 20px; border-bottom:1px solid #eee;">
       <h3 style="margin:0;" id="moduleActionTitle">모듈 처리</h3>
       <button onclick="closeModuleActionModal()" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>

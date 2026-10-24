@@ -37,7 +37,7 @@ module.exports = {
     { value: 'raid', label: 'RAID' },
     { value: 'gpu', label: 'GPU' },
     { value: 'npu', label: 'NPU' },
-    { value: 'psu', label: 'PSU' },
+    // v2.8.0 OPS-5 후속: psu 생성 경로 차단(목록 제외). DB CHECK는 유지 — 기존 행 표시는 각 화면 폴백
     { value: 'cable', label: '케이블' }
   ],
 
@@ -59,7 +59,6 @@ module.exports = {
     { value: 'raid', label: 'RAID', category: 'module' },
     { value: 'gpu', label: 'GPU', category: 'module' },
     { value: 'npu', label: 'NPU', category: 'module' },
-    { value: 'psu', label: 'PSU', category: 'module' },
     { value: 'cable', label: '케이블', category: 'module' }
   ],
 

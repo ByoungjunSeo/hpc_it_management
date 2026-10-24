@@ -255,6 +255,12 @@ async function getServerRoomAssets() {
 // ══════════════════════════════════════════════════════════════
 
 // EP#1: Page render
+// v2.8.0 OPS-5 후속: PSU 생성 경로 차단 — 스캔 결과에서 psu 제거(자산 매칭 /scan-asset과 동일 정책. PSU는 수동 관리)
+function stripPsu(result) {
+  if (result && Array.isArray(result.modules)) result.modules = result.modules.filter(m => m && m.module_type !== 'psu');
+  return result;
+}
+
 router.get('/', async (req, res) => {
   try {
     const assets = await getServerRoomAssets();
@@ -830,6 +836,7 @@ router.post('/register-inventory', requireMaintenance, async (req, res) => {
     for (const item of items) {
       const { item_code, module_type, model, manufacturer, capacity, count, computing_module_id, specification, label } = item;
       if (!item_code || !module_type) continue;
+      if (module_type === 'psu') continue;   // v2.8.0: PSU 재고 품목 생성 차단
 
       const quantity = parseInt(count) || 1;
 
@@ -1022,7 +1029,7 @@ router.post('/scan', requireMaintenance, async (req, res) => {
       password: password || undefined,
       port: port ? parseInt(port, 10) : undefined
     });
-    res.json(result);
+    res.json(stripPsu(result));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1042,7 +1049,7 @@ router.post('/scan-range', requireMaintenance, async (req, res) => {
       password: password || undefined,
       port: port ? parseInt(port, 10) : undefined
     });
-    res.json(results);
+    res.json(Array.isArray(results) ? results.map(stripPsu) : results);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1082,9 +1089,15 @@ router.post('/apply', requireMaintenance, async (req, res) => {
       }
     }
 
-    if (modules && modules.length > 0) {
+    // v2.8.0: 요청의 psu는 버리고, 이미 등록된 psu는 유지(apply-asset과 동일 — 전체 삭제 후 재생성이므로)
+    const applyModules = Array.isArray(modules) ? modules.filter(m => m && m.module_type !== 'psu') : [];
+    if (applyModules.length > 0) {
+      const keptPsu = createdNew ? [] : (await ComputingModule.findByAsset(targetAssetId)).filter(m => m.module_type === 'psu')
+        .map(m => ({ module_type: m.module_type, model: m.model, manufacturer: m.manufacturer, capacity: m.capacity, count: m.count || 1,
+          specification: m.specification, slot_info: m.slot_info, notes: m.notes, owner: m.owner || 'company',
+          owner_vendor_id: m.owner_vendor_id || null, is_onboard: m.is_onboard || 0 }));
       await ComputingModule.deleteByAsset(targetAssetId);
-      await ComputingModule.bulkCreate(targetAssetId, modules);
+      await ComputingModule.bulkCreate(targetAssetId, applyModules.concat(keptPsu));
     }
 
     // 공통원칙: 자산 생성 쓰기는 create audit 별도 기록 (v1은 scan audit만)

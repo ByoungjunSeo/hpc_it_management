@@ -309,7 +309,7 @@ function toggleVendorMgmt() {
         if (!isModule) {
             assetInput.value = '';
             assetInput.readOnly = true;
-            assetInput.style.background = '#f1f5f9';
+            assetInput.style.background = 'var(--bg)';
             assetGroup.style.display = 'none';
         }
         fetchVendorMgmtPreview();
@@ -398,7 +398,7 @@ function fetchMgmtSuggestions(assetType) {
                     var btn = document.createElement('button');
                     btn.type = 'button';
                     btn.className = 'btn btn-sm';
-                    btn.style.cssText = 'padding:2px 10px; font-size:13px; border:1px solid #cbd5e1; border-radius:4px; background:#f8fafc; cursor:pointer; color:#334155;';
+                    btn.style.cssText = 'padding:2px 10px; font-size:13px; border:1px solid var(--border); border-radius:4px; background:var(--surface-muted); cursor:pointer; color:var(--text);';
                     btn.textContent = s.next;
                     btn.title = '마지막: ' + s.last + ' (총 ' + s.count + '건)';
                     btn.addEventListener('click', function() {

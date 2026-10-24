@@ -338,7 +338,7 @@
 .badge-module-adjust { background:#6b7280; color:#fff; }
 
 .sortable { cursor: pointer; user-select: none; }
-.sortable:hover { background: #e2e8f0; }
+.sortable:hover { background: var(--surface-strong); }
 .sort-icon { font-size: 10px; opacity: 0.3; margin-left: 2px; }
 .sort-icon::after { content: '▲▼'; }
 .sortable.asc .sort-icon { opacity: 1; }
@@ -405,8 +405,8 @@ function naturalCompare(a, b) {
 
 <!-- Item Detail Modal -->
 <div id="itemDetailModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:1001; align-items:center; justify-content:center;">
-  <div style="background:#fff; border-radius:8px; width:92%; max-width:700px; max-height:85vh; overflow:auto; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
-    <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-bottom:1px solid #eee; position:sticky; top:0; background:#fff; z-index:1;">
+  <div style="background:var(--bg-white); border-radius:8px; width:92%; max-width:700px; max-height:85vh; overflow:auto; box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:14px 20px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg-white); z-index:1;">
       <h3 style="margin:0;" id="itemDetailTitle">부품 상세</h3>
       <button onclick="document.getElementById('itemDetailModal').style.display='none'" style="background:none; border:none; font-size:1.5em; cursor:pointer; color:#666;">&times;</button>
     </div>
@@ -435,10 +435,10 @@ function showItemDetail(code) {
 
     // Inventory summary
     html += '<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">';
-    html += '<div style="background:#f0fdf4; padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:#16a34a;">' + (spec.total_quantity || 0) + '</div><div style="font-size:11px; color:#64748b;">총수량</div></div>';
-    html += '<div style="background:#eff6ff; padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:#2563eb;">' + (spec.in_use_quantity || 0) + '</div><div style="font-size:11px; color:#64748b;">사용중</div></div>';
-    html += '<div style="background:#fefce8; padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:#ca8a04;">' + (spec.storage_quantity || 0) + '</div><div style="font-size:11px; color:#64748b;">장비실</div></div>';
-    html += '<div style="background:#f8fafc; padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:#64748b;">' + (spec.spare_quantity || 0) + '</div><div style="font-size:11px; color:#64748b;">여유</div></div>';
+    html += '<div style="background:var(--surface-success); padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:var(--success);">' + (spec.total_quantity || 0) + '</div><div style="font-size:11px; color:var(--text-light);">총수량</div></div>';
+    html += '<div style="background:var(--surface-info); padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:var(--company-color);">' + (spec.in_use_quantity || 0) + '</div><div style="font-size:11px; color:var(--text-light);">사용중</div></div>';
+    html += '<div style="background:var(--surface-warn); padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:var(--on-warn);">' + (spec.storage_quantity || 0) + '</div><div style="font-size:11px; color:var(--text-light);">장비실</div></div>';
+    html += '<div style="background:var(--surface-muted); padding:8px 14px; border-radius:6px; text-align:center; flex:1; min-width:80px;"><div style="font-size:18px; font-weight:700; color:var(--text-light);">' + (spec.spare_quantity || 0) + '</div><div style="font-size:11px; color:var(--text-light);">여유</div></div>';
     html += '</div>';
 
     // Spec info
@@ -452,7 +452,7 @@ function showItemDetail(code) {
     // Usage (installed on which assets)
     if (usage.usage && usage.usage.length > 0) {
       html += '<h4 style="margin:12px 0 6px; font-size:14px;">설치 현황</h4>';
-      html += '<table style="width:100%; font-size:13px; border-collapse:collapse;"><thead><tr style="background:#f8fafc;"><th style="padding:4px 8px; text-align:left; border-bottom:1px solid #e2e8f0;">자산</th><th style="padding:4px 8px; text-align:right; border-bottom:1px solid #e2e8f0;">수량</th></tr></thead><tbody>';
+      html += '<table style="width:100%; font-size:13px; border-collapse:collapse;"><thead><tr style="background:var(--surface-muted);"><th style="padding:4px 8px; text-align:left; border-bottom:1px solid var(--border);">자산</th><th style="padding:4px 8px; text-align:right; border-bottom:1px solid var(--border);">수량</th></tr></thead><tbody>';
       usage.usage.forEach(function(u) {
         html += '<tr><td style="padding:4px 8px; border-bottom:1px solid #f1f5f9;"><a href="/assets/' + u.asset_id + '">' + (u.management_number || u.model_name || 'ID:' + u.asset_id) + '</a></td><td style="padding:4px 8px; text-align:right; border-bottom:1px solid #f1f5f9;">' + u.count + '</td></tr>';
       });
@@ -464,7 +464,7 @@ function showItemDetail(code) {
     var eventColors = { incoming: '#16a34a', outgoing: '#dc2626', installed: '#2563eb', removed: '#ea580c', transfer: '#6b7280', adjust: '#6b7280' };
     if (history.logs && history.logs.length > 0) {
       html += '<h4 style="margin:14px 0 6px; font-size:14px;">변경 이력</h4>';
-      html += '<table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr style="background:#f8fafc;"><th style="padding:4px 6px; text-align:left; border-bottom:1px solid #e2e8f0;">이벤트</th><th style="padding:4px 6px; text-align:right; border-bottom:1px solid #e2e8f0;">수량</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid #e2e8f0;">자산</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid #e2e8f0;">비고</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid #e2e8f0;">일시</th></tr></thead><tbody>';
+      html += '<table style="width:100%; font-size:12px; border-collapse:collapse;"><thead><tr style="background:var(--surface-muted);"><th style="padding:4px 6px; text-align:left; border-bottom:1px solid var(--border);">이벤트</th><th style="padding:4px 6px; text-align:right; border-bottom:1px solid var(--border);">수량</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid var(--border);">자산</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid var(--border);">비고</th><th style="padding:4px 6px; text-align:left; border-bottom:1px solid var(--border);">일시</th></tr></thead><tbody>';
       history.logs.forEach(function(log) {
         var evLabel = eventLabels[log.event_type] || log.event_type;
         var evColor = eventColors[log.event_type] || '#6b7280';

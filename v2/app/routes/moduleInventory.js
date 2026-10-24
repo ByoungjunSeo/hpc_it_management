@@ -440,6 +440,11 @@ router.get('/modules/new', async (req, res) => {
 // EP#11: Create module
 router.post('/modules', requireMaintenance, async (req, res) => {
   try {
+    // v2.8.0 OPS-5 후속: PSU 장착 행 생성 차단(폼 선택지에서도 제외됨)
+    if (!appConfig.moduleTypes.some(t => t.value === req.body.module_type)) {
+      req.flash('error', '등록할 수 없는 모듈 유형입니다.');
+      return res.redirect('/module-inventory/modules/new');
+    }
     const modId = await ComputingModule.create(req.body);
 
     // 모듈 설치: storage 감소 + 이력 기록

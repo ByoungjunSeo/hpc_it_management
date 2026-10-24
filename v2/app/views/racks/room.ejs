@@ -53,8 +53,8 @@
 <% if (typeof storageModules !== 'undefined' && storageModules.length > 0) { %>
 <div class="card mb-2" style="padding:0; overflow:hidden;">
     <div class="tab-nav" style="display:flex; border-bottom:1px solid #e2e8f0;">
-        <button class="tab-btn active" data-tab="rackTab" style="flex:1; padding:10px 16px; border:none; background:#fff; cursor:pointer; font-weight:600; border-bottom:2px solid #3b82f6; color:#3b82f6;">랙 배치</button>
-        <button class="tab-btn" data-tab="moduleTab" style="flex:1; padding:10px 16px; border:none; background:#f8fafc; cursor:pointer; font-weight:400; border-bottom:2px solid transparent; color:#64748b;">컴퓨팅 모듈 (<%= storageModules.length %>종)</button>
+        <button class="tab-btn active" data-tab="rackTab" style="flex:1; padding:10px 16px; border:none; background:var(--bg-white); cursor:pointer; font-weight:600; border-bottom:2px solid #3b82f6; color:#3b82f6;">랙 배치</button>
+        <button class="tab-btn" data-tab="moduleTab" style="flex:1; padding:10px 16px; border:none; background:var(--surface-muted); cursor:pointer; font-weight:400; border-bottom:2px solid transparent; color:var(--text-light);">컴퓨팅 모듈 (<%= storageModules.length %>종)</button>
     </div>
 </div>
 <% } %>
@@ -264,7 +264,7 @@ function editStorageQty(el) {
     .then(function(data) {
       if (data.success) {
         el.textContent = data.storage_quantity;
-        el.style.background = '#dcfce7';
+        el.style.background = 'var(--surface-success-strong)';
         setTimeout(function() { el.style.background = ''; }, 1500);
       } else {
         alert(data.error || '수정 실패');
@@ -589,13 +589,13 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
       b.style.fontWeight = '400';
       b.style.borderBottom = '2px solid transparent';
       b.style.color = '#64748b';
-      b.style.background = '#f8fafc';
+      b.style.background = 'var(--surface-muted)';
     });
     this.classList.add('active');
     this.style.fontWeight = '600';
     this.style.borderBottom = '2px solid #3b82f6';
     this.style.color = '#3b82f6';
-    this.style.background = '#fff';
+    this.style.background = 'var(--bg-white)';
 
     document.getElementById('rackTab').style.display = tabId === 'rackTab' ? '' : 'none';
     var moduleTab = document.getElementById('moduleTab');
