@@ -28,6 +28,20 @@ function escapeHtml(text) {
     return d.innerHTML;
 }
 
+// B-9: 읽기 전용 스캔 진단 안내(도구 없음·권한 없음·RAID 가상디스크 대체) — 해당할 때만, 줄마다 한 항목
+function scanDiagnosticsHtml(data) {
+    if (!data) return '';
+    var lines = [];
+    var miss = Array.isArray(data.missing_tools) ? data.missing_tools : [];
+    var deny = Array.isArray(data.permission_denied) ? data.permission_denied : [];
+    if (miss.length) lines.push('이 장비에 없는 도구: ' + miss.map(escapeHtml).join(', ') + ' — 해당 항목은 수집되지 않았습니다(스캔은 도구를 설치하지 않음).');
+    if (deny.length) lines.push('권한 부족으로 읽지 못한 도구: ' + deny.map(escapeHtml).join(', ') + ' (sudo -n 실패 · 비밀번호 없는 sudo 또는 root 계정 필요)');
+    if (data.virtual_disk_fallback) lines.push('물리 디스크 미확인(RAID 가상디스크) — 디스크 항목이 RAID 가상디스크 기준으로 수집되었습니다.');
+    if (!lines.length) return '';
+    return '<div class="scan-diag" style="margin-bottom:8px; padding:6px 10px; font-size:12px; background:var(--surface-warn); border:1px solid var(--line-warn); color:var(--on-warn); border-radius:4px;">' +
+        lines.map(function(l) { return '<div>&#x26A0; ' + l + '</div>'; }).join('') + '</div>';
+}
+
 function moduleTypeBadge(type) {
     var labels = { cpu: 'CPU', memory: 'MEM', disk: 'DISK', network: 'NIC', raid: 'RAID', gpu: 'GPU', npu: 'NPU' };
     return labels[type] || type;
@@ -165,6 +179,7 @@ function showDetail(assetId, forceRefresh) {
         sysInfoParts.forEach(function(p) { html += '<span>' + p + '</span>'; });
         html += '</div>';
     }
+    html += scanDiagnosticsHtml(data);   // B-9
 
     if (data.discovered_modules && data.discovered_modules.length > 0) {
         // Check if memory is fallback-only
@@ -1033,6 +1048,7 @@ function submitUnmatchedModules() {
   // onclick/페이지 호환용 전역 노출 — 렌더 HTML(onclick 문자열)·페이지 참조를 바이트 그대로 유지.
   window.scanResults = scanResults;
   window.escapeHtml = escapeHtml;
+  window.scanDiagnosticsHtml = scanDiagnosticsHtml;
   window.moduleTypeBadge = moduleTypeBadge;
   window.moduleSummaryHtml = moduleSummaryHtml;
   window.moduleTypeLabel = moduleTypeLabel;

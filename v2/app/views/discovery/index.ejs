@@ -303,9 +303,8 @@
         <div class="card">
             <div class="card-header">
                 <h2>스캔 결과</h2>
-                <div class="btn-group">
-                    <button class="btn btn-success" onclick="applyAllManualResults()">모두 자산에 반영</button>
-                </div>
+                <%# B-9: 레거시 [모두 자산에 반영] 제거(POST /discovery/apply 중지 — 재고 미반영 경로). 반영은 자산 매칭에서. %>
+                <span class="text-muted" style="font-size:12px;">조회 전용 — 반영은 각 자산의 자산 매칭(스캔 → 적용)에서</span>
             </div>
             <div id="manualResultsList"></div>
         </div>
@@ -687,7 +686,8 @@ function startManualScan() {
         document.getElementById('manualProgressFill').style.width = '100%';
         document.getElementById('manualProgressText').textContent = '완료! ' + results.length + '개 호스트 스캔됨';
 
-        if (mode === 'range') {
+        // B-9: 단일·범위 모두 IP 매칭 조회(읽기) — 결과마다 자산 매칭 링크 표시용
+        {
             var lookupPromises = results.map(function(r) {
                 return fetch('/discovery/lookup-ip?ip=' + encodeURIComponent(r.ip))
                     .then(function(resp) { return resp.json(); })
@@ -698,9 +698,6 @@ function startManualScan() {
                 renderManualResults(results);
                 resetManualScanBtn();
             });
-        } else {
-            renderManualResults(results);
-            resetManualScanBtn();
         }
     })
     .catch(function(err) {
@@ -735,10 +732,20 @@ function renderManualResults(results) {
         html += '<div style="padding:16px; border-bottom:1px solid var(--border);">';
         html += '<div class="d-flex justify-between align-center mb-1">';
         html += '<strong>' + escapeHtml(r.ip) + '</strong> ' + statusBadge + matchBadge;
-        if (r.status === 'success') {
-            html += ' <button class="btn btn-sm btn-success" onclick="applyManualResult(' + idx + ')">자산에 반영</button>';
-        }
         html += '</div>';
+        // B-9: [자산에 반영] 대신 매칭된 자산의 자산 매칭 링크(같은 화면 목록 행으로 이동·강조, 스캔은 사용자가 실행)
+        if (r._matchInfo && r._matchInfo.length > 0) {
+            html += '<div class="mb-1" style="font-size:13px;">';
+            r._matchInfo.forEach(function(mi) {
+                var aid = parseInt(mi.asset_id, 10);
+                if (!aid) return;
+                html += '<a class="btn btn-sm btn-outline" style="margin-right:6px;" href="/discovery?asset=' + aid + '#asset-row-' + aid + '">자산 매칭에서 보기: ' + escapeHtml(mi.asset_number || mi.management_number || ('#' + aid)) + '</a>';
+            });
+            html += '</div>';
+        } else if (r.status === 'success') {
+            html += '<p class="text-muted" style="font-size:12px;">등록된 자산과 매칭되지 않았습니다 — 자산 등록 후 자산 매칭에서 반영하세요.</p>';
+        }
+        if (r.status === 'success') html += scanDiagnosticsHtml(r);   // B-9: 도구 없음·권한 없음 안내
 
         if (r.hostname) html += '<p>호스트명: ' + escapeHtml(r.hostname) + '</p>';
         if (r.totalMemory) html += '<p>총 메모리: ' + escapeHtml(r.totalMemory) + '</p>';
@@ -758,44 +765,20 @@ function renderManualResults(results) {
     document.getElementById('manualResultsList').innerHTML = html;
 }
 
-function applyManualResult(idx) {
-    var r = manualScanResultsData[idx];
-    if (!r || r.status !== 'success') return;
+// B-9: applyManualResult / applyAllManualResults 제거 — POST /discovery/apply는 410(재고 미반영 경로 중지).
 
-    fetch('/discovery/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip: r.ip, hostname: r.hostname, modules: r.modules, create_new: true })
-    })
-    .then(function(res) { return res.json(); })
-    .then(function(data) {
-        if (data.success) {
-            alert('자산이 등록/업데이트되었습니다. (ID: ' + data.asset_id + ')');
-        } else {
-            alert('오류: ' + (data.error || '알 수 없는 오류'));
-        }
-    })
-    .catch(function(err) { alert('오류: ' + err.message); });
-}
-
-function applyAllManualResults() {
-    var successResults = manualScanResultsData.filter(function(r) { return r.status === 'success'; });
-    if (successResults.length === 0) { alert('반영할 결과가 없습니다.'); return; }
-    if (!confirm(successResults.length + '개 호스트를 자산에 반영하시겠습니까?')) return;
-
-    var promises = successResults.map(function(r) {
-        return fetch('/discovery/apply', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip: r.ip, hostname: r.hostname, modules: r.modules, create_new: true })
-        }).then(function(res) { return res.json(); });
-    });
-
-    Promise.all(promises).then(function(results) {
-        var ok = results.filter(function(r) { return r.success; }).length;
-        alert(ok + '/' + results.length + '개 자산이 반영되었습니다.');
-    });
-}
+// B-9: /discovery?asset=<id> 진입 시 해당 자산 행으로 이동·강조(자동 스캔 없음)
+(function () {
+    var m = /[?&]asset=(\d+)/.exec(window.location.search);
+    if (!m) return;
+    var row = document.getElementById('asset-row-' + m[1]);
+    if (!row) return;
+    if (typeof filterCategory === 'function') filterCategory('all');
+    row.classList.add('disc-focus');
+    row.style.outline = '2px solid var(--primary)';
+    row.style.outlineOffset = '-2px';
+    try { row.scrollIntoView({ block: 'center' }); } catch (e) {}
+})();
 </script>
 
 <%- include('../partials/footer', { extraJs }) %>

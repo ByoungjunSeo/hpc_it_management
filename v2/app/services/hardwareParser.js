@@ -1016,7 +1016,28 @@ function parseFreeMemory(output) {
   return match ? match[1] : '';
 }
 
-function parseAll(output) {
+// B-9: 스캔 스크립트 표식(===TOOL_MISSING:<도구>=== / ===PERMISSION_DENIED:<도구>===).
+// 출력 전체에서 먼저 추출·제거해 기존 섹션 파서 입력은 종전과 같게 유지. 도구명은 형식 검사(원격 출력 위조 대비).
+const SCAN_MARKER_RE = /^===(TOOL_MISSING|PERMISSION_DENIED):([^=\r\n]*)===[ \t]*(?:\r?\n|$)/gm;
+const SCAN_MARKER_NAME_RE = /^[A-Za-z0-9._-]{1,32}$/;
+function extractScanMarkers(output) {
+  const text = String(output || '');
+  const missing = [], denied = [];
+  let m;
+  SCAN_MARKER_RE.lastIndex = 0;
+  while ((m = SCAN_MARKER_RE.exec(text))) {
+    const name = m[2].trim();
+    if (!SCAN_MARKER_NAME_RE.test(name)) continue;
+    const arr = m[1] === 'TOOL_MISSING' ? missing : denied;
+    if (!arr.includes(name)) arr.push(name);
+  }
+  return { missing_tools: missing, permission_denied: denied, cleaned: text.replace(SCAN_MARKER_RE, '') };
+}
+
+function parseAll(rawOutput) {
+  const markers = extractScanMarkers(rawOutput);
+  const output = markers.cleaned;
+  let virtualDiskFallback = false;
   const raidModules = parseRaid(output);
   // Only consider RAID present if lspci actually detected a RAID controller
   // (RAID_PD section always has content from sysfs/smartctl fallback even without RAID)
@@ -1035,6 +1056,10 @@ function parseAll(output) {
       if (diskModules.length === 0) {
         diskModules = parseDisk(output, { includeVirtual: true });
       }
+      // B-9: 물리 디스크 미확인 — RAID 도구 PD 없음 + 결과 디스크가 RAID 가상디스크. 판정만(결과 모듈은 종전 그대로).
+      //   parseDisk 필터(^PERC 등)는 smartctl이 붙인 벤더 접두("DELL PERC …")를 놓치므로 위치 무관 패턴으로 별도 판정.
+      virtualDiskFallback = diskModules.some(d => d.specification === 'RAID VD' ||
+        /(^|[\s_])(MR\d|AVAGO|LSI|PERC|Smart\s*Array|Logical[_\s]?Volume|RAID)(?=[\s_\-]|\d|$)/i.test(d.model || ''));
     }
   } else {
     diskModules = parseDisk(output);
@@ -1082,12 +1107,17 @@ function parseAll(output) {
       ...raidModules,
       ...parseGpu(output),
       ...parseNpu(output)
-    ]
+    ],
+    // B-9: 키 추가만(기존 키 불변)
+    missing_tools: markers.missing_tools,
+    permission_denied: markers.permission_denied,
+    virtual_disk_fallback: virtualDiskFallback
   };
 }
 
 module.exports = {
   parseAll,
+  extractScanMarkers,
   parseCpu,
   parseMemory,
   parseMemoryFallback,

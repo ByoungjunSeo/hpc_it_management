@@ -4,25 +4,31 @@ const appConfig = require('../config/app');
 const hardwareParser = require('./hardwareParser');
 
 const DISCOVERY_SCRIPT = `
-# Auto-install essential tools if missing
-if ! command -v lspci >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y pciutils >/dev/null 2>&1
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y pciutils >/dev/null 2>&1
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y pciutils >/dev/null 2>&1
+# B-9: 스캔은 대상 장비 읽기 전용 — 패키지 설치·파일 쓰기 없음. 도구가 없으면 ===TOOL_MISSING:<도구>=== 표식만 출력.
+# priv <표식명> <명령...>: sudo -n(비밀번호 요구 시 즉시 실패) → sudo 없이 한 번 더 →
+#   권한 오류(stdout·stderr)면 ===PERMISSION_DENIED:<표식명>=== (stderr는 변수로만 받음 — 임시 파일 없음)
+PERM_RE='permission denied|operation not permitted|must be root|need to be root|requires root|root privilege|insufficient privilege'
+priv() {
+  _t="$1"; shift
+  _o=$(sudo -n "$@" 2>/dev/null)
+  if [ -n "$_o" ]; then printf '%s\\n' "$_o"; return 0; fi
+  _o=$("$@" 2>/dev/null)
+  if [ -n "$_o" ]; then
+    printf '%s\\n' "$_o"
+    # smartctl 등은 권한 오류를 stdout으로 출력 — 출력은 그대로 두고 표식만 추가
+    if printf '%s' "$_o" | grep -qiE "$PERM_RE"; then echo "===PERMISSION_DENIED:$_t==="; fi
+    return 0
   fi
-fi
-if ! command -v lsblk >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y util-linux >/dev/null 2>&1
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y util-linux >/dev/null 2>&1
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y util-linux >/dev/null 2>&1
+  _e=$("$@" 2>&1 >/dev/null)
+  if printf '%s' "$_e" | grep -qiE "$PERM_RE"; then
+    echo "===PERMISSION_DENIED:$_t==="
   fi
-fi
+  return 1
+}
+command -v lspci >/dev/null 2>&1 || echo "===TOOL_MISSING:lspci==="
+command -v lsblk >/dev/null 2>&1 || echo "===TOOL_MISSING:lsblk==="
+DMI=$(command -v dmidecode 2>/dev/null)
+if [ -z "$DMI" ] && [ -x /usr/sbin/dmidecode ]; then DMI=/usr/sbin/dmidecode; fi
 echo "===HOSTNAME_START==="
 hostname
 echo "===HOSTNAME_END==="
@@ -36,27 +42,18 @@ fi
 uname -r 2>/dev/null | sed 's/^/KERNEL=/'
 echo "===OSINFO_END==="
 echo "===SERIAL_START==="
-if command -v dmidecode >/dev/null 2>&1; then
-  sudo dmidecode -t 1 2>/dev/null | grep -iE 'Serial Number|Product Name|Manufacturer' || dmidecode -t 1 2>/dev/null | grep -iE 'Serial Number|Product Name|Manufacturer'
+if [ -n "$DMI" ]; then
+  priv dmidecode "$DMI" -t 1 | grep -iE 'Serial Number|Product Name|Manufacturer|^===PERMISSION_DENIED:'
 fi
 echo "===SERIAL_END==="
 echo "===CPU_START==="
 lscpu 2>/dev/null
 echo "===CPU_END==="
 echo "===MEMORY_START==="
-if ! command -v dmidecode >/dev/null 2>&1 && ! [ -f /usr/sbin/dmidecode ]; then
-  if command -v yum >/dev/null 2>&1; then
-    yum install -y dmidecode >/dev/null 2>&1
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y dmidecode >/dev/null 2>&1
-  elif command -v apt-get >/dev/null 2>&1; then
-    apt-get install -y dmidecode >/dev/null 2>&1
-  fi
-fi
-if command -v dmidecode >/dev/null 2>&1; then
-  sudo dmidecode -t 17 2>/dev/null || dmidecode -t 17 2>/dev/null
-elif [ -f /usr/sbin/dmidecode ]; then
-  /usr/sbin/dmidecode -t 17 2>/dev/null
+if [ -n "$DMI" ]; then
+  priv dmidecode "$DMI" -t 17
+else
+  echo "===TOOL_MISSING:dmidecode==="
 fi
 echo "===MEMORY_END==="
 echo "===MEMORY_FALLBACK_START==="
@@ -68,9 +65,11 @@ lsblk -d -o NAME,MAJ:MIN,RM,SIZE,RO,TYPE,MODEL 2>/dev/null
 echo "===DISK_END==="
 echo "===DISK_DETAIL_START==="
 SMARTCTL_D=$(command -v smartctl 2>/dev/null)
+if [ -z "$SMARTCTL_D" ]; then echo "===TOOL_MISSING:smartctl==="; fi
 if [ -n "$SMARTCTL_D" ]; then
   for dev in $(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk"{print $1}'); do
-    INFO=$(sudo $SMARTCTL_D -i "/dev/$dev" 2>/dev/null || $SMARTCTL_D -i "/dev/$dev" 2>/dev/null)
+    INFO=$(priv smartctl $SMARTCTL_D -i "/dev/$dev")
+    echo "$INFO" | grep '^===PERMISSION_DENIED:'
     MODEL=$(echo "$INFO" | grep -E '^(Device Model|Product|Model Number):' | head -1 | sed 's/^[^:]*:\s*//')
     VENDOR=$(echo "$INFO" | grep -E '^Vendor:' | head -1 | sed 's/^[^:]*:\s*//')
     if [ -n "$MODEL" ]; then
@@ -113,18 +112,7 @@ SSACLI=$(command -v ssacli 2>/dev/null || command -v hpssacli 2>/dev/null)
 ARCCONF=$(command -v arcconf 2>/dev/null)
 if [ -z "$STORCLI" ] && [ -z "$MEGACLI" ] && [ -z "$PERCCLI" ] && [ -z "$SSACLI" ] && [ -z "$ARCCONF" ]; then
   if lspci 2>/dev/null | grep -qi raid; then
-    if command -v yum >/dev/null 2>&1; then
-      yum install -y storcli 2>/dev/null || yum install -y MegaCli 2>/dev/null
-    elif command -v dnf >/dev/null 2>&1; then
-      dnf install -y storcli 2>/dev/null || dnf install -y MegaCli 2>/dev/null
-    elif command -v apt-get >/dev/null 2>&1; then
-      apt-get install -y storcli 2>/dev/null || apt-get install -y megacli 2>/dev/null
-    fi
-    STORCLI=$(command -v storcli64 2>/dev/null || command -v storcli 2>/dev/null || command -v /opt/MegaRAID/storcli/storcli64 2>/dev/null)
-    MEGACLI=$(command -v MegaCli64 2>/dev/null || command -v MegaCli 2>/dev/null || command -v megacli 2>/dev/null || command -v /opt/MegaRAID/MegaCli/MegaCli64 2>/dev/null || command -v /opt/MegaRAID/MegaCli/MegaCli 2>/dev/null)
-    PERCCLI=$(command -v perccli64 2>/dev/null || command -v perccli 2>/dev/null)
-    SSACLI=$(command -v ssacli 2>/dev/null || command -v hpssacli 2>/dev/null)
-    ARCCONF=$(command -v arcconf 2>/dev/null)
+    echo "===TOOL_MISSING:storcli==="
   fi
 fi
 if [ -n "$STORCLI" ]; then
@@ -167,24 +155,19 @@ fi
 # smartctl fallback — always try if RAID detected and physical disks not yet found
 SMARTCTL=$(command -v smartctl 2>/dev/null)
 if [ -z "$SMARTCTL" ] && lspci 2>/dev/null | grep -qi raid; then
-  if command -v apt-get >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y smartmontools >/dev/null 2>&1
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y smartmontools >/dev/null 2>&1
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y smartmontools >/dev/null 2>&1
-  fi
-  SMARTCTL=$(command -v smartctl 2>/dev/null)
+  echo "===TOOL_MISSING:smartctl==="
 fi
 if [ -n "$SMARTCTL" ]; then
   echo "===SMARTCTL_START==="
-  SCAN_RESULT=$(sudo $SMARTCTL --scan-open 2>/dev/null || $SMARTCTL --scan-open 2>/dev/null)
+  SCAN_RESULT=$(priv smartctl $SMARTCTL --scan-open)
+  echo "$SCAN_RESULT" | grep '^===PERMISSION_DENIED:'
+  SCAN_RESULT=$(echo "$SCAN_RESULT" | grep -v '^===PERMISSION_DENIED:')
   if [ -n "$SCAN_RESULT" ]; then
     echo "$SCAN_RESULT" | while IFS= read -r line; do
       DEV_SPEC=$(echo "$line" | sed 's/#.*//' | xargs)
       if [ -n "$DEV_SPEC" ]; then
         echo "===DEV:$DEV_SPEC==="
-        sudo $SMARTCTL -i $DEV_SPEC 2>/dev/null || $SMARTCTL -i $DEV_SPEC 2>/dev/null
+        priv smartctl $SMARTCTL -i $DEV_SPEC
       fi
     done
     # Brute-force scan for additional RAID disks that --scan-open missed
@@ -194,7 +177,7 @@ if [ -n "$SMARTCTL" ]; then
       FOUND_SLOTS=$(echo "$SCAN_RESULT" | grep -oP 'megaraid,\K[0-9]+')
       for slot in $(seq 0 63); do
         if echo "$FOUND_SLOTS" | grep -qx "$slot"; then continue; fi
-        RES=$(sudo $SMARTCTL -i "$RAID_DEV" -d megaraid,"$slot" 2>&1 || $SMARTCTL -i "$RAID_DEV" -d megaraid,"$slot" 2>&1)
+        RES=$(priv smartctl $SMARTCTL -i "$RAID_DEV" -d megaraid,"$slot")
         if echo "$RES" | grep -qE '^(Vendor|Product|Model Family|Device Model):'; then
           echo "===DEV:$RAID_DEV -d megaraid,$slot==="
           echo "$RES"
@@ -204,7 +187,7 @@ if [ -n "$SMARTCTL" ]; then
   else
     for dev in $(lsblk -dn -o NAME,TYPE 2>/dev/null | awk '$2=="disk"{print "/dev/"$1}'); do
       echo "===DEV:$dev==="
-      sudo $SMARTCTL -i "$dev" 2>/dev/null || $SMARTCTL -i "$dev" 2>/dev/null
+      priv smartctl $SMARTCTL -i "$dev"
     done
   fi
   echo "===SMARTCTL_END==="
@@ -212,18 +195,11 @@ fi
 echo "===RAID_PD_END==="
 echo "===NVME_START==="
 NVME_CLI=$(command -v nvme 2>/dev/null)
-if [ -z "$NVME_CLI" ]; then
-  if command -v apt-get >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y nvme-cli >/dev/null 2>&1
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y nvme-cli >/dev/null 2>&1
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y nvme-cli >/dev/null 2>&1
-  fi
-  NVME_CLI=$(command -v nvme 2>/dev/null)
+if [ -z "$NVME_CLI" ] && lspci 2>/dev/null | grep -qi "Non-Volatile memory"; then
+  echo "===TOOL_MISSING:nvme==="
 fi
 if [ -n "$NVME_CLI" ]; then
-  sudo $NVME_CLI list 2>/dev/null || $NVME_CLI list 2>/dev/null
+  priv nvme $NVME_CLI list
 fi
 echo "===NVME_LSPCI==="
 lspci 2>/dev/null | grep -i "Non-Volatile memory"
@@ -342,6 +318,10 @@ function connectAndDiscover(host, options = {}) {
                 osInfo: parsed.osInfo,
                 serial: parsed.serial,
                 modules: parsed.modules,
+                // B-9: 읽기 전용 스캔 진단(키 추가만)
+                missing_tools: parsed.missing_tools,
+                permission_denied: parsed.permission_denied,
+                virtual_disk_fallback: parsed.virtual_disk_fallback,
                 rawOutput: output
               });
             } catch (parseErr) {

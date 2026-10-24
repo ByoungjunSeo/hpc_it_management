@@ -366,6 +366,10 @@ router.post('/scan-asset', requireMaintenance, async (req, res) => {
       serial: scanResult.serial || null,
       error: scanResult.error,
       discovered_modules: scanResult.modules || [],
+      // B-9: 읽기 전용 스캔 진단(도구 없음·권한 없음·RAID 가상디스크 대체) — 표시용, 적용 본문에는 쓰지 않음
+      missing_tools: scanResult.missing_tools || [],
+      permission_denied: scanResult.permission_denied || [],
+      virtual_disk_fallback: !!scanResult.virtual_disk_fallback,
       registered_modules: registeredModules,
       comparison,
       rawOutput: scanResult.rawOutput || null,
@@ -1055,60 +1059,10 @@ router.post('/scan-range', requireMaintenance, async (req, res) => {
   }
 });
 
-// EP#14: Apply discovery result to asset (legacy, v1 L1018–1057)
-// ssh_password 기본값은 env 경유(appConfig.ssh.defaultPassword ← SSH_DEFAULT_PASSWORD). audit는 공통원칙으로 create 보강.
-router.post('/apply', requireMaintenance, async (req, res) => {
-  try {
-    const { ip, hostname, modules, asset_id, create_new } = req.body;
-
-    let targetAssetId = asset_id;
-    let createdNew = false;
-
-    if (create_new) {
-      targetAssetId = await Asset.create({
-        asset_type: 'server',
-        model_name: hostname || ip,
-        ip_address: ip,
-        // v2.4.1: ssh_password는 자산에 저장하지 않음(접속 시 env에서 읽음)
-        status: 'active'
-      });
-      createdNew = true;
-    } else if (!targetAssetId) {
-      const existing = await Asset.findByIp(ip);
-      if (existing) {
-        targetAssetId = existing.id;
-      } else {
-        targetAssetId = await Asset.create({
-          asset_type: 'server',
-          model_name: hostname || ip,
-          ip_address: ip,
-          // v2.4.1: ssh_password는 자산에 저장하지 않음(접속 시 env에서 읽음)
-          status: 'active'
-        });
-        createdNew = true;
-      }
-    }
-
-    // v2.8.0: 요청의 psu는 버리고, 이미 등록된 psu는 유지(apply-asset과 동일 — 전체 삭제 후 재생성이므로)
-    const applyModules = Array.isArray(modules) ? modules.filter(m => m && m.module_type !== 'psu') : [];
-    if (applyModules.length > 0) {
-      const keptPsu = createdNew ? [] : (await ComputingModule.findByAsset(targetAssetId)).filter(m => m.module_type === 'psu')
-        .map(m => ({ module_type: m.module_type, model: m.model, manufacturer: m.manufacturer, capacity: m.capacity, count: m.count || 1,
-          specification: m.specification, slot_info: m.slot_info, notes: m.notes, owner: m.owner || 'company',
-          owner_vendor_id: m.owner_vendor_id || null, is_onboard: m.is_onboard || 0 }));
-      await ComputingModule.deleteByAsset(targetAssetId);
-      await ComputingModule.bulkCreate(targetAssetId, applyModules.concat(keptPsu));
-    }
-
-    // 공통원칙: 자산 생성 쓰기는 create audit 별도 기록 (v1은 scan audit만)
-    if (createdNew) {
-      await AuditLog.log(req, { action: 'create', targetType: 'asset', targetId: targetAssetId, targetLabel: 'discovery 자산 생성: ' + (hostname || ip) });
-    }
-    await AuditLog.log(req, { action: 'scan', targetType: 'asset', targetId: targetAssetId, targetLabel: ip, details: { hostname, moduleCount: modules ? modules.length : 0 } });
-    res.json({ success: true, asset_id: targetAssetId });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+// EP#14: (B-9 중지) 레거시 수동 스캔 적용 — 모듈을 지우고 다시 만들며 재고 차감·부품 로그·재계산을 하지 않던 경로.
+// 감사 로그 시작(2026-02-21) 이후 사용 0건. 410으로 고정(DB 무변경). 자산 매칭(scan-asset → apply-asset)을 사용.
+router.post('/apply', requireMaintenance, (req, res) => {
+  res.status(410).json({ error: '이 경로는 재고에 반영되지 않아 중지되었습니다. 자산 매칭(스캔 → 적용)을 사용하세요.' });
 });
 
 module.exports = router;
