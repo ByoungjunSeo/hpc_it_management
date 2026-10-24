@@ -1,0 +1,65 @@
+<%#
+  B-8: 장비실 자산 목록(유형별 섹션) — 섀시 행 바로 아래 노드(들여쓰기, node_index 순), 섀시 접기/펼치기.
+  입력: bladeRows = [{ asset, nodes, parent }] (routes/storage.js buildBladeRows), appConfig.
+  노드는 부모 섀시 유형 섹션에 함께 표시. 부모가 이 목록에 없는 노드는 단독 행 + "섀시: 관리번호(위치)".
+%>
+<%
+  const typeLabelOf = (a) => appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type;
+  const statusBadge = (a) => 'badge-' + (a.status === 'active' ? 'success' : a.status === 'returned' ? 'info' : a.status === 'maintenance' ? 'warning' : 'secondary');
+  const statusLabel = (a) => appConfig.assetStatuses.find(t => t.value === a.status)?.label || a.status;
+  const grouped = {};
+  bladeRows.forEach(r => { const k = typeLabelOf(r.asset); (grouped[k] = grouped[k] || []).push(r); });
+%>
+<% Object.keys(grouped).forEach(typeLabel => {
+     const rows = grouped[typeLabel];
+     const nodeCount = rows.reduce((s, r) => s + r.nodes.length, 0);
+%>
+<h3 class="stg-type-head" style="margin: 12px 0 8px 0; font-size: 14px;" data-top="<%= rows.length %>" data-nodes="<%= nodeCount %>"><%= typeLabel %> (<%= nodeCount ? ('섀시·단독 ' + rows.length + ' + 노드 ' + nodeCount) : rows.length %>)</h3>
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>자산번호</th>
+                <th>모델명</th>
+                <th>관리번호</th>
+                <th>상태</th>
+                <th>비고</th>
+            </tr>
+        </thead>
+        <tbody>
+            <% rows.forEach(r => { const asset = r.asset; %>
+            <tr class="stg-row<%= r.nodes.length ? ' stg-chassis' : '' %><%= r.parent ? ' stg-orphan' : '' %>" data-id="<%= asset.id %>">
+                <td>
+                    <% if (r.nodes.length) { %>
+                    <button type="button" class="btn btn-sm btn-outline stg-toggle" data-chassis="<%= asset.id %>" aria-expanded="true" title="노드 접기/펼치기" style="padding:0 6px; margin-right:4px;">▾</button>
+                    <% } %>
+                    <a href="/assets/<%= asset.id %>"><%= asset.asset_number || '-' %></a>
+                </td>
+                <td>
+                    <%= asset.model_name || '-' %>
+                    <% if (r.nodes.length) { %><span class="badge badge-info stg-chassis-tag" style="margin-left:6px;">블레이드 섀시 · 노드 <%= r.nodes.length %>대</span><% } %>
+                </td>
+                <td>
+                    <%= asset.management_number || '-' %>
+                    <% if (r.parent) { %><div class="text-muted stg-parent-note" style="font-size:12px;">섀시: <%= r.parent.management_number || ('#' + r.parent.id) %>(<%= r.parent.room_name ? (r.parent.room_name + (r.parent.rack_name ? ' · ' + r.parent.rack_name : '')) : (r.parent.rack_name || '위치 미지정') %>)</div><% } %>
+                </td>
+                <td><span class="badge <%= statusBadge(asset) %>"><%= statusLabel(asset) %></span></td>
+                <td><%= asset.notes || '-' %></td>
+            </tr>
+            <% r.nodes.forEach(n => { %>
+            <tr class="stg-row stg-node" data-id="<%= n.id %>" data-parent="<%= asset.id %>" data-node-index="<%= n.node_index == null ? '' : n.node_index %>">
+                <td style="padding-left:28px;">
+                    <span class="text-muted stg-node-label">└ 노드<%= n.node_index == null ? '' : n.node_index %><%= n.blade_slot ? ' · ' + n.blade_slot : '' %></span>
+                    <a href="/assets/<%= n.id %>"<% if (!n.asset_number) { %> class="text-muted" title="노드 자산번호 없음 — 섀시 자산번호"<% } %>><%= n.asset_number || (asset.asset_number ? '(' + asset.asset_number + ')' : '-') %></a>
+                </td>
+                <td><%= n.model_name || '-' %></td>
+                <td><%= n.management_number || '-' %></td>
+                <td><span class="badge <%= statusBadge(n) %>"><%= statusLabel(n) %></span></td>
+                <td><%= n.notes || '-' %></td>
+            </tr>
+            <% }) %>
+            <% }) %>
+        </tbody>
+    </table>
+</div>
+<% }) %>

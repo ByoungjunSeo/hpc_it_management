@@ -18,48 +18,14 @@
 <div class="card">
     <div class="card-header">
         <h2><%= room.name %></h2>
-        <span class="text-muted"><%= room.location || '' %> &middot; 보관 자산 <%= room.assets.length %>대</span>
+        <% const roomNodes = room.bladeRows.reduce((s, r) => s + r.nodes.length, 0); %>
+        <span class="text-muted"><%= room.location || '' %> &middot; 보관 자산 <%= room.bladeRows.length + roomNodes %>대<%= roomNodes ? ' (섀시·단독 ' + room.bladeRows.length + ' + 노드 ' + roomNodes + ')' : '' %></span>
     </div>
 
     <% if (room.assets.length === 0) { %>
     <p class="text-muted">보관 자산이 없습니다.</p>
     <% } else { %>
-    <%
-      // Group by asset type
-      const grouped = {};
-      room.assets.forEach(a => {
-        const typeLabel = appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type;
-        if (!grouped[typeLabel]) grouped[typeLabel] = [];
-        grouped[typeLabel].push(a);
-      });
-    %>
-    <% Object.keys(grouped).forEach(typeLabel => { %>
-    <h3 style="margin: 12px 0 8px 0; font-size: 14px;"><%= typeLabel %> (<%= grouped[typeLabel].length %>)</h3>
-    <div class="table-wrapper">
-        <table>
-            <thead>
-                <tr>
-                    <th>자산번호</th>
-                    <th>모델명</th>
-                    <th>관리번호</th>
-                    <th>상태</th>
-                    <th>비고</th>
-                </tr>
-            </thead>
-            <tbody>
-                <% grouped[typeLabel].forEach(asset => { %>
-                <tr>
-                    <td><a href="/assets/<%= asset.id %>"><%= asset.asset_number || '-' %></a></td>
-                    <td><%= asset.model_name || '-' %></td>
-                    <td><%= asset.management_number || '-' %></td>
-                    <td><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'returned' ? 'info' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label || asset.status %></span></td>
-                    <td><%= asset.notes || '-' %></td>
-                </tr>
-                <% }) %>
-            </tbody>
-        </table>
-    </div>
-    <% }) %>
+    <%- include('_asset-section', { bladeRows: room.bladeRows }) %>
     <% } %>
 </div>
 <% }) %>
@@ -68,43 +34,10 @@
 <div class="card">
     <div class="card-header">
         <h2>미배치 / 비활성 자산</h2>
-        <span class="text-muted"><%= unplacedAssets.length %>대</span>
+        <% const unNodes = unplacedRows.reduce((s, r) => s + r.nodes.length, 0); %>
+        <span class="text-muted"><%= unplacedRows.length + unNodes %>대<%= unNodes ? ' (섀시·단독 ' + unplacedRows.length + ' + 노드 ' + unNodes + ')' : '' %></span>
     </div>
-    <%
-      const ungrouped = {};
-      unplacedAssets.forEach(a => {
-        const typeLabel = appConfig.assetTypes.find(t => t.value === a.asset_type)?.label || a.asset_type;
-        if (!ungrouped[typeLabel]) ungrouped[typeLabel] = [];
-        ungrouped[typeLabel].push(a);
-      });
-    %>
-    <% Object.keys(ungrouped).forEach(typeLabel => { %>
-    <h3 style="margin: 12px 0 8px 0; font-size: 14px;"><%= typeLabel %> (<%= ungrouped[typeLabel].length %>)</h3>
-    <div class="table-wrapper">
-        <table>
-            <thead>
-                <tr>
-                    <th>자산번호</th>
-                    <th>모델명</th>
-                    <th>관리번호</th>
-                    <th>상태</th>
-                    <th>비고</th>
-                </tr>
-            </thead>
-            <tbody>
-                <% ungrouped[typeLabel].forEach(asset => { %>
-                <tr>
-                    <td><a href="/assets/<%= asset.id %>"><%= asset.asset_number || '-' %></a></td>
-                    <td><%= asset.model_name || '-' %></td>
-                    <td><%= asset.management_number || '-' %></td>
-                    <td><span class="badge badge-<%= asset.status === 'active' ? 'success' : asset.status === 'returned' ? 'info' : asset.status === 'maintenance' ? 'warning' : 'secondary' %>"><%= appConfig.assetStatuses.find(t => t.value === asset.status)?.label || asset.status %></span></td>
-                    <td><%= asset.notes || '-' %></td>
-                </tr>
-                <% }) %>
-            </tbody>
-        </table>
-    </div>
-    <% }) %>
+    <%- include('_asset-section', { bladeRows: unplacedRows }) %>
 </div>
 <% } %>
 
@@ -247,6 +180,25 @@ function editStorageQty(el) {
 </div>
 
 <script>
+// B-8: 섀시 노드 접기/펼치기 — 기본 펼침, 상태는 localStorage(실패해도 동작)
+(function(){
+  var KEY = 'stg.chassis.collapsed', collapsed = {};
+  try { collapsed = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { collapsed = {}; }
+  function apply(id) {
+    var c = !!collapsed[id];
+    document.querySelectorAll('tr.stg-node[data-parent="' + id + '"]').forEach(function(tr){ tr.hidden = c; });
+    document.querySelectorAll('.stg-toggle[data-chassis="' + id + '"]').forEach(function(b){ b.textContent = c ? '▸' : '▾'; b.setAttribute('aria-expanded', c ? 'false' : 'true'); });
+  }
+  document.querySelectorAll('.stg-toggle').forEach(function(b){
+    var id = b.getAttribute('data-chassis');
+    apply(id);
+    b.addEventListener('click', function(){
+      if (collapsed[id]) delete collapsed[id]; else collapsed[id] = true;
+      try { localStorage.setItem(KEY, JSON.stringify(collapsed)); } catch (e) {}
+      apply(id);
+    });
+  });
+})();
 document.querySelectorAll('.stg-tab').forEach(function(btn) {
   btn.addEventListener('click', function() {
     var tabId = this.dataset.tab;
